@@ -29,9 +29,22 @@
 		0540E38C2D88263C00B12C98 /* Powerwall-TVUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Powerwall-TVUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0540E3B72D8829F700B12C98 /* Exceptions for "Powerwall-TV" folder in "Powerwall-TV" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 0540E36F2D88263900B12C98 /* Powerwall-TV */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0540E3722D88263900B12C98 /* Powerwall-TV */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				0540E3B72D8829F700B12C98 /* Exceptions for "Powerwall-TV" folder in "Powerwall-TV" target */,
+			);
 			path = "Powerwall-TV";
 			sourceTree = "<group>";
 		};
@@ -399,6 +412,9 @@
 				DEVELOPMENT_TEAM = 4P8S9W2NYL;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Powerwall-TV/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Powerwall;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -425,6 +441,9 @@
 				DEVELOPMENT_TEAM = 4P8S9W2NYL;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Powerwall-TV/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Powerwall;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
 				LD_RUNPATH_SEARCH_PATHS = (

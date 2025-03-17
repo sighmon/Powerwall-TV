@@ -9,44 +9,63 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @StateObject private var viewModel: PowerwallViewModel
+    @State private var showingSettings = false
+    private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
+
+    init() {
+        let ip = UserDefaults.standard.string(forKey: "gatewayIP") ?? ""
+        let username = UserDefaults.standard.string(forKey: "username") ?? ""
+        let password = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
+        _viewModel = StateObject(wrappedValue: PowerwallViewModel(ipAddress: ip, username: username, password: password))
+    }
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
+        VStack(spacing: 20) {
+            if viewModel.ipAddress.isEmpty {
+                Text("Please configure the gateway settings.")
+                    .foregroundColor(.gray)
+            } else if let data = viewModel.data {
+                Text("⚡️ Grid: \(data.site.instantPower / 1000, specifier: "%.3f") kW")
+                Text("🔋 Powerwall: \(data.battery.instantPower / 1000, specifier: "%.3f") kW")
+                Text("🏡 Home: \(data.load.instantPower / 1000, specifier: "%.3f") kW")
+                Text("☀️ Solar: \(data.solar.instantPower / 1000, specifier: "%.3f") kW")
+                Text("💛 Total: \(data.solar.energyExported / 1000, specifier: "%.0f") kWh")
+            } else if let errorMessage = viewModel.errorMessage {
+                Text("Error: \(errorMessage)")
+                    .foregroundColor(.red)
+            } else {
+                Text("Loading...")
             }
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
+
+            Button(action: {
+                showingSettings = true
+            }) {
+                ZStack {
+                    Circle()
+                        .fill(Color.gray)
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "gear")
+                        .font(.title)
                 }
             }
-        } detail: {
-            Text("Select an item")
+            .accessibilityLabel("Settings")
+            .padding(.top, 100)
         }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
+        .padding()
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(ipAddress: $viewModel.ipAddress, username: $viewModel.username, password: $viewModel.password)
         }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+        .onReceive(timer) { _ in
+            if !viewModel.ipAddress.isEmpty {
+                viewModel.fetchData()
+            }
+        }
+        .onAppear {
+            if viewModel.ipAddress.isEmpty {
+                showingSettings = true
+            } else {
+                viewModel.fetchData()
             }
         }
     }
