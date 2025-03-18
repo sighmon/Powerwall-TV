@@ -96,7 +96,7 @@ struct ContentView: View {
                         VStack {
                             Spacer()
                             HStack {
-                                Spacer()
+                                Spacer().frame(width: 980)
                                 VStack {
                                     Text("\(data.site.instantPower / 1000, specifier: "%.3f") kW")
                                         .fontWeight(.bold)
