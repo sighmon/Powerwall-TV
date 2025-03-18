@@ -161,7 +161,17 @@ struct ContentView: View {
                 SettingsView(ipAddress: $viewModel.ipAddress, username: $viewModel.username, password: $viewModel.password)
             }
             .onReceive(timer) { _ in
-                if !viewModel.ipAddress.isEmpty {
+                if viewModel.ipAddress == "demo" {
+                    viewModel.data = PowerwallData(
+                        battery: PowerwallData.Battery(instantPower: Double(arc4random_uniform(4096)) + 256),
+                        load: PowerwallData.Load(instantPower: Double(arc4random_uniform(4096)) + 256),
+                        solar: PowerwallData.Solar(
+                            instantPower: Double(arc4random_uniform(4096)) + 256,
+                            energyExported: 409600
+                        ),
+                        site: PowerwallData.Site(instantPower: Double(arc4random_uniform(4096)) + 256)
+                    )
+                } else if !viewModel.ipAddress.isEmpty {
                     viewModel.fetchData()
                 }
             }
