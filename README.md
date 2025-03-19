@@ -4,6 +4,11 @@ An AppleTV application to view the current state of your Tesla Powerwall via you
 
 <img src="powerwall-tv.png" />
 
+## Download
+
+* Download the app from the [AppleTV App Store](https://apps.apple.com/us/app/powerwall-tv/id6743396507)
+* Sign up for beta versions [TestFlight](https://testflight.apple.com/join/4EFw1RBR)
+
 ## Setup
 
 * [Connecting Powerwall to Wi-Fi](https://www.tesla.com/en_au/support/energy/powerwall/mobile-app/connecting-powerwall-wi-fi)
@@ -21,4 +26,9 @@ Use the details above to add to this application:
 ## Privacy
 
 This application collects no personal data, and all information entered into it is only used to connect directly to your Powerwall via your own WiFi network.
+
+## TODO
+
+* Add energy animations to show the flow of energy around your home
+* Add the ability to sign in with your Tesla Fleet API Key
 
