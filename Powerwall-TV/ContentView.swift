@@ -109,6 +109,7 @@ struct ContentView: View {
                             }
                         }
                     }
+                    .foregroundColor(.white)
                 } else if let errorMessage = viewModel.errorMessage {
                     VStack {
                         Spacer()
@@ -122,6 +123,7 @@ struct ContentView: View {
                             }
                         }
                     }
+                    .foregroundColor(.white)
                 } else {
                     VStack {
                         Spacer()
@@ -135,6 +137,7 @@ struct ContentView: View {
                             }
                         }
                     }
+                    .foregroundColor(.white)
                 }
 
                 VStack {
