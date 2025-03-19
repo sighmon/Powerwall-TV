@@ -11,6 +11,7 @@ import SwiftData
 struct ContentView: View {
     @StateObject private var viewModel: PowerwallViewModel
     @State private var demo = false
+    @State private var animations = false
     @State private var showingSettings = false
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
@@ -119,6 +120,22 @@ struct ContentView: View {
                                         .opacity(0.6)
                                         .fontWeight(.bold)
                                         .font(.footnote)
+                                }
+                            }
+                        }
+                        // Solar to Gateway animation
+                        if animations && data.solar.instantPower > 10 {
+                            HStack {
+                                Spacer().frame(width: 370)
+                                VStack {
+                                    Spacer().frame(height: 285)
+                                    PowerSurgeView(
+                                        color: .yellow,
+                                        direction: FlowDirection.forward,
+                                        duration: 1,
+                                        curve: SolarToGateway()
+                                    )
+                                    .frame(width: 40, height: 265)
                                 }
                             }
                         }
