@@ -39,5 +39,15 @@ struct SettingsView: View {
                 }
             }
         }
+        Text(appVersionAndBuild())
+            .font(.footnote)
+            .opacity(0.6)
     }
+}
+
+func appVersionAndBuild() -> String {
+    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+    let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
+
+    return "\(version) (\(build))"
 }
