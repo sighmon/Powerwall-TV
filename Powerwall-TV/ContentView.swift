@@ -83,14 +83,28 @@ struct ContentView: View {
                             HStack {
                                 Spacer().frame(width: 120)
                                 VStack {
-                                    Text("\(data.battery.instantPower / 1000, specifier: "%.3f") kW")
+                                    Text("\(data.battery.instantPower / 1000, specifier: "%.3f") kW · \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
                                         .fontWeight(.bold)
                                         .font(.headline)
-                                    Text("POWERWALL")
+                                    Text("POWERWALL · \(data.battery.count, specifier: "%.0f")x")
                                         .opacity(0.6)
                                         .fontWeight(.bold)
                                         .font(.footnote)
                                 }
+                            }
+                        }
+                        HStack {
+                            Spacer().frame(width: 59)
+                            VStack {
+                                Spacer().frame(height: 526)
+                                GeometryReader { geometry in
+                                    Rectangle()
+                                        .fill(Color.green) // Lime green color
+                                        .frame(width: 5, height: geometry.size.height * (viewModel.batteryPercentage?.percentage ?? 0 / 100))
+                                        .cornerRadius(1)
+                                }
+                                .frame(width: 0.8, height: 0.84)
+                                    .rotationEffect(Angle(degrees: 180))
                             }
                         }
                         VStack {
@@ -166,7 +180,7 @@ struct ContentView: View {
             .onReceive(timer) { _ in
                 if viewModel.ipAddress == "demo" {
                     viewModel.data = PowerwallData(
-                        battery: PowerwallData.Battery(instantPower: Double(arc4random_uniform(4096)) + 256),
+                        battery: PowerwallData.Battery(instantPower: Double(arc4random_uniform(4096)) + 256, count: 1),
                         load: PowerwallData.Load(instantPower: Double(arc4random_uniform(4096)) + 256),
                         solar: PowerwallData.Solar(
                             instantPower: Double(arc4random_uniform(4096)) + 256,
@@ -174,6 +188,7 @@ struct ContentView: View {
                         ),
                         site: PowerwallData.Site(instantPower: Double(arc4random_uniform(4096)) + 256)
                     )
+                    viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
                 } else if !viewModel.ipAddress.isEmpty {
                     viewModel.fetchData()
                 }
@@ -183,7 +198,7 @@ struct ContentView: View {
                     showingSettings = true
                 } else if viewModel.ipAddress == "demo" {
                     viewModel.data = PowerwallData(
-                        battery: PowerwallData.Battery(instantPower: 256),
+                        battery: PowerwallData.Battery(instantPower: 256, count: 1),
                         load: PowerwallData.Load(instantPower: 256),
                         solar: PowerwallData.Solar(
                             instantPower: 2048,
@@ -191,6 +206,7 @@ struct ContentView: View {
                         ),
                         site: PowerwallData.Site(instantPower: 1024)
                     )
+                    viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
                 } else {
                     viewModel.fetchData()
                 }

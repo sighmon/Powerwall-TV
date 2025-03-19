@@ -15,6 +15,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var username: String
     @Published var password: String
     @Published var data: PowerwallData?
+    @Published var batteryPercentage: BatteryPercentage?
     @Published var errorMessage: String?
     
     // URLSession instance to manage cookies across requests
@@ -98,6 +99,7 @@ class PowerwallViewModel: ObservableObject {
         login { success in
             if success {
                 self.fetchDataAfterLogin()
+                self.fetchBatteryPercentage()
             }
             // If login fails, errorMessage is already set by the login function
         }
@@ -130,15 +132,41 @@ class PowerwallViewModel: ObservableObject {
             }
             .store(in: &cancellables)
     }
+
+    /// Fetches battery percentage from the /api/system_status/soe endpoint
+    private func fetchBatteryPercentage() {
+        guard let url = URL(string: "https://\(ipAddress)/api/system_status/soe") else {
+            self.errorMessage = "Invalid battery percentage URL"
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+
+        urlSession.dataTaskPublisher(for: request)
+            .map { $0.data }
+            .decode(type: BatteryPercentage.self, decoder: JSONDecoder())
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] completion in
+                if case .failure(let error) = completion {
+                    self?.errorMessage = "Failed to fetch battery percentage: \(error.localizedDescription)"
+                }
+            } receiveValue: { [weak self] percentage in
+                self?.batteryPercentage = percentage
+            }
+            .store(in: &cancellables)
+    }
 }
 
 // Define the data model (adjust according to your API response)
 struct PowerwallData: Codable {
     struct Battery: Codable {
         let instantPower: Double
+        let count: Double
 
         enum CodingKeys: String, CodingKey {
             case instantPower = "instant_power"
+            case count = "num_meters_aggregated"
         }
     }
     let battery: Battery
@@ -171,4 +199,9 @@ struct PowerwallData: Codable {
         }
     }
     let site: Site
+}
+
+// Data model for battery percentage
+struct BatteryPercentage: Codable {
+    let percentage: Double
 }
