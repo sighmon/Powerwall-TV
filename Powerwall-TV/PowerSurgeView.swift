@@ -59,10 +59,10 @@ struct GatewayToHome: Shape {
 struct PowerwallToGateway: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        path.move(to: CGPoint(x: rect.minX - 7, y: rect.minY + 20))
+        path.move(to: CGPoint(x: rect.minX - 9, y: rect.minY + 20))
         path.addQuadCurve(
-            to: CGPoint(x: rect.minX + 5, y: rect.minY),
-            control: CGPoint(x: rect.minX - 9, y: rect.minY + 8)
+            to: CGPoint(x: rect.minX + 2, y: rect.minY + 5),
+            control: CGPoint(x: rect.minX - 9, y: rect.minY + 5)
         )
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY - 25))
         return path
@@ -88,6 +88,19 @@ struct PowerSurgeView<Curve: Shape>: View {
     @State private var direction: Bool
     @State private var opacity: Double
 
+    private var gradient: LinearGradient {
+        // For a forward flow, the gradient fades from full (leading) to transparent (trailing)
+        // For a backward flow, we reverse that.
+        LinearGradient(
+            gradient: Gradient(stops: [
+                .init(color: color.opacity(0.5), location: 0),
+                .init(color: color.opacity(1.0), location: 1)
+            ]),
+            startPoint: direction ? .leading : .trailing,
+            endPoint: direction ? .trailing : .leading
+        )
+    }
+
     init(
         color: Color = .green,
         isForward: Bool = true,
@@ -111,18 +124,19 @@ struct PowerSurgeView<Curve: Shape>: View {
         ZStack {
             // Full gray Bezier line (static)
             curve
-                .stroke(Color.gray, lineWidth: 6)
+                .stroke(Color.gray, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .opacity(0.0)
 
             // Moving line (animated)
             curve
                 .trim(from: startFraction, to: startFraction + 1.0)
-                .stroke(color, lineWidth: 6)
+                .stroke(color, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .opacity(opacity)
         }
         .onAppear {
             opacity = 0.0
             DispatchQueue.main.asyncAfter(deadline: .now() + startOffset) {
+                startFraction = direction ? 1.0 : -1.0
                 opacity = 1.0
                 animate()
             }
