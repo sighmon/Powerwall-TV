@@ -8,11 +8,13 @@
 import SwiftUI
 import SwiftData
 
+
 struct ContentView: View {
     @StateObject private var viewModel: PowerwallViewModel
     @State private var demo = false
-    @State private var animations = false
+    @State private var animations = true
     @State private var showingSettings = false
+    @State private var wiggleWatts = 40.0
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
     init() {
@@ -128,14 +130,64 @@ struct ContentView: View {
                             HStack {
                                 Spacer().frame(width: 370)
                                 VStack {
-                                    Spacer().frame(height: 285)
+                                    Spacer().frame(height: 300)
                                     PowerSurgeView(
                                         color: .yellow,
-                                        direction: FlowDirection.forward,
+                                        isForward: true,
                                         duration: 1,
                                         curve: SolarToGateway()
                                     )
+                                    .frame(width: 40, height: 295)
+                                }
+                            }
+                        }
+                        // Gateway to Grid animation
+                        if animations && data.site.instantPower > 10 || data.site.instantPower < -10 {
+                            HStack {
+                                Spacer().frame(width: 370)
+                                VStack {
+                                    Spacer().frame(height: 605)
+                                    PowerSurgeView(
+                                        color: data.site.instantPower > 0 ? .gray : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .green,
+                                        isForward: data.site.instantPower < 0,
+                                        duration: 1.5,
+                                        startOffset: data.site.instantPower < 0 ? 0.75 : 0.0,
+                                        curve: GatewayToGrid()
+                                    )
                                     .frame(width: 40, height: 265)
+                                }
+                            }
+                        }
+                        // Gateway to Home animation
+                        if animations && data.load.instantPower > 10 {
+                            HStack {
+                                Spacer().frame(width: 530)
+                                VStack {
+                                    Spacer().frame(height: 295)
+                                    PowerSurgeView(
+                                        color: data.solar.instantPower + wiggleWatts > data.load.instantPower ? .yellow : data.battery.instantPower + wiggleWatts > data.load.instantPower ? .green : .gray,
+                                        isForward: true,
+                                        duration: 1.5,
+                                        startOffset: 0.75,
+                                        curve: GatewayToHome()
+                                    )
+                                    .frame(width: 110, height: 60)
+                                }
+                            }
+                        }
+                        // Powerwall to Gateway animation
+                        if animations && data.battery.instantPower > 10 || data.battery.instantPower < -10 {
+                            HStack {
+                                Spacer().frame(width: 240)
+                                VStack {
+                                    Spacer().frame(height: 360)
+                                    PowerSurgeView(
+                                        color: data.battery.instantPower > 0 ? .green : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .gray,
+                                        isForward: data.battery.instantPower > 0,
+                                        duration: 1.5,
+                                        curve: PowerwallToGateway()
+                                    )
+                                    .frame(width: 125, height: 60)
                                 }
                             }
                         }
@@ -211,6 +263,9 @@ struct ContentView: View {
                 }
             }
             .onAppear {
+                if demo {
+                    viewModel.ipAddress = "demo"
+                }
                 if viewModel.ipAddress.isEmpty {
                     showingSettings = true
                 } else if viewModel.ipAddress == "demo" {
