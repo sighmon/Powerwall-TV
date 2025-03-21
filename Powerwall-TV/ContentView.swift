@@ -135,11 +135,12 @@ struct ContentView: View {
                                     PowerSurgeView(
                                         color: .yellow,
                                         isForward: true,
-                                        duration: 1.5,
+                                        duration: 2,
                                         curve: SolarToGateway(),
                                         shouldStart: startAnimations
                                     )
                                     .frame(width: 40, height: 295)
+                                    .id("solar_\(data.solar.instantPower < 0)_\(startAnimations)")
                                 }
                             }
                         }
@@ -152,12 +153,13 @@ struct ContentView: View {
                                     PowerSurgeView(
                                         color: data.solar.instantPower + wiggleWatts > data.load.instantPower ? .yellow : data.battery.instantPower + wiggleWatts > data.load.instantPower ? .green : .gray,
                                         isForward: true,
-                                        duration: 1.5,
-                                        startOffset: 0.75,
+                                        duration: 2,
+                                        startOffset: 1,
                                         curve: GatewayToHome(),
                                         shouldStart: startAnimations
                                     )
                                     .frame(width: 110, height: 60)
+                                    .id("home_\(data.load.instantPower < 0)_\(startAnimations)")
                                 }
                             }
                         }
@@ -170,11 +172,12 @@ struct ContentView: View {
                                     PowerSurgeView(
                                         color: data.battery.instantPower > 0 ? .green : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .gray,
                                         isForward: data.battery.instantPower > 0,
-                                        duration: 1.5,
+                                        duration: 2,
                                         curve: PowerwallToGateway(),
                                         shouldStart: startAnimations
                                     )
                                     .frame(width: 125, height: 60)
+                                    .id("battery_\(data.battery.instantPower < 0)_\(startAnimations)")
                                 }
                             }
                         }
@@ -187,12 +190,13 @@ struct ContentView: View {
                                     PowerSurgeView(
                                         color: data.site.instantPower > 0 ? .gray : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .green,
                                         isForward: data.site.instantPower < 0,
-                                        duration: 1.5,
-                                        startOffset: data.site.instantPower < 0 ? 0.75 : 0.0,
+                                        duration: 2,
+                                        startOffset: 1,
                                         curve: GatewayToGrid(),
                                         shouldStart: startAnimations
                                     )
                                     .frame(width: 190, height: 120)
+                                    .id("grid_\(data.site.instantPower < 0)_\(startAnimations)")
                                 }
                             }
                         }
@@ -281,7 +285,7 @@ struct ContentView: View {
                             instantPower: 2048,
                             energyExported: 4096000
                         ),
-                        site: PowerwallData.Site(instantPower: 1024)
+                        site: PowerwallData.Site(instantPower: -1024)
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {

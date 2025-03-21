@@ -127,8 +127,8 @@ struct PowerSurgeView<Curve: Shape>: View {
                 .stroke(color, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .opacity(opacity)
         }
-        .onChange(of: shouldStart) { newValue in
-            if newValue {
+        .onAppear {
+            if shouldStart {
                 DispatchQueue.main.asyncAfter(deadline: .now() + startOffset) {
                     opacity = 1.0
                     startFraction = direction ? -1.0 : 1.0
