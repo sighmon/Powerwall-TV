@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var animations = true
     @State private var showingSettings = false
     @State private var wiggleWatts = 40.0
+    @State private var startAnimations = false
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
     init() {
@@ -41,7 +42,7 @@ struct ContentView: View {
                                     Text("\(data.solar.energyExported / 1000, specifier: "%.0f") kWh")
                                         .fontWeight(.bold)
                                         .font(.headline)
-                                    Text("ENERGY EXPORTED")
+                                    Text("ENERGY GENERATED")
                                         .opacity(0.6)
                                         .fontWeight(.bold)
                                         .font(.footnote)
@@ -134,27 +135,11 @@ struct ContentView: View {
                                     PowerSurgeView(
                                         color: .yellow,
                                         isForward: true,
-                                        duration: 1,
-                                        curve: SolarToGateway()
+                                        duration: 1.5,
+                                        curve: SolarToGateway(),
+                                        shouldStart: startAnimations
                                     )
                                     .frame(width: 40, height: 295)
-                                }
-                            }
-                        }
-                        // Gateway to Grid animation
-                        if animations && data.site.instantPower > 10 || data.site.instantPower < -10 {
-                            HStack {
-                                Spacer().frame(width: 370)
-                                VStack {
-                                    Spacer().frame(height: 605)
-                                    PowerSurgeView(
-                                        color: data.site.instantPower > 0 ? .gray : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .green,
-                                        isForward: data.site.instantPower < 0,
-                                        duration: 1.5,
-                                        startOffset: data.site.instantPower < 0 ? 0.75 : 0.0,
-                                        curve: GatewayToGrid()
-                                    )
-                                    .frame(width: 40, height: 265)
                                 }
                             }
                         }
@@ -169,7 +154,8 @@ struct ContentView: View {
                                         isForward: true,
                                         duration: 1.5,
                                         startOffset: 0.75,
-                                        curve: GatewayToHome()
+                                        curve: GatewayToHome(),
+                                        shouldStart: startAnimations
                                     )
                                     .frame(width: 110, height: 60)
                                 }
@@ -185,9 +171,28 @@ struct ContentView: View {
                                         color: data.battery.instantPower > 0 ? .green : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .gray,
                                         isForward: data.battery.instantPower > 0,
                                         duration: 1.5,
-                                        curve: PowerwallToGateway()
+                                        curve: PowerwallToGateway(),
+                                        shouldStart: startAnimations
                                     )
                                     .frame(width: 125, height: 60)
+                                }
+                            }
+                        }
+                        // Gateway to Grid animation
+                        if animations && data.site.instantPower > 10 || data.site.instantPower < -10 {
+                            HStack {
+                                Spacer().frame(width: 580)
+                                VStack {
+                                    Spacer().frame(height: 462)
+                                    PowerSurgeView(
+                                        color: data.site.instantPower > 0 ? .gray : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .green,
+                                        isForward: data.site.instantPower < 0,
+                                        duration: 1.5,
+                                        startOffset: data.site.instantPower < 0 ? 0.75 : 0.0,
+                                        curve: GatewayToGrid(),
+                                        shouldStart: startAnimations
+                                    )
+                                    .frame(width: 190, height: 120)
                                 }
                             }
                         }
@@ -279,8 +284,15 @@ struct ContentView: View {
                         site: PowerwallData.Site(instantPower: 1024)
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                        startAnimations = true
+                    }
                 } else {
                     viewModel.fetchData()
+                    // Trigger animations after a slight delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                        startAnimations = true
+                    }
                 }
             }
         }

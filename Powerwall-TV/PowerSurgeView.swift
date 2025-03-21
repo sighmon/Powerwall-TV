@@ -36,13 +36,16 @@ struct SolarToGateway: Shape {
 struct GatewayToGrid: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        path.move(to: CGPoint(x: rect.midX + 10, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.midX + 10, y: rect.minY + 30))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.midX + 20, y: rect.minY + 50),
-            control: CGPoint(x: rect.midX + 10, y: rect.minY + 45)
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + 35))
+        path.addArc(
+            center: CGPoint(x: rect.minX + 6, y: rect.minY + 39),
+            radius: 5.1,
+            startAngle: .degrees(180),
+            endAngle: .degrees(120),
+            clockwise: true
         )
-        path.addLine(to: CGPoint(x: rect.midX + 200, y: rect.minY + 115))
+        path.addLine(to: CGPoint(x: rect.maxX - 5, y: rect.maxY - 10))
         return path
     }
 }
@@ -61,8 +64,8 @@ struct PowerwallToGateway: Shape {
         var path = Path()
         path.move(to: CGPoint(x: rect.minX - 9, y: rect.minY + 20))
         path.addQuadCurve(
-            to: CGPoint(x: rect.minX + 2, y: rect.minY + 5),
-            control: CGPoint(x: rect.minX - 9, y: rect.minY + 5)
+            to: CGPoint(x: rect.minX + 2, y: rect.minY + 4),
+            control: CGPoint(x: rect.minX - 10, y: rect.minY + 8)
         )
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY - 25))
         return path
@@ -70,27 +73,19 @@ struct PowerwallToGateway: Shape {
 }
 
 struct PowerSurgeView<Curve: Shape>: View {
-    // The color of the moving line
     var color: Color
-    // Direction: true for forward (start to end), false for backward (end to start)
     var isForward: Bool
-    // Duration of the animation in seconds
     var duration: Double
-    // Pause duration between animations in seconds
     var pauseDuration: Double
-    // Offset the start by this duration in seconds
     var startOffset: Double
     let curve: Curve
+    var shouldStart: Bool
 
-    // State variable to control the starting point of the green line's trim
     @State private var startFraction: CGFloat
-    // Local copy of isForward to toggle direction
     @State private var direction: Bool
     @State private var opacity: Double
 
     private var gradient: LinearGradient {
-        // For a forward flow, the gradient fades from full (leading) to transparent (trailing)
-        // For a backward flow, we reverse that.
         LinearGradient(
             gradient: Gradient(stops: [
                 .init(color: color.opacity(0.5), location: 0),
@@ -107,7 +102,8 @@ struct PowerSurgeView<Curve: Shape>: View {
         duration: Double = 1.0,
         pauseDuration: Double = 1.0,
         startOffset: Double = 0.0,
-        curve: Curve = PreviewCurve()
+        curve: Curve = PreviewCurve(),
+        shouldStart: Bool = false
     ) {
         self.color = color
         self.isForward = isForward
@@ -115,51 +111,42 @@ struct PowerSurgeView<Curve: Shape>: View {
         self.pauseDuration = pauseDuration
         self.startOffset = startOffset
         self.curve = curve
+        self.shouldStart = shouldStart
         _startFraction = State(initialValue: isForward ? 0 : 2.0 / 3.0)
         _direction = State(initialValue: isForward)
-        _opacity = State(initialValue: 1.0)
+        _opacity = State(initialValue: 0.0)
     }
 
     var body: some View {
         ZStack {
-            // Full gray Bezier line (static)
             curve
                 .stroke(Color.gray, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .opacity(0.0)
-
-            // Moving line (animated)
             curve
                 .trim(from: startFraction, to: startFraction + 1.0)
                 .stroke(color, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .opacity(opacity)
         }
-        .onAppear {
-            opacity = 0.0
-            DispatchQueue.main.asyncAfter(deadline: .now() + startOffset) {
-                startFraction = direction ? 1.0 : -1.0
-                opacity = 1.0
-                animate()
+        .onChange(of: shouldStart) { newValue in
+            if newValue {
+                DispatchQueue.main.asyncAfter(deadline: .now() + startOffset) {
+                    opacity = 1.0
+                    startFraction = direction ? -1.0 : 1.0
+                    animate()
+                }
             }
         }
     }
 
-    // Function to handle the animation loop with pause
     private func animate() {
-        // Define the target fraction based on direction
         let targetFraction: CGFloat = direction ? 1.0 : -1.0
-
-        // Move the line
         withAnimation(.linear(duration: duration)) {
             startFraction = targetFraction
             opacity = 1.0
         }
-
-        // After animation completes, pause and then reverse
         DispatchQueue.main.asyncAfter(deadline: .now() + duration + pauseDuration) {
-            // Toggle direction for the next cycle
             startFraction = direction ? -1.0 : 1.0
             opacity = 1.0
-            // Recursively call animate to loop
             animate()
         }
     }
