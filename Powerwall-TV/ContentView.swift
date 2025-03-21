@@ -173,6 +173,7 @@ struct ContentView: View {
                                         color: data.battery.instantPower > 0 ? .green : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .gray,
                                         isForward: data.battery.instantPower > 0,
                                         duration: 2,
+                                        startOffset: data.battery.instantPower > 0 ? 0 : 1,
                                         curve: PowerwallToGateway(),
                                         shouldStart: startAnimations
                                     )
@@ -191,7 +192,7 @@ struct ContentView: View {
                                         color: data.site.instantPower > 0 ? .gray : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .green,
                                         isForward: data.site.instantPower < 0,
                                         duration: 2,
-                                        startOffset: 1,
+                                        startOffset: data.site.instantPower > 0 ? 0 : 1,
                                         curve: GatewayToGrid(),
                                         shouldStart: startAnimations
                                     )

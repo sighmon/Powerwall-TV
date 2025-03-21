@@ -129,7 +129,7 @@ struct PowerSurgeView<Curve: Shape>: View {
         }
         .onAppear {
             if shouldStart {
-                DispatchQueue.main.asyncAfter(deadline: .now() + startOffset) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + calculateDelay() + startOffset) {
                     opacity = 1.0
                     startFraction = direction ? -1.0 : 1.0
                     animate()
@@ -144,11 +144,23 @@ struct PowerSurgeView<Curve: Shape>: View {
             startFraction = targetFraction
             opacity = 1.0
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration + pauseDuration) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + calculateDelay() + startOffset) {
             startFraction = direction ? -1.0 : 1.0
             opacity = 1.0
             animate()
         }
+    }
+
+    private func calculateDelay() -> Double {
+        // Get the current system uptime
+        let currentUptime = ProcessInfo.processInfo.systemUptime
+        // Calculate the total cycle time
+        let cycleTime = duration + pauseDuration
+        // Time elapsed since the last theoretical start
+        let timeSinceLastStart = currentUptime.truncatingRemainder(dividingBy: cycleTime)
+        // Delay until the next start time
+        let delay = cycleTime - timeSinceLastStart
+        return delay
     }
 }
 
