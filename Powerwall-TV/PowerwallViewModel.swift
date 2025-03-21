@@ -16,6 +16,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var password: String
     @Published var data: PowerwallData?
     @Published var batteryPercentage: BatteryPercentage?
+    @Published var gridStatus: GridStatus?
     @Published var errorMessage: String?
     
     // URLSession instance to manage cookies across requests
@@ -31,7 +32,7 @@ class PowerwallViewModel: ObservableObject {
         self.urlSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
     }
 
-    /// Logs in to the Powerwall gateway to obtain an authentication cookie
+    // Logs in to the Powerwall gateway to obtain an authentication cookie
     func login(completion: @escaping (Bool) -> Void) {
         // Construct the login URL
         guard let url = URL(string: "https://\(ipAddress)/api/login/Basic") else {
@@ -93,19 +94,24 @@ class PowerwallViewModel: ObservableObject {
         }.resume()
     }
 
-    /// Fetches data from the Powerwall API after successful login
+    // Fetches data from the Powerwall API after successful login
     func fetchData() {
         // Ensure login before fetching data
         login { success in
             if success {
                 self.fetchDataAfterLogin()
                 self.fetchBatteryPercentage()
+                self.fetchGridStatus()
             }
             // If login fails, errorMessage is already set by the login function
         }
     }
 
-    /// Private helper to fetch data using the authenticated session
+    func isOffGrid() -> Bool {
+        return gridStatus?.status ?? "" == "SystemIslandedActive"
+    }
+
+    // Private helper to fetch data using the authenticated session
     private func fetchDataAfterLogin() {
         // Construct the data URL (example endpoint: /api/meters/aggregates)
         guard let url = URL(string: "https://\(ipAddress)/api/meters/aggregates") else {
@@ -133,7 +139,7 @@ class PowerwallViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    /// Fetches battery percentage from the /api/system_status/soe endpoint
+    // Fetches battery percentage from the /api/system_status/soe endpoint
     private func fetchBatteryPercentage() {
         guard let url = URL(string: "https://\(ipAddress)/api/system_status/soe") else {
             self.errorMessage = "Invalid battery percentage URL"
@@ -153,6 +159,30 @@ class PowerwallViewModel: ObservableObject {
                 }
             } receiveValue: { [weak self] percentage in
                 self?.batteryPercentage = percentage
+            }
+            .store(in: &cancellables)
+    }
+
+    // Fetches the grid connection status from the /api/system_status/grid_status endpoint
+    private func fetchGridStatus() {
+        guard let url = URL(string: "https://\(ipAddress)/api/system_status/grid_status") else {
+            self.errorMessage = "Invalid grid status URL"
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+
+        urlSession.dataTaskPublisher(for: request)
+            .map { $0.data }
+            .decode(type: GridStatus.self, decoder: JSONDecoder())
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] completion in
+                if case .failure(let error) = completion {
+                    self?.errorMessage = "Failed to fetch grid status: \(error.localizedDescription)"
+                }
+            } receiveValue: { [weak self] status in
+                self?.gridStatus = status
             }
             .store(in: &cancellables)
     }
@@ -204,4 +234,13 @@ struct PowerwallData: Codable {
 // Data model for battery percentage
 struct BatteryPercentage: Codable {
     let percentage: Double
+}
+
+// Data model for grid status
+struct GridStatus: Codable {
+    let status: String
+
+    enum CodingKeys: String, CodingKey {
+        case status = "grid_status"
+    }
 }

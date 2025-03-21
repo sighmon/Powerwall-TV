@@ -11,7 +11,7 @@ import SwiftData
 
 struct ContentView: View {
     @StateObject private var viewModel: PowerwallViewModel
-    @State private var demo = false
+    @State private var demo = true
     @State private var animations = true
     @State private var showingSettings = false
     @State private var wiggleWatts = 40.0
@@ -119,10 +119,11 @@ struct ContentView: View {
                                     Text("\(data.site.instantPower / 1000, specifier: "%.3f") kW")
                                         .fontWeight(.bold)
                                         .font(.headline)
-                                    Text("GRID")
-                                        .opacity(0.6)
+                                    Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID")
+                                        .opacity(viewModel.isOffGrid() ? 1.0 : 0.6)
                                         .fontWeight(.bold)
                                         .font(.footnote)
+                                        .foregroundColor(viewModel.isOffGrid() ? .orange : .white)
                                 }
                             }
                         }
@@ -164,7 +165,7 @@ struct ContentView: View {
                             }
                         }
                         // Powerwall to Gateway animation
-                        if animations && data.battery.instantPower > 10 || data.battery.instantPower < -10 {
+                        if animations && (data.battery.instantPower > 10 || data.battery.instantPower < -10) {
                             HStack {
                                 Spacer().frame(width: 240)
                                 VStack {
@@ -183,7 +184,7 @@ struct ContentView: View {
                             }
                         }
                         // Gateway to Grid animation
-                        if animations && data.site.instantPower > 10 || data.site.instantPower < -10 {
+                        if animations && !viewModel.isOffGrid() && (data.site.instantPower > 10 || data.site.instantPower < -10) {
                             HStack {
                                 Spacer().frame(width: 580)
                                 VStack {
@@ -268,6 +269,7 @@ struct ContentView: View {
                         site: PowerwallData.Site(instantPower: Double(arc4random_uniform(4096)) + 256)
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
+                    viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
                 } else if !viewModel.ipAddress.isEmpty {
                     viewModel.fetchData()
                 }
@@ -289,6 +291,7 @@ struct ContentView: View {
                         site: PowerwallData.Site(instantPower: -1024)
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
+                    viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                         startAnimations = true
                     }
