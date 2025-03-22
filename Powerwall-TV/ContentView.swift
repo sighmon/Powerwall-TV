@@ -152,7 +152,7 @@ struct ContentView: View {
                                 VStack {
                                     Spacer().frame(height: 295)
                                     PowerSurgeView(
-                                        color: data.solar.instantPower + wiggleWatts > data.site.instantPower ? .yellow : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
+                                        color: data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
                                         isForward: true,
                                         duration: 2,
                                         startOffset: 1,
@@ -304,13 +304,13 @@ struct ContentView: View {
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
                     viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         startAnimations = true
                     }
                 } else {
                     viewModel.fetchData()
                     // Trigger animations after a slight delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         startAnimations = true
                     }
                 }
