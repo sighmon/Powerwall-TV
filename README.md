@@ -2,7 +2,7 @@
 
 An AppleTV application to view the current state of your Tesla Powerwall via your local network.
 
-<img src="powerwall-tv.png" />
+<img src="powerwall-tv.png" width="45%" /> <video src="powerwall-tv.mp4" width="45%" />
 
 ## Download
 
@@ -29,6 +29,5 @@ This application collects no personal data, and all information entered into it 
 
 ## TODO
 
-* Add energy animations to show the flow of energy around your home
 * Add the ability to sign in with your Tesla Fleet API Key
 
