@@ -152,7 +152,7 @@ struct ContentView: View {
                                 VStack {
                                     Spacer().frame(height: 295)
                                     PowerSurgeView(
-                                        color: data.solar.instantPower + wiggleWatts > data.load.instantPower ? .yellow : data.battery.instantPower + wiggleWatts > data.load.instantPower ? .green : .gray,
+                                        color: data.solar.instantPower + wiggleWatts > data.site.instantPower ? .yellow : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
                                         isForward: true,
                                         duration: 2,
                                         startOffset: 1,
@@ -270,14 +270,15 @@ struct ContentView: View {
             }
             .onReceive(timer) { _ in
                 if viewModel.ipAddress == "demo" {
+                    let homeLoad = Double(arc4random_uniform(4096)) + 256
                     viewModel.data = PowerwallData(
-                        battery: PowerwallData.Battery(instantPower: Double(arc4random_uniform(4096)) + 256, count: 1),
-                        load: PowerwallData.Load(instantPower: Double(arc4random_uniform(4096)) + 256),
+                        battery: PowerwallData.Battery(instantPower: homeLoad * 0.2, count: 1),
+                        load: PowerwallData.Load(instantPower: homeLoad),
                         solar: PowerwallData.Solar(
-                            instantPower: Double(arc4random_uniform(4096)) + 256,
+                            instantPower: homeLoad * 0.7,
                             energyExported: 409600
                         ),
-                        site: PowerwallData.Site(instantPower: Double(arc4random_uniform(4096)) + 256)
+                        site: PowerwallData.Site(instantPower: homeLoad * 0.1)
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
                     viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
@@ -294,12 +295,12 @@ struct ContentView: View {
                 } else if viewModel.ipAddress == "demo" {
                     viewModel.data = PowerwallData(
                         battery: PowerwallData.Battery(instantPower: 256, count: 1),
-                        load: PowerwallData.Load(instantPower: 256),
+                        load: PowerwallData.Load(instantPower: 2304),
                         solar: PowerwallData.Solar(
                             instantPower: 2048,
                             energyExported: 4096000
                         ),
-                        site: PowerwallData.Site(instantPower: -1024)
+                        site: PowerwallData.Site(instantPower: 0)
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
                     viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
