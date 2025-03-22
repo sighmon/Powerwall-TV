@@ -11,7 +11,7 @@ import SwiftData
 
 struct ContentView: View {
     @StateObject private var viewModel: PowerwallViewModel
-    @State private var demo = true
+    @State private var demo = false
     @State private var animations = true
     @State private var showingSettings = false
     @State private var wiggleWatts = 40.0
@@ -199,6 +199,17 @@ struct ContentView: View {
                                     )
                                     .frame(width: 190, height: 120)
                                     .id("grid_\(data.site.instantPower < 0)_\(startAnimations)")
+                                }
+                            }
+                        }
+                        if viewModel.isOffGrid() {
+                            HStack {
+                                Spacer().frame(width: 580)
+                                VStack {
+                                    Spacer().frame(height: 505)
+                                    Image(uiImage: UIImage(named: "off-grid.png")!)
+                                        .resizable()
+                                        .frame(width: 100, height: 60)
                                 }
                             }
                         }
