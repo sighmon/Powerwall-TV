@@ -19,10 +19,7 @@ struct ContentView: View {
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
     init() {
-        let ip = UserDefaults.standard.string(forKey: "gatewayIP") ?? ""
-        let username = UserDefaults.standard.string(forKey: "username") ?? ""
-        let password = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
-        _viewModel = StateObject(wrappedValue: PowerwallViewModel(ipAddress: ip, username: username, password: password))
+        _viewModel = StateObject(wrappedValue: PowerwallViewModel())
     }
 
     var body: some View {
@@ -31,7 +28,7 @@ struct ContentView: View {
                 .resizable()
                 .ignoresSafeArea()
             ZStack {
-                if viewModel.ipAddress.isEmpty {
+                if (viewModel.ipAddress.isEmpty) {
                     Text("Please configure the gateway settings.")
                         .foregroundColor(.gray)
                 } else if let data = viewModel.data {
@@ -266,7 +263,12 @@ struct ContentView: View {
             }
             .padding()
             .sheet(isPresented: $showingSettings) {
-                SettingsView(ipAddress: $viewModel.ipAddress, username: $viewModel.username, password: $viewModel.password)
+                SettingsView(
+                    loginMode: $viewModel.loginMode,
+                    ipAddress: $viewModel.ipAddress,
+                    username: $viewModel.username,
+                    password: $viewModel.password
+                )
             }
             .onReceive(timer) { _ in
                 if viewModel.ipAddress == "demo" {
@@ -282,7 +284,7 @@ struct ContentView: View {
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
                     viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
-                } else if !viewModel.ipAddress.isEmpty {
+                } else if viewModel.ipAddress.isEmpty {
                     viewModel.fetchData()
                 }
             }
