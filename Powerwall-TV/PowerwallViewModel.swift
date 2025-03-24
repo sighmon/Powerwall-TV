@@ -37,7 +37,7 @@ class PowerwallViewModel: ObservableObject {
     private let scopes = "openid energy_device_data" // Adjust based on needs
 
     // Fleet API-specific properties
-    @Published var accessToken: String?
+    @Published var accessToken: String = KeychainWrapper.standard.string(forKey: "fleetAPI_accessToken") ?? ""
     @Published var energySiteId: String?
 
     private var cancellables = Set<AnyCancellable>()
@@ -49,7 +49,6 @@ class PowerwallViewModel: ObservableObject {
     init() {
         let delegate = InsecureURLSessionDelegate() // Custom delegate for local SSL bypass
         self.localURLSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-        self.accessToken = KeychainWrapper.standard.string(forKey: "fleetAPI_accessToken")
     }
 
     // MARK: - Login Methods
@@ -196,7 +195,7 @@ class PowerwallViewModel: ObservableObject {
     }
 
     private func fetchEnergyProducts() {
-        guard let accessToken = accessToken else {
+        if accessToken == "" {
             errorMessage = "No access token available"
             return
         }
@@ -245,7 +244,7 @@ class PowerwallViewModel: ObservableObject {
                 // If login fails, errorMessage is already set by the login function
             }
         case .fleetAPI:
-            if accessToken != nil {
+            if accessToken != "" {
                 // TODO: how do we check for expired accessToken?
                 // Token exists, try fetching devices or data directly
                 self.fetchEnergyProducts()
@@ -336,13 +335,27 @@ class PowerwallViewModel: ObservableObject {
     }
 
     func isOffGrid() -> Bool {
-        return gridStatus?.status ?? "" == "SystemIslandedActive"
+        return gridStatus?.status ?? "" == "SystemIslandedActive" || gridStatus?.status ?? "" == "Inactive"
+    }
+
+    func batteryCountString() -> String {
+        guard let batteryCount: Double = data?.battery.count else {
+            return ""
+        }
+        if batteryCount == 0 {
+            return ""
+        }
+        return String(format: " · %.0fx", batteryCount)
     }
 
     private func fetchFleetAPIData() {
-        guard let accessToken = accessToken, let energySiteId = energySiteId,
+        if accessToken == "" {
+            errorMessage = "Must log in first"
+            return
+        }
+        guard let energySiteId = energySiteId,
               let url = URL(string: "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/live_status") else {
-            errorMessage = "Must log in and select an energy site first"
+            errorMessage = "Must select an energy site first"
             return
         }
 
@@ -351,14 +364,22 @@ class PowerwallViewModel: ObservableObject {
 
         fleetURLSession.dataTaskPublisher(for: request)
             .map { $0.data }
-            .decode(type: PowerwallData.self, decoder: JSONDecoder())
+            .decode(type: FleetEnergySiteResponse.self, decoder: JSONDecoder())
             .receive(on: DispatchQueue.main)
             .sink { [weak self] completion in
                 if case .failure(let error) = completion {
                     self?.errorMessage = "Failed to fetch Fleet API data: \(error.localizedDescription)"
                 }
             } receiveValue: { [weak self] data in
-                self?.data = data
+                let powerwall = PowerwallData(
+                    battery: PowerwallData.Battery(instantPower: data.response.batteryPower, count: 0),
+                    load: PowerwallData.Load(instantPower: data.response.loadPower),
+                    solar: PowerwallData.Solar(instantPower: data.response.solarPower, energyExported: 0),
+                    site: PowerwallData.Site(instantPower: data.response.gridPower)
+                )
+                self?.data = powerwall
+                self?.batteryPercentage = BatteryPercentage(percentage: data.response.batteryPercentage)
+                self?.gridStatus = GridStatus(status: data.response.gridStatus)
             }
             .store(in: &cancellables)
     }
@@ -379,25 +400,34 @@ struct Product: Codable {
     let deviceType: String?
     let energySiteId: Int?
     let siteName: String?
-    let id: String?
-    let gatewayId: String?
-    let resourceType: String?
-    let energyLeft: Int?
-    let totalPackEnergy: Int?
-    let percentageCharged: Int?
-    let batteryPower: Int?
 
     enum CodingKeys: String, CodingKey {
         case deviceType = "device_type"
         case energySiteId = "energy_site_id"
         case siteName = "site_name"
-        case id
-        case gatewayId = "gateway_id"
-        case resourceType = "resource_type"
-        case energyLeft = "energy_left"
-        case totalPackEnergy = "total_pack_energy"
-        case percentageCharged = "percentage_charged"
+    }
+}
+
+// Fleet response model
+struct FleetEnergySiteResponse: Codable {
+    let response: FleetLiveStatus
+}
+
+struct FleetLiveStatus: Codable {
+    let batteryPower: Double
+    let batteryPercentage: Double
+    let solarPower: Double
+    let loadPower: Double
+    let gridPower: Double
+    let gridStatus: String
+
+    enum CodingKeys: String, CodingKey {
         case batteryPower = "battery_power"
+        case batteryPercentage = "percentage_charged"
+        case solarPower = "solar_power"
+        case loadPower = "load_power"
+        case gridPower = "grid_power"
+        case gridStatus = "grid_status"
     }
 }
 

@@ -13,6 +13,7 @@ struct SettingsView: View {
     @Binding var ipAddress: String
     @Binding var username: String
     @Binding var password: String
+    @Binding var accessToken: String
     @Environment(\.presentationMode) var presentationMode
 
     var body: some View {
@@ -35,6 +36,11 @@ struct SettingsView: View {
                         TextField("Username", text: $username)
                             .textContentType(.username)
                         SecureField("Password", text: $password)
+                            .textContentType(.password)
+                    }
+                } else {
+                    Section(header: Text("Fleet API Settings")) {
+                        SecureField("Access token", text: $accessToken)
                             .textContentType(.password)
                     }
                 }
@@ -84,7 +90,8 @@ struct SettingsView_Previews: PreviewProvider {
             loginMode: .constant(LoginMode.local),
             ipAddress: .constant("192.168.1.100"),
             username: .constant("user@example.com"),
-            password: .constant("password")
+            password: .constant("password"),
+            accessToken: .constant("accessToken")
         )
     }
 }

@@ -99,7 +99,7 @@ struct PowerSurgeView<Curve: Shape>: View {
     init(
         color: Color = .green,
         isForward: Bool = true,
-        duration: Double = 1.0,
+        duration: Double = 2.0,
         pauseDuration: Double = 1.0,
         startOffset: Double = 0.0,
         curve: Curve = PreviewCurve(),

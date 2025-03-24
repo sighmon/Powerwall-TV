@@ -36,13 +36,15 @@ struct ContentView: View {
                         VStack {
                             HStack {
                                 VStack {
-                                    Text("\(data.solar.energyExported / 1000, specifier: "%.0f") kWh")
-                                        .fontWeight(.bold)
-                                        .font(.headline)
-                                    Text("ENERGY GENERATED")
-                                        .opacity(0.6)
-                                        .fontWeight(.bold)
-                                        .font(.footnote)
+                                    if data.solar.energyExported > 0 {
+                                        Text("\(data.solar.energyExported / 1000, specifier: "%.0f") kWh")
+                                            .fontWeight(.bold)
+                                            .font(.headline)
+                                        Text("ENERGY GENERATED")
+                                            .opacity(0.6)
+                                            .fontWeight(.bold)
+                                            .font(.footnote)
+                                    }
                                 }
                                 Spacer()
                             }
@@ -87,7 +89,7 @@ struct ContentView: View {
                                     Text("\(data.battery.instantPower / 1000, specifier: "%.3f") kW · \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
                                         .fontWeight(.bold)
                                         .font(.headline)
-                                    Text("POWERWALL · \(data.battery.count, specifier: "%.0f")x")
+                                    Text("POWERWALL\(viewModel.batteryCountString())")
                                         .opacity(0.6)
                                         .fontWeight(.bold)
                                         .font(.footnote)
@@ -267,7 +269,8 @@ struct ContentView: View {
                     loginMode: $viewModel.loginMode,
                     ipAddress: $viewModel.ipAddress,
                     username: $viewModel.username,
-                    password: $viewModel.password
+                    password: $viewModel.password,
+                    accessToken: $viewModel.accessToken
                 )
             }
             .onReceive(timer) { _ in
@@ -284,7 +287,7 @@ struct ContentView: View {
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
                     viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
-                } else if viewModel.ipAddress.isEmpty {
+                } else if !viewModel.ipAddress.isEmpty {
                     viewModel.fetchData()
                 }
             }
