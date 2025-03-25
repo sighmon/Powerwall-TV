@@ -192,7 +192,67 @@ class PowerwallViewModel: ObservableObject {
                 self.accessToken = tokenResponse.access_token
                 // Save the accessToken to Keychain
                 KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
+                if let refreshToken = tokenResponse.refresh_token {
+                    KeychainWrapper.standard.set(refreshToken, forKey: "fleetAPI_refreshToken")
+                }
+                if let expiresIn = tokenResponse.expires_in {
+                    let expirationDate = Date().addingTimeInterval(TimeInterval(expiresIn))
+                    UserDefaults.standard.set(expirationDate, forKey: "fleetAPI_tokenExpiration")
+                }
                 self.fetchEnergyProducts()
+            }
+        }.resume()
+    }
+
+    private func refreshAccessToken() {
+        guard let refreshToken = KeychainWrapper.standard.string(forKey: "fleetAPI_refreshToken") else {
+            errorMessage = "No refresh token available"
+            loginWithTeslaFleetAPI() // Fallback to full login
+            return
+        }
+
+        guard let tokenURL = URL(string: "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token") else {
+            errorMessage = "Invalid token URL"
+            return
+        }
+
+        var request = URLRequest(url: tokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        let body = "grant_type=refresh_token&client_id=\(clientID)&client_secret=\(clientSecret)&refresh_token=\(refreshToken)"
+        request.httpBody = body.data(using: .utf8)
+
+        fleetURLSession.dataTask(with: request) { [weak self] data, _, error in
+            guard let self = self else { return }
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Token refresh failed: \(error.localizedDescription)"
+                    self.loginWithTeslaFleetAPI() // Fallback to full login
+                }
+                return
+            }
+
+            guard let data = data,
+                  let tokenResponse = try? JSONDecoder().decode(TokenResponse.self, from: data) else {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to decode token response"
+                    self.loginWithTeslaFleetAPI()
+                }
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.accessToken = tokenResponse.access_token
+                KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
+                if let refreshToken = tokenResponse.refresh_token { // Some APIs issue new refresh tokens
+                    KeychainWrapper.standard.set(refreshToken, forKey: "fleetAPI_refreshToken")
+                }
+                if let expiresIn = tokenResponse.expires_in {
+                    let expirationDate = Date().addingTimeInterval(TimeInterval(expiresIn))
+                    UserDefaults.standard.set(expirationDate, forKey: "fleetAPI_tokenExpiration")
+                }
+                self.fetchFleetAPIData() // Retry the failed request
             }
         }.resume()
     }
@@ -261,6 +321,10 @@ class PowerwallViewModel: ObservableObject {
                     }
                     // If login fails, errorMessage is already set by the login function
                 }
+            }
+            if let expirationDate = UserDefaults.standard.object(forKey: "fleetAPI_tokenExpiration") as? Date,
+               Date() >= expirationDate {
+                self.refreshAccessToken()
             }
             if !self.energySites.isEmpty {
                 let currentSite = self.energySites[self.currentEnergySiteIndex]
@@ -383,7 +447,11 @@ class PowerwallViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] completion in
                 if case .failure(let error) = completion {
-                    self?.errorMessage = "Failed to fetch Fleet API data: \(error.localizedDescription)"
+                    if (error as? URLError)?.code == .userAuthenticationRequired {
+                        self?.refreshAccessToken() // Attempt to refresh token
+                    } else {
+                        self?.errorMessage = "Failed to fetch Fleet API data: \(error.localizedDescription)"
+                    }
                 }
             } receiveValue: { [weak self] data in
                 let powerwall = PowerwallData(
@@ -404,6 +472,8 @@ class PowerwallViewModel: ObservableObject {
 
 struct TokenResponse: Codable {
     let access_token: String
+    let refresh_token: String?
+    let expires_in: Int?
 }
 
 struct ProductsResponse: Codable {
