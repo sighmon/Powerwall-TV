@@ -36,6 +36,12 @@ struct ContentView: View {
                         VStack {
                             HStack {
                                 VStack {
+                                    if (viewModel.siteName != nil) {
+                                        Text(viewModel.siteName ?? "")
+                                            .fontWeight(.bold)
+                                            .font(.headline)
+                                            .padding(.bottom)
+                                    }
                                     if data.solar.energyExported > 0 {
                                         Text("\(data.solar.energyExported / 1000, specifier: "%.0f") kWh")
                                             .fontWeight(.bold)
@@ -309,6 +315,7 @@ struct ContentView: View {
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
                     viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
+                    viewModel.siteName = "Home sweet home"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         startAnimations = true
                     }

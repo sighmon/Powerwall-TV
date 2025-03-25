@@ -39,6 +39,7 @@ class PowerwallViewModel: ObservableObject {
     // Fleet API-specific properties
     @Published var accessToken: String = KeychainWrapper.standard.string(forKey: "fleetAPI_accessToken") ?? ""
     @Published var energySiteId: String?
+    @Published var siteName: String?
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -221,6 +222,7 @@ class PowerwallViewModel: ObservableObject {
                 let energyProducts = productsResponse.response.filter { $0.deviceType == "energy" }
                 if let firstEnergyProduct = energyProducts.first, let id = firstEnergyProduct.energySiteId {
                     self?.energySiteId = String(id) // Use energy_site_id as the device ID
+                    self?.siteName = firstEnergyProduct.siteName
                     self?.fetchFleetAPIData()
                 } else {
                     self?.errorMessage = "No energy products found"
