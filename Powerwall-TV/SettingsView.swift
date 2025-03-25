@@ -14,6 +14,7 @@ struct SettingsView: View {
     @Binding var username: String
     @Binding var password: String
     @Binding var accessToken: String
+    @Binding var preventScreenSaver: Bool
     @Environment(\.presentationMode) var presentationMode
 
     var body: some View {
@@ -44,6 +45,16 @@ struct SettingsView: View {
                             .textContentType(.password)
                     }
                 }
+
+                // New section for screen saver prevention
+                Section(header: Text("Display Settings")) {
+                    Toggle("Prevent screen saver from showing", isOn: $preventScreenSaver)
+                    if preventScreenSaver {
+                        Text("Warning: keeping the screen on may increase power usage and risk burn-in.")
+                                .font(.footnote)
+                                .foregroundColor(.gray)
+                    }
+                }
             }
             .navigationTitle("Settings")
             .toolbar {
@@ -57,13 +68,8 @@ struct SettingsView: View {
                             UserDefaults.standard.set(ipAddress, forKey: "gatewayIP")
                             UserDefaults.standard.set(username, forKey: "username")
                             KeychainWrapper.standard.set(password, forKey: "gatewayPassword")
-                        } else {
-                            // TODO: do we want to delete local settings?
-                            // TODO: when do we want to delete a Fleet API accessToken?
-                            // UserDefaults.standard.removeObject(forKey: "gatewayIP")
-                            // UserDefaults.standard.removeObject(forKey: "username")
-                            // KeychainWrapper.standard.removeObject(forKey: "gatewayPassword")
                         }
+                        UserDefaults.standard.set(preventScreenSaver, forKey: "preventScreenSaver")
 
                         // Dismiss the settings view
                         presentationMode.wrappedValue.dismiss()
@@ -91,7 +97,8 @@ struct SettingsView_Previews: PreviewProvider {
             ipAddress: .constant("192.168.1.100"),
             username: .constant("user@example.com"),
             password: .constant("password"),
-            accessToken: .constant("accessToken")
+            accessToken: .constant("accessToken"),
+            preventScreenSaver: .constant(false)
         )
     }
 }

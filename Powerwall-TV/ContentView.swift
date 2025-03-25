@@ -276,7 +276,8 @@ struct ContentView: View {
                     ipAddress: $viewModel.ipAddress,
                     username: $viewModel.username,
                     password: $viewModel.password,
-                    accessToken: $viewModel.accessToken
+                    accessToken: $viewModel.accessToken,
+                    preventScreenSaver: $viewModel.preventScreenSaver
                 )
             }
             .onReceive(timer) { _ in
@@ -326,6 +327,7 @@ struct ContentView: View {
                         startAnimations = true
                     }
                 }
+                UIApplication.shared.isIdleTimerDisabled = viewModel.preventScreenSaver
             }
             .onMoveCommand { direction in
                 if direction == .left && viewModel.currentEnergySiteIndex > 0 {
