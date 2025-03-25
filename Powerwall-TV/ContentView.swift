@@ -259,39 +259,14 @@ struct ContentView: View {
                             ZStack {
                                 Circle()
                                     .fill(Color.gray)
-                                    .frame(width: 20, height: 20)
+                                    .frame(width: 40, height: 40)
                                 Image(systemName: "gear")
+                                    .font(.title)
                             }
                         }
                         .accessibilityLabel("Settings")
-
-                        if viewModel.loginMode == .fleetAPI && viewModel.energySites.count > 1 {
-                            if viewModel.currentEnergySiteIndex > 0 {
-                                Button(action: {
-                                    if viewModel.currentEnergySiteIndex > 0 {
-                                        viewModel.currentEnergySiteIndex -= 1
-                                        UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
-                                        viewModel.fetchData()
-                                    }
-                                }) {
-                                    Image(systemName: "arrow.left")
-                                }
-                            }
-                            if viewModel.currentEnergySiteIndex != viewModel.energySites.count - 1 {
-                                Button(action: {
-                                    if viewModel.currentEnergySiteIndex < viewModel.energySites.count - 1 {
-                                        viewModel.currentEnergySiteIndex += 1
-                                        UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
-                                        viewModel.fetchData()
-                                    }
-                                }) {
-                                    Image(systemName: "arrow.right")
-                                }
-                            }
-                        }
                         Spacer()
                     }
-                    .font(.subheadline)
                 }
             }
             .padding()
@@ -350,6 +325,18 @@ struct ContentView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         startAnimations = true
                     }
+                }
+            }
+            .onMoveCommand { direction in
+                if direction == .left && viewModel.currentEnergySiteIndex > 0 {
+                    viewModel.currentEnergySiteIndex -= 1
+                    UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
+                    viewModel.fetchData()
+                }
+                if direction == .right && viewModel.currentEnergySiteIndex < viewModel.energySites.count - 1 {
+                    viewModel.currentEnergySiteIndex += 1
+                    UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
+                    viewModel.fetchData()
                 }
             }
         }
