@@ -24,6 +24,8 @@ class PowerwallViewModel: ObservableObject {
     @Published var ipAddress: String = UserDefaults.standard.string(forKey: "gatewayIP") ?? ""
     @Published var username: String = UserDefaults.standard.string(forKey: "username") ?? "customer"
     @Published var password: String = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
+    @Published var currentEnergySiteIndex: Int = UserDefaults.standard.integer(forKey: "currentEnergySiteIndex")
+    @Published var energySites: [Product] = []
 
     @Published var data: PowerwallData?
     @Published var batteryPercentage: BatteryPercentage?
@@ -196,7 +198,7 @@ class PowerwallViewModel: ObservableObject {
     }
 
     private func fetchEnergyProducts() {
-        if accessToken == "" {
+        if accessToken.isEmpty {
             errorMessage = "No access token available"
             return
         }
@@ -214,18 +216,23 @@ class PowerwallViewModel: ObservableObject {
             .map { $0.data }
             .decode(type: ProductsResponse.self, decoder: JSONDecoder())
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] completion in
-                if case .failure(let error) = completion {
+            .sink { [weak self] completionResult in
+                if case .failure(let error) = completionResult {
                     self?.errorMessage = "Failed to fetch products: \(error.localizedDescription)"
                 }
             } receiveValue: { [weak self] productsResponse in
-                let energyProducts = productsResponse.response.filter { $0.deviceType == "energy" }
-                if let firstEnergyProduct = energyProducts.first, let id = firstEnergyProduct.energySiteId {
-                    self?.energySiteId = String(id) // Use energy_site_id as the device ID
-                    self?.siteName = firstEnergyProduct.siteName
-                    self?.fetchFleetAPIData()
+                guard let self = self else { return }
+                let energySites = productsResponse.response.filter { $0.deviceType == "energy" }
+                self.energySites = energySites
+                if energySites.isEmpty {
+                    self.errorMessage = "No energy products found"
                 } else {
-                    self?.errorMessage = "No energy products found"
+                    // Adjust index if out of bounds
+                    if self.currentEnergySiteIndex >= energySites.count {
+                        self.currentEnergySiteIndex = 0
+                        UserDefaults.standard.set(0, forKey: "currentEnergySiteIndex")
+                    }
+                    self.fetchData()
                 }
             }
             .store(in: &cancellables)
@@ -246,11 +253,7 @@ class PowerwallViewModel: ObservableObject {
                 // If login fails, errorMessage is already set by the login function
             }
         case .fleetAPI:
-            if accessToken != "" {
-                // TODO: how do we check for expired accessToken?
-                // Token exists, try fetching devices or data directly
-                self.fetchEnergyProducts()
-            } else {
+            if accessToken.isEmpty {
                 // No token, initiate login
                 login { success in
                     if success {
@@ -258,6 +261,16 @@ class PowerwallViewModel: ObservableObject {
                     }
                     // If login fails, errorMessage is already set by the login function
                 }
+            }
+            if !self.energySites.isEmpty {
+                let currentSite = self.energySites[self.currentEnergySiteIndex]
+                if let id = currentSite.energySiteId, let name = currentSite.siteName {
+                    self.energySiteId = String(id)
+                    self.siteName = name
+                    self.fetchFleetAPIData()
+                }
+            } else {
+                self.fetchEnergyProducts()
             }
         }
     }
