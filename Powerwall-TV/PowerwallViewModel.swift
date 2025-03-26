@@ -8,7 +8,7 @@
 
 import Foundation
 import Combine
-import AuthenticationServices // For ASWebAuthenticationSession
+import AuthenticationServices
 
 // Enum to define login options
 enum LoginMode: String, CaseIterable {
@@ -43,6 +43,14 @@ class PowerwallViewModel: ObservableObject {
     @Published var accessToken: String = KeychainWrapper.standard.string(forKey: "fleetAPI_accessToken") ?? ""
     @Published var energySiteId: String?
     @Published var siteName: String?
+    @Published var batteryPowerHistory: [HistoricalDataPoint] = []
+    @Published var batteryPercentageHistory: [HistoricalDataPoint] = []
+
+    private let isoFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -428,6 +436,14 @@ class PowerwallViewModel: ObservableObject {
         return String(format: " · %.0fx", batteryCount)
     }
 
+    private func getHistoryDateRange() -> (start: String, end: String) {
+        // For the last 48 hours
+        let now = Date()
+        let end = isoFormatter.string(from: now)
+        let start = isoFormatter.string(from: now.addingTimeInterval(-48 * 3600))
+        return (start, end)
+    }
+
     private func fetchFleetAPIData() {
         if accessToken == "" {
             errorMessage = "Must log in first"
@@ -466,6 +482,108 @@ class PowerwallViewModel: ObservableObject {
                 self?.gridStatus = GridStatus(status: data.response.gridStatus)
             }
             .store(in: &cancellables)
+    }
+
+    private func fetchPowerHistory(completion: @escaping (Result<[HistoricalDataPoint], Error>) -> Void) {
+        guard let energySiteId = energySiteId else {
+            completion(.failure(NSError(domain: "Missing energySiteId", code: 0, userInfo: nil)))
+            return
+        }
+
+        let (start, end) = getHistoryDateRange()
+        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/history?kind=power&start_date=\(start)&end_date=\(end)"
+        guard let url = URL(string: urlString) else {
+            completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            guard let data = data else {
+                completion(.failure(NSError(domain: "No data", code: 0, userInfo: nil)))
+                return
+            }
+            do {
+                let powerResponse = try JSONDecoder().decode(PowerHistoryResponse.self, from: data)
+                let dataPoints = powerResponse.response.time_series.map { point in
+                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.batteryPower, from: point.batteryFromGrid > point.batteryFromSolar ? PowerFrom.grid : PowerFrom.solar)
+                }
+                completion(.success(dataPoints))
+            } catch {
+                completion(.failure(error))
+            }
+        }.resume()
+    }
+
+    private func fetchSOEHistory(completion: @escaping (Result<[HistoricalDataPoint], Error>) -> Void) {
+        guard let energySiteId = energySiteId else {
+            completion(.failure(NSError(domain: "Missing energySiteId", code: 0, userInfo: nil)))
+            return
+        }
+
+        let (start, end) = getHistoryDateRange()
+        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/history?kind=soe&start_date=\(start)&end_date=\(end)"
+        guard let url = URL(string: urlString) else {
+            completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            guard let data = data else {
+                completion(.failure(NSError(domain: "No data", code: 0, userInfo: nil)))
+                return
+            }
+            do {
+                let soeResponse = try JSONDecoder().decode(SOEHistoryResponse.self, from: data)
+                let dataPoints = soeResponse.response.time_series.map { point in
+                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.soe, from: nil)
+                }
+                completion(.success(dataPoints))
+            } catch {
+                completion(.failure(error))
+            }
+        }.resume()
+    }
+
+    func fetchFleetAPIHistory() {
+        fetchPowerHistory { result in
+            switch result {
+            case .success(let dataPoints):
+                DispatchQueue.main.async {
+                    self.batteryPowerHistory = dataPoints
+                }
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to fetch battery power history: \(error.localizedDescription)"
+                }
+            }
+        }
+
+        fetchSOEHistory { result in
+            switch result {
+            case .success(let dataPoints):
+                DispatchQueue.main.async {
+                    self.batteryPercentageHistory = dataPoints
+                }
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to fetch battery percentage history: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 }
 
@@ -572,4 +690,53 @@ struct GridStatus: Codable {
     enum CodingKeys: String, CodingKey {
         case status = "grid_status"
     }
+}
+
+// Historical power data from energy_history with kind="power"
+struct PowerHistoryResponse: Codable {
+    let response: PowerHistory
+}
+
+struct PowerHistory: Codable {
+    let time_series: [PowerDataPoint]
+}
+
+struct PowerDataPoint: Codable {
+    let timestamp: String
+    let batteryPower: Double
+    let batteryFromSolar: Double
+    let batteryFromGrid: Double
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case batteryPower = "battery_energy_exported"
+        case batteryFromSolar = "battery_energy_imported_from_solar"
+        case batteryFromGrid = "battery_energy_imported_from_grid"
+    }
+}
+
+// Historical state of charge data from energy_history with kind="soe"
+struct SOEHistoryResponse: Codable {
+    let response: SOEHistory
+}
+
+struct SOEHistory: Codable {
+    let time_series: [SOEDataPoint]
+}
+
+struct SOEDataPoint: Codable {
+    let timestamp: String
+    let soe: Double
+}
+
+// Generic structure for graph data points
+enum PowerFrom: String, CaseIterable {
+    case grid = "grid"
+    case solar = "solar"
+}
+
+struct HistoricalDataPoint {
+    let date: Date
+    let value: Double
+    let from: PowerFrom?
 }

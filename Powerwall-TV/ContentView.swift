@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var demo = false
     @State private var animations = true
     @State private var showingSettings = false
+    @State private var showingGraph = false
     @State private var wiggleWatts = 40.0
     @State private var startAnimations = false
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
@@ -261,10 +262,24 @@ struct ContentView: View {
                                     .fill(Color.gray)
                                     .frame(width: 40, height: 40)
                                 Image(systemName: "gear")
-                                    .font(.title)
+                                    .font(.title2)
+                                    .frame(width: 80, height: 80)
                             }
                         }
                         .accessibilityLabel("Settings")
+
+                        if viewModel.loginMode == .fleetAPI {
+                            Button(action: {
+                                showingGraph = true
+                            }) {
+                                ZStack {
+                                    Image(systemName: "chart.bar.xaxis.ascending.badge.clock")
+                                        .font(.title3)
+                                        .frame(width: 80, height: 80)
+                                }
+                            }
+                            .accessibilityLabel("Chart")
+                        }
                         Spacer()
                     }
                 }
@@ -279,6 +294,9 @@ struct ContentView: View {
                     accessToken: $viewModel.accessToken,
                     preventScreenSaver: $viewModel.preventScreenSaver
                 )
+            }
+            .sheet(isPresented: $showingGraph) {
+                GraphView(viewModel: viewModel)
             }
             .onReceive(timer) { _ in
                 if viewModel.ipAddress == "demo" {
