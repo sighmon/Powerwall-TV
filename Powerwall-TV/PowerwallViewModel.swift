@@ -491,7 +491,7 @@ class PowerwallViewModel: ObservableObject {
         }
 
         let (start, end) = getHistoryDateRange()
-        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/history?kind=power&start_date=\(start)&end_date=\(end)"
+        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/calendar_history?kind=energy&period=day&start_date=\(start)&end_date=\(end)&time_zone=Australia/Adelaide"
         guard let url = URL(string: urlString) else {
             completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
             return
@@ -512,7 +512,7 @@ class PowerwallViewModel: ObservableObject {
             do {
                 let powerResponse = try JSONDecoder().decode(PowerHistoryResponse.self, from: data)
                 let dataPoints = powerResponse.response.time_series.map { point in
-                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.batteryPower, from: point.batteryFromGrid > point.batteryFromSolar ? PowerFrom.grid : PowerFrom.solar)
+                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.batteryPower - point.batteryFromSolar - point.batteryFromGrid, from: point.batteryFromGrid > point.batteryFromSolar ? PowerFrom.grid : PowerFrom.solar)
                 }
                 completion(.success(dataPoints))
             } catch {
@@ -528,7 +528,7 @@ class PowerwallViewModel: ObservableObject {
         }
 
         let (start, end) = getHistoryDateRange()
-        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/history?kind=soe&start_date=\(start)&end_date=\(end)"
+        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/calendar_history?kind=soe&period=day&start_date=\(start)&end_date=\(end)&time_zone=Australia/Adelaide"
         guard let url = URL(string: urlString) else {
             completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
             return

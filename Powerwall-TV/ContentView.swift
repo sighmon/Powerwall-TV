@@ -260,7 +260,7 @@ struct ContentView: View {
                             ZStack {
                                 Circle()
                                     .fill(Color.gray)
-                                    .frame(width: 40, height: 40)
+                                    .frame(width: 30, height: 30)
                                 Image(systemName: "gear")
                                     .font(.title2)
                                     .frame(width: 80, height: 80)
@@ -348,12 +348,12 @@ struct ContentView: View {
                 UIApplication.shared.isIdleTimerDisabled = viewModel.preventScreenSaver
             }
             .onMoveCommand { direction in
-                if direction == .left && viewModel.currentEnergySiteIndex > 0 {
+                if direction == .up && viewModel.currentEnergySiteIndex > 0 {
                     viewModel.currentEnergySiteIndex -= 1
                     UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
                     viewModel.fetchData()
                 }
-                if direction == .right && viewModel.currentEnergySiteIndex < viewModel.energySites.count - 1 {
+                if direction == .down && viewModel.currentEnergySiteIndex < viewModel.energySites.count - 1 {
                     viewModel.currentEnergySiteIndex += 1
                     UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
                     viewModel.fetchData()

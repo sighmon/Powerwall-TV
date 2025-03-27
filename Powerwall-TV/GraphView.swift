@@ -26,7 +26,7 @@ struct GraphView: View {
         VStack(spacing: 20) {
             // Battery Power Flow Chart
             Text("Powerwall")
-                .font(.headline)
+                .font(.title)
             Text("YESTERDAY → TODAY · ENERGY FLOW · kWh")
                 .opacity(0.6)
                 .fontWeight(.bold)
@@ -36,7 +36,7 @@ struct GraphView: View {
                 ForEach(viewModel.batteryPowerHistory, id: \.date) { point in
                     PointMark(
                         x: .value("Time", point.date),
-                        y: .value("Power (kW)", point.value / 1000)
+                        y: .value("Power (kW)", point.value / 100)
                     )
                     .opacity(0) // Hide the points
                 }
@@ -57,8 +57,8 @@ struct GraphView: View {
                                     let zeroCrossing = interpolateZeroCrossing(start: start, end: end)
 
                                     // First segment: start to zeroCrossing
-                                    if let startPoint = proxy.position(for: (x: start.date, y: start.value / 1000)),
-                                       let zeroPoint = proxy.position(for: (x: zeroCrossing.date, y: zeroCrossing.value / 1000)) {
+                                    if let startPoint = proxy.position(for: (x: start.date, y: start.value / 100)),
+                                       let zeroPoint = proxy.position(for: (x: zeroCrossing.date, y: zeroCrossing.value / 100)) {
                                         let color = colorForPoint(start)
                                         let areaPath = Path { p in
                                             p.move(to: startPoint)
@@ -87,8 +87,8 @@ struct GraphView: View {
                                     }
 
                                     // Second segment: zeroCrossing to end
-                                    if let zeroPoint = proxy.position(for: (x: zeroCrossing.date, y: zeroCrossing.value / 1000)),
-                                       let endPoint = proxy.position(for: (x: end.date, y: end.value / 1000)) {
+                                    if let zeroPoint = proxy.position(for: (x: zeroCrossing.date, y: zeroCrossing.value / 100)),
+                                       let endPoint = proxy.position(for: (x: end.date, y: end.value / 100)) {
                                         let color = colorForPoint(zeroCrossing)
                                         let areaPath = Path { p in
                                             p.move(to: zeroPoint)
@@ -117,8 +117,8 @@ struct GraphView: View {
                                     }
                                 } else {
                                     // No zero crossing, draw the full segment
-                                    if let startPoint = proxy.position(for: (x: start.date, y: start.value / 1000)),
-                                       let endPoint = proxy.position(for: (x: end.date, y: end.value / 1000)) {
+                                    if let startPoint = proxy.position(for: (x: start.date, y: start.value / 100)),
+                                       let endPoint = proxy.position(for: (x: end.date, y: end.value / 100)) {
                                         let color = colorForPoint(start)
                                         let areaPath = Path { p in
                                             p.move(to: startPoint)
@@ -153,7 +153,7 @@ struct GraphView: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .hour, count: 6)) { value in
+                AxisMarks(values: .stride(by: .hour, count: 3)) { value in
                     AxisGridLine()
                     AxisTick()
                     if let date = value.as(Date.self) {
@@ -172,6 +172,12 @@ struct GraphView: View {
                 .opacity(0.6)
                 .fontWeight(.bold)
                 .font(.footnote)
+            if (viewModel.data == nil), let errorMessage = viewModel.errorMessage {
+                Text("Error: \(errorMessage)")
+                    .opacity(0.6)
+                    .fontWeight(.bold)
+                    .font(.footnote)
+            }
             Chart {
                 ForEach(viewModel.batteryPercentageHistory, id: \.date) { point in
                     LineMark(
@@ -197,7 +203,7 @@ struct GraphView: View {
             .frame(height: 200)
             .foregroundColor(.green)
             .chartXAxis {
-                AxisMarks(values: .stride(by: .hour, count: 6)) { _ in
+                AxisMarks(values: .stride(by: .hour, count: 3)) { _ in
                     AxisGridLine()
                     AxisTick()
                     AxisValueLabel(format: .dateTime.hour())
@@ -220,8 +226,8 @@ struct GraphView: View {
 func interpolateZeroCrossing(start: HistoricalDataPoint, end: HistoricalDataPoint) -> HistoricalDataPoint {
     let startTime = start.date.timeIntervalSince1970
     let endTime = end.date.timeIntervalSince1970
-    let startValue = start.value / 1000 // Convert to kW
-    let endValue = end.value / 1000
+    let startValue = start.value / 100 // Convert to kW
+    let endValue = end.value / 100
 
     let ratio = startValue / (startValue - endValue)
     let crossingTime = startTime + ratio * (endTime - startTime)
