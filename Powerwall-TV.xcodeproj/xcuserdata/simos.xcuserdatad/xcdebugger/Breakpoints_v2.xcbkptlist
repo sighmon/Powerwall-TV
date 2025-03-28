@@ -135,38 +135,6 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "6E7C8529-CBE5-48E5-BB10-F01B5339E0BA"
-            shouldBeEnabled = "No"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Powerwall-TV/PowerwallViewModel.swift"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "203"
-            endingLineNumber = "203"
-            landmarkName = "exchangeCodeForToken(code:)"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "EB515548-249E-4497-8A42-D958F7C6990D"
-            shouldBeEnabled = "No"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Powerwall-TV/PowerwallViewModel.swift"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "201"
-            endingLineNumber = "201"
-            landmarkName = "exchangeCodeForToken(code:)"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
             uuid = "C821591D-BD8C-4105-90DA-832354EE2512"
             shouldBeEnabled = "No"
             ignoreCount = "0"
@@ -290,6 +258,52 @@
             endingLineNumber = "515"
             landmarkName = "fetchPowerHistory(completion:)"
             landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "65549966-5BCD-480F-A7FC-B4D811246EDD"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Powerwall-TV/PowerwallViewModel.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "204"
+            endingLineNumber = "204"
+            landmarkName = "exchangeCodeForToken(code:)"
+            landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "65549966-5BCD-480F-A7FC-B4D811246EDD - 594f66fa2c1db19f"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "closure #3 @Swift.MainActor () -&gt; () in closure #1 @Sendable (Swift.Optional&lt;Foundation.Data&gt;, Swift.Optional&lt;__C.NSURLResponse&gt;, Swift.Optional&lt;Swift.Error&gt;) -&gt; () in Powerwall_TV.PowerwallViewModel.exchangeCodeForToken(code: Swift.String) -&gt; ()"
+                  moduleName = "Powerwall-TV.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/simos/Coding/iOS/Powerwall-TV/Powerwall-TV/PowerwallViewModel.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "204"
+                  endingLineNumber = "204">
+               </Location>
+               <Location
+                  uuid = "65549966-5BCD-480F-A7FC-B4D811246EDD - 594f66fa2c1db19f"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "closure #3 @Swift.MainActor () -&gt; () in closure #1 @Sendable (Swift.Optional&lt;Foundation.Data&gt;, Swift.Optional&lt;__C.NSURLResponse&gt;, Swift.Optional&lt;Swift.Error&gt;) -&gt; () in Powerwall_TV.PowerwallViewModel.exchangeCodeForToken(code: Swift.String) -&gt; ()"
+                  moduleName = "Powerwall-TV.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/simos/Coding/iOS/Powerwall-TV/Powerwall-TV/PowerwallViewModel.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "204"
+                  endingLineNumber = "204">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>

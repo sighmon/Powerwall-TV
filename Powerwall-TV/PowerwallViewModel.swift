@@ -36,8 +36,8 @@ class PowerwallViewModel: ObservableObject {
     // Tesla Fleet API credentials (replace with your actual values)
     private let clientID = Secrets.clientID
     private let clientSecret = Secrets.clientSecret
-    private let redirectURI = "powerwalltv://app/callback" // Must match Tesla's registered URI
-    private let scopes = "openid energy_device_data" // Adjust based on needs
+    private let redirectURI = "powerwalltv://app/callback"
+    private let scopes = "openid energy_device_data offline_access"
 
     // Fleet API-specific properties
     @Published var accessToken: String = KeychainWrapper.standard.string(forKey: "fleetAPI_accessToken") ?? ""
@@ -177,7 +177,7 @@ class PowerwallViewModel: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
-        let body = "grant_type=authorization_code&client_id=\(clientID)&client_secret=\(clientSecret)&code=\(code)&redirect_uri=\(redirectURI)"
+        let body = "grant_type=authorization_code&client_id=\(clientID)&client_secret=\(clientSecret)&code=\(code)&redirect_uri=\(redirectURI)&audience=https://fleet-api.prd.na.vn.cloud.tesla.com"
         request.httpBody = body.data(using: .utf8)
 
         fleetURLSession.dataTask(with: request) { [weak self] data, _, error in
