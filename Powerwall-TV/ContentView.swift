@@ -347,6 +347,9 @@ struct ContentView: View {
                 }
                 UIApplication.shared.isIdleTimerDisabled = viewModel.preventScreenSaver
             }
+            .onDisappear {
+                startAnimations = false
+            }
             .onMoveCommand { direction in
                 if direction == .up && viewModel.currentEnergySiteIndex > 0 {
                     viewModel.currentEnergySiteIndex -= 1
