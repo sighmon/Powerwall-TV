@@ -84,6 +84,7 @@ struct PowerSurgeView<Curve: Shape>: View {
     @State private var startFraction: CGFloat
     @State private var direction: Bool
     @State private var opacity: Double
+    @State private var isAnimating = false
 
     private var gradient: LinearGradient {
         LinearGradient(
@@ -99,7 +100,7 @@ struct PowerSurgeView<Curve: Shape>: View {
     init(
         color: Color = .green,
         isForward: Bool = true,
-        duration: Double = 1.0,
+        duration: Double = 2.0,
         pauseDuration: Double = 1.0,
         startOffset: Double = 0.0,
         curve: Curve = PreviewCurve(),
@@ -129,11 +130,28 @@ struct PowerSurgeView<Curve: Shape>: View {
         }
         .onAppear {
             if shouldStart {
-                DispatchQueue.main.asyncAfter(deadline: .now() + calculateDelay() + startOffset) {
-                    opacity = 1.0
-                    startFraction = direction ? -1.0 : 1.0
-                    animate()
+                startAnimation()
+            }
+        }
+        .onChange(of: shouldStart) { newValue in
+            if newValue {
+                if !isAnimating {
+                    startAnimation()
                 }
+            } else {
+                isAnimating = false
+                opacity = 0.0 // Optional: reset visibility
+            }
+        }
+    }
+
+    private func startAnimation() {
+        isAnimating = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + calculateDelay() + startOffset) {
+            if isAnimating {
+                opacity = 1.0
+                startFraction = direction ? -1.0 : 1.0
+                animate()
             }
         }
     }
