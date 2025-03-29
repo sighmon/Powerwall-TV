@@ -29,7 +29,7 @@ struct ContentView: View {
                 .resizable()
                 .ignoresSafeArea()
             ZStack {
-                if (viewModel.ipAddress.isEmpty) {
+                if (viewModel.ipAddress.isEmpty && viewModel.loginMode == .local) {
                     Text("Please configure the gateway settings.")
                         .foregroundColor(.gray)
                 } else if let data = viewModel.data {
@@ -320,7 +320,7 @@ struct ContentView: View {
                 if demo {
                     viewModel.ipAddress = "demo"
                 }
-                if viewModel.ipAddress.isEmpty {
+                if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
                     showingSettings = true
                 } else if viewModel.ipAddress == "demo" {
                     viewModel.data = PowerwallData(
