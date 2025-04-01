@@ -89,7 +89,7 @@ struct GraphView: View {
                                     // Second segment: zeroCrossing to end
                                     if let zeroPoint = proxy.position(for: (x: zeroCrossing.date, y: zeroCrossing.value / 100)),
                                        let endPoint = proxy.position(for: (x: end.date, y: end.value / 100)) {
-                                        let color = colorForPoint(zeroCrossing)
+                                        let color = colorForPoint(end) // Updated to use end point
                                         let areaPath = Path { p in
                                             p.move(to: zeroPoint)
                                             p.addLine(to: endPoint)
@@ -243,7 +243,7 @@ func generateSampleData() -> [HistoricalDataPoint] {
     var dataPoints: [HistoricalDataPoint] = []
     for i in 0..<48 {
         let date = calendar.date(byAdding: .hour, value: -i, to: now)!
-        let value = Double.random(in: -10000...10000) // Random power in watts
+        let value = Double.random(in: -1000...1000) // Random power in watts
         let from = ((i % 2) == 0) ? PowerFrom.solar : PowerFrom.grid
         dataPoints.append(HistoricalDataPoint(date: date, value: value, from: from))
     }

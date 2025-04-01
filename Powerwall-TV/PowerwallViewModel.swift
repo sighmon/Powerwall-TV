@@ -38,6 +38,7 @@ class PowerwallViewModel: ObservableObject {
     private let clientSecret = Secrets.clientSecret
     private let redirectURI = "powerwalltv://app/callback"
     private let scopes = "openid energy_device_data offline_access"
+    private var wiggleWatts = 10.0
 
     // Fleet API-specific properties
     @Published var accessToken: String = KeychainWrapper.standard.string(forKey: "fleetAPI_accessToken") ?? ""
@@ -310,6 +311,7 @@ class PowerwallViewModel: ObservableObject {
     // MARK: - Data Fetching
 
     func fetchData() {
+        self.errorMessage = nil
         switch loginMode {
         case .local:
             // Ensure login before fetching data
@@ -512,7 +514,7 @@ class PowerwallViewModel: ObservableObject {
             do {
                 let powerResponse = try JSONDecoder().decode(PowerHistoryResponse.self, from: data)
                 let dataPoints = powerResponse.response.time_series.map { point in
-                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.batteryPower - point.batteryFromSolar - point.batteryFromGrid, from: point.batteryFromGrid > point.batteryFromSolar ? PowerFrom.grid : PowerFrom.solar)
+                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.batteryPower - point.batteryFromSolar - point.batteryFromGrid, from: (point.batteryFromGrid + self.wiggleWatts) > point.batteryFromSolar ? PowerFrom.grid : PowerFrom.solar)
                 }
                 completion(.success(dataPoints))
             } catch {

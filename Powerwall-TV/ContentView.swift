@@ -51,6 +51,13 @@ struct ContentView: View {
                                             .opacity(0.6)
                                             .fontWeight(.bold)
                                             .font(.footnote)
+                                            .padding(.bottom)
+                                    }
+                                    if let errorMessage = viewModel.errorMessage {
+                                        Text("Error: \(errorMessage)")
+                                            .fontWeight(.bold)
+                                            .font(.footnote)
+                                            .foregroundColor(.red)
                                     }
                                 }
                                 Spacer()
@@ -221,20 +228,6 @@ struct ContentView: View {
                         }
                     }
                     .foregroundColor(.white)
-                } else if let errorMessage = viewModel.errorMessage {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer().frame(width: 120)
-                            VStack {
-                                Text("Error: \(errorMessage)")
-                                    .opacity(0.6)
-                                    .fontWeight(.bold)
-                                    .font(.footnote)
-                            }
-                        }
-                    }
-                    .foregroundColor(.white)
                 } else {
                     VStack {
                         Spacer()
@@ -335,6 +328,7 @@ struct ContentView: View {
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
                     viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
                     viewModel.siteName = "Home sweet home"
+                    // viewModel.errorMessage = "An error has occured"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         startAnimations = true
                     }
