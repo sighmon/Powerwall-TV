@@ -14,15 +14,13 @@ struct ContentView: View {
     @State private var demo = false
     @State private var animations = true
     @State private var showingSettings = false
+    @State private var showingGraph = false
     @State private var wiggleWatts = 40.0
     @State private var startAnimations = false
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
     init() {
-        let ip = UserDefaults.standard.string(forKey: "gatewayIP") ?? ""
-        let username = UserDefaults.standard.string(forKey: "username") ?? ""
-        let password = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
-        _viewModel = StateObject(wrappedValue: PowerwallViewModel(ipAddress: ip, username: username, password: password))
+        _viewModel = StateObject(wrappedValue: PowerwallViewModel())
     }
 
     var body: some View {
@@ -31,7 +29,7 @@ struct ContentView: View {
                 .resizable()
                 .ignoresSafeArea()
             ZStack {
-                if viewModel.ipAddress.isEmpty {
+                if (viewModel.ipAddress.isEmpty && viewModel.loginMode == .local) {
                     Text("Please configure the gateway settings.")
                         .foregroundColor(.gray)
                 } else if let data = viewModel.data {
@@ -39,13 +37,28 @@ struct ContentView: View {
                         VStack {
                             HStack {
                                 VStack {
-                                    Text("\(data.solar.energyExported / 1000, specifier: "%.0f") kWh")
-                                        .fontWeight(.bold)
-                                        .font(.headline)
-                                    Text("ENERGY GENERATED")
-                                        .opacity(0.6)
-                                        .fontWeight(.bold)
-                                        .font(.footnote)
+                                    if (viewModel.siteName != nil) {
+                                        Text(viewModel.siteName ?? "")
+                                            .fontWeight(.bold)
+                                            .font(.headline)
+                                            .padding(.bottom)
+                                    }
+                                    if data.solar.energyExported > 0 {
+                                        Text("\(data.solar.energyExported / 1000, specifier: "%.0f") kWh")
+                                            .fontWeight(.bold)
+                                            .font(.headline)
+                                        Text("ENERGY GENERATED")
+                                            .opacity(0.6)
+                                            .fontWeight(.bold)
+                                            .font(.footnote)
+                                            .padding(.bottom)
+                                    }
+                                    if let errorMessage = viewModel.errorMessage {
+                                        Text("Error: \(errorMessage)")
+                                            .fontWeight(.bold)
+                                            .font(.footnote)
+                                            .foregroundColor(.red)
+                                    }
                                 }
                                 Spacer()
                             }
@@ -90,7 +103,7 @@ struct ContentView: View {
                                     Text("\(data.battery.instantPower / 1000, specifier: "%.3f") kW · \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
                                         .fontWeight(.bold)
                                         .font(.headline)
-                                    Text("POWERWALL · \(data.battery.count, specifier: "%.0f")x")
+                                    Text("POWERWALL\(viewModel.batteryCountString())")
                                         .opacity(0.6)
                                         .fontWeight(.bold)
                                         .font(.footnote)
@@ -215,20 +228,6 @@ struct ContentView: View {
                         }
                     }
                     .foregroundColor(.white)
-                } else if let errorMessage = viewModel.errorMessage {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer().frame(width: 120)
-                            VStack {
-                                Text("Error: \(errorMessage)")
-                                    .opacity(0.6)
-                                    .fontWeight(.bold)
-                                    .font(.footnote)
-                            }
-                        }
-                    }
-                    .foregroundColor(.white)
                 } else {
                     VStack {
                         Spacer()
@@ -254,19 +253,43 @@ struct ContentView: View {
                             ZStack {
                                 Circle()
                                     .fill(Color.gray)
-                                    .frame(width: 40, height: 40)
+                                    .frame(width: 30, height: 30)
                                 Image(systemName: "gear")
-                                    .font(.title)
+                                    .font(.title2)
+                                    .frame(width: 80, height: 80)
                             }
                         }
                         .accessibilityLabel("Settings")
+
+                        if viewModel.loginMode == .fleetAPI {
+                            Button(action: {
+                                showingGraph = true
+                            }) {
+                                ZStack {
+                                    Image(systemName: "chart.bar.xaxis.ascending.badge.clock")
+                                        .font(.title3)
+                                        .frame(width: 80, height: 80)
+                                }
+                            }
+                            .accessibilityLabel("Chart")
+                        }
                         Spacer()
                     }
                 }
             }
             .padding()
             .sheet(isPresented: $showingSettings) {
-                SettingsView(ipAddress: $viewModel.ipAddress, username: $viewModel.username, password: $viewModel.password)
+                SettingsView(
+                    loginMode: $viewModel.loginMode,
+                    ipAddress: $viewModel.ipAddress,
+                    username: $viewModel.username,
+                    password: $viewModel.password,
+                    accessToken: $viewModel.accessToken,
+                    preventScreenSaver: $viewModel.preventScreenSaver
+                )
+            }
+            .sheet(isPresented: $showingGraph) {
+                GraphView(viewModel: viewModel)
             }
             .onReceive(timer) { _ in
                 if viewModel.ipAddress == "demo" {
@@ -290,7 +313,7 @@ struct ContentView: View {
                 if demo {
                     viewModel.ipAddress = "demo"
                 }
-                if viewModel.ipAddress.isEmpty {
+                if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
                     showingSettings = true
                 } else if viewModel.ipAddress == "demo" {
                     viewModel.data = PowerwallData(
@@ -304,6 +327,8 @@ struct ContentView: View {
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
                     viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
+                    viewModel.siteName = "Home sweet home"
+                    // viewModel.errorMessage = "An error has occured"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         startAnimations = true
                     }
@@ -313,6 +338,22 @@ struct ContentView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         startAnimations = true
                     }
+                }
+                UIApplication.shared.isIdleTimerDisabled = viewModel.preventScreenSaver
+            }
+            .onDisappear {
+                startAnimations = false
+            }
+            .onMoveCommand { direction in
+                if direction == .up && viewModel.currentEnergySiteIndex > 0 {
+                    viewModel.currentEnergySiteIndex -= 1
+                    UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
+                    viewModel.fetchData()
+                }
+                if direction == .down && viewModel.currentEnergySiteIndex < viewModel.energySites.count - 1 {
+                    viewModel.currentEnergySiteIndex += 1
+                    UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
+                    viewModel.fetchData()
                 }
             }
         }

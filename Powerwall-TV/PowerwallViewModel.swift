@@ -8,40 +8,89 @@
 
 import Foundation
 import Combine
+import AuthenticationServices
+
+// Enum to define login options
+enum LoginMode: String, CaseIterable {
+    case local = "local"
+    case fleetAPI = "fleetAPI"
+}
 
 class PowerwallViewModel: ObservableObject {
-    // Published properties for SwiftUI binding
-    @Published var ipAddress: String
-    @Published var username: String
-    @Published var password: String
+    // Published properties for UI binding
+
+    // Local login
+    @Published var loginMode: LoginMode = LoginMode(rawValue: UserDefaults.standard.string(forKey: "loginMode") ?? "local") ?? .local
+    @Published var ipAddress: String = UserDefaults.standard.string(forKey: "gatewayIP") ?? ""
+    @Published var username: String = UserDefaults.standard.string(forKey: "username") ?? "customer"
+    @Published var password: String = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
+    @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
+    @Published var currentEnergySiteIndex: Int = UserDefaults.standard.integer(forKey: "currentEnergySiteIndex")
+    @Published var energySites: [Product] = []
+
     @Published var data: PowerwallData?
     @Published var batteryPercentage: BatteryPercentage?
     @Published var gridStatus: GridStatus?
     @Published var errorMessage: String?
-    
-    // URLSession instance to manage cookies across requests
-    private let urlSession: URLSession
+
+    // Tesla Fleet API credentials (replace with your actual values)
+    private let clientID = Secrets.clientID
+    private let clientSecret = Secrets.clientSecret
+    private let redirectURI = "powerwalltv://app/callback"
+    private let scopes = "openid energy_device_data offline_access"
+    private var wiggleWatts = 10.0
+
+    // Fleet API-specific properties
+    @Published var accessToken: String = KeychainWrapper.standard.string(forKey: "fleetAPI_accessToken") ?? ""
+    @Published var energySiteId: String?
+    @Published var siteName: String?
+    @Published var batteryPowerHistory: [HistoricalDataPoint] = []
+    @Published var batteryPercentageHistory: [HistoricalDataPoint] = []
+
+    private let isoFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
     private var cancellables = Set<AnyCancellable>()
 
-    init(ipAddress: String, username: String = "customer", password: String) {
-        self.ipAddress = ipAddress
-        self.username = username
-        self.password = password
-        // Use the shared URLSession to handle cookies automatically
-        let delegate = InsecureURLSessionDelegate()
-        self.urlSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+    // URLSession instances
+    private let localURLSession: URLSession  // For local, insecure connections
+    private let fleetURLSession = URLSession.shared  // For Fleet API
+
+    init() {
+        let delegate = InsecureURLSessionDelegate() // Custom delegate for local SSL bypass
+        self.localURLSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
     }
 
-    // Logs in to the Powerwall gateway to obtain an authentication cookie
+    // MARK: - Login Methods
+
+    // Logs in based on the selected login mode
     func login(completion: @escaping (Bool) -> Void) {
-        // Construct the login URL
+        switch loginMode {
+        case .local:
+            if ipAddress.isEmpty || password.isEmpty {
+                errorMessage = "Missing IP address or password for local login"
+                completion(false)
+                return
+            }
+            localLogin(ipAddress: ipAddress, password: password, completion: completion)
+        case .fleetAPI:
+            loginWithTeslaFleetAPI()
+            completion(true) // Asynchronous; handle completion in callback
+        }
+    }
+
+    // MARK: - Local Login
+
+    private func localLogin(ipAddress: String, password: String, completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: "https://\(ipAddress)/api/login/Basic") else {
-            self.errorMessage = "Invalid login URL"
+            errorMessage = "Invalid login URL"
             completion(false)
             return
         }
 
-        // Create the login payload as a dictionary
         let loginPayload: [String: Any] = [
             "username": "customer",
             "password": password,
@@ -49,21 +98,19 @@ class PowerwallViewModel: ObservableObject {
             "force_sm_off": false
         ]
 
-        // Serialize the payload to JSON
         guard let jsonData = try? JSONSerialization.data(withJSONObject: loginPayload) else {
-            self.errorMessage = "Failed to serialize login payload"
+            errorMessage = "Failed to serialize login payload"
             completion(false)
             return
         }
 
-        // Configure the POST request
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = jsonData
 
-        // Perform the login request
-        urlSession.dataTask(with: request) { data, response, error in
+        localURLSession.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
             if let error = error {
                 DispatchQueue.main.async {
                     self.errorMessage = "Login failed: \(error.localizedDescription)"
@@ -72,75 +119,265 @@ class PowerwallViewModel: ObservableObject {
                 return
             }
 
-            // Verify that we received an AuthCookie in the response
-            if let httpResponse = response as? HTTPURLResponse {
-                let cookies = HTTPCookie.cookies(withResponseHeaderFields: httpResponse.allHeaderFields as? [String: String] ?? [:], for: url)
-                if cookies.contains(where: { $0.name == "AuthCookie" }) {
-                    DispatchQueue.main.async {
-                        completion(true) // Login successful
-                    }
-                } else {
-                    DispatchQueue.main.async {
-                        self.errorMessage = "Login failed: No AuthCookie received"
-                        completion(false)
-                    }
+            if let httpResponse = response as? HTTPURLResponse,
+               HTTPCookie.cookies(withResponseHeaderFields: httpResponse.allHeaderFields as? [String: String] ?? [:], for: url).contains(where: { $0.name == "AuthCookie" }) {
+                DispatchQueue.main.async {
+                    completion(true) // Success
                 }
             } else {
                 DispatchQueue.main.async {
-                    self.errorMessage = "Login failed: Invalid response"
+                    self.errorMessage = "Login failed: No AuthCookie received"
                     completion(false)
                 }
             }
         }.resume()
     }
 
-    // Fetches data from the Powerwall API after successful login
-    func fetchData() {
-        // Ensure login before fetching data
-        login { success in
-            if success {
-                self.fetchDataAfterLogin()
-                self.fetchBatteryPercentage()
-                self.fetchGridStatus()
-            }
-            // If login fails, errorMessage is already set by the login function
-        }
-    }
+    // MARK: - Tesla Fleet API Login
 
-    func isOffGrid() -> Bool {
-        return gridStatus?.status ?? "" == "SystemIslandedActive"
-    }
+    private func loginWithTeslaFleetAPI() {
+        let state = UUID().uuidString
+        let authURLString = "https://auth.tesla.com/oauth2/v3/authorize?client_id=\(clientID)&redirect_uri=\(redirectURI)&response_type=code&scope=\(scopes)&state=\(state)"
 
-    // Private helper to fetch data using the authenticated session
-    private func fetchDataAfterLogin() {
-        // Construct the data URL (example endpoint: /api/meters/aggregates)
-        guard let url = URL(string: "https://\(ipAddress)/api/meters/aggregates") else {
-            self.errorMessage = "Invalid data URL"
+        guard let authURL = URL(string: authURLString) else {
+            errorMessage = "Invalid authorization URL"
             return
         }
 
-        // Configure the GET request
+        let authSession = ASWebAuthenticationSession(url: authURL, callbackURLScheme: "powerwalltv") { [weak self] callbackURL, error in
+            guard let self = self else { return }
+
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Login failed: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            guard let callbackURL = callbackURL,
+                  let code = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "code" })?.value else {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to retrieve authorization code"
+                }
+                return
+            }
+
+            self.exchangeCodeForToken(code: code)
+        }
+
+        authSession.start()
+    }
+
+    private func exchangeCodeForToken(code: String) {
+        guard let tokenURL = URL(string: "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token") else {
+            errorMessage = "Invalid token URL"
+            return
+        }
+
+        var request = URLRequest(url: tokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        let body = "grant_type=authorization_code&client_id=\(clientID)&client_secret=\(clientSecret)&code=\(code)&redirect_uri=\(redirectURI)&audience=https://fleet-api.prd.na.vn.cloud.tesla.com"
+        request.httpBody = body.data(using: .utf8)
+
+        fleetURLSession.dataTask(with: request) { [weak self] data, _, error in
+            guard let self = self else { return }
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Token exchange failed: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            guard let data = data,
+                  let tokenResponse = try? JSONDecoder().decode(TokenResponse.self, from: data) else {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to decode token response"
+                }
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.accessToken = tokenResponse.access_token
+                // Save the accessToken to Keychain
+                KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
+                if let refreshToken = tokenResponse.refresh_token {
+                    KeychainWrapper.standard.set(refreshToken, forKey: "fleetAPI_refreshToken")
+                }
+                if let expiresIn = tokenResponse.expires_in {
+                    let expirationDate = Date().addingTimeInterval(TimeInterval(expiresIn))
+                    UserDefaults.standard.set(expirationDate, forKey: "fleetAPI_tokenExpiration")
+                }
+                self.fetchEnergyProducts()
+            }
+        }.resume()
+    }
+
+    private func refreshAccessToken() {
+        guard let refreshToken = KeychainWrapper.standard.string(forKey: "fleetAPI_refreshToken") else {
+            errorMessage = "No refresh token available"
+            loginWithTeslaFleetAPI() // Fallback to full login
+            return
+        }
+
+        guard let tokenURL = URL(string: "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token") else {
+            errorMessage = "Invalid token URL"
+            return
+        }
+
+        var request = URLRequest(url: tokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        let body = "grant_type=refresh_token&client_id=\(clientID)&client_secret=\(clientSecret)&refresh_token=\(refreshToken)"
+        request.httpBody = body.data(using: .utf8)
+
+        fleetURLSession.dataTask(with: request) { [weak self] data, _, error in
+            guard let self = self else { return }
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Token refresh failed: \(error.localizedDescription)"
+                    self.loginWithTeslaFleetAPI() // Fallback to full login
+                }
+                return
+            }
+
+            guard let data = data,
+                  let tokenResponse = try? JSONDecoder().decode(TokenResponse.self, from: data) else {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to decode token response"
+                    self.loginWithTeslaFleetAPI()
+                }
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.accessToken = tokenResponse.access_token
+                KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
+                if let refreshToken = tokenResponse.refresh_token { // Some APIs issue new refresh tokens
+                    KeychainWrapper.standard.set(refreshToken, forKey: "fleetAPI_refreshToken")
+                }
+                if let expiresIn = tokenResponse.expires_in {
+                    let expirationDate = Date().addingTimeInterval(TimeInterval(expiresIn))
+                    UserDefaults.standard.set(expirationDate, forKey: "fleetAPI_tokenExpiration")
+                }
+                self.fetchFleetAPIData() // Retry the failed request
+            }
+        }.resume()
+    }
+
+    private func fetchEnergyProducts() {
+        if accessToken.isEmpty {
+            errorMessage = "No access token available"
+            return
+        }
+
+        guard let url = URL(string: "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/products") else {
+            errorMessage = "Invalid products URL"
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTaskPublisher(for: request)
+            .map { $0.data }
+            .decode(type: ProductsResponse.self, decoder: JSONDecoder())
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] completionResult in
+                if case .failure(let error) = completionResult {
+                    self?.errorMessage = "Failed to fetch products: \(error.localizedDescription)"
+                }
+            } receiveValue: { [weak self] productsResponse in
+                guard let self = self else { return }
+                let energySites = productsResponse.response.filter { $0.deviceType == "energy" }
+                self.energySites = energySites
+                if energySites.isEmpty {
+                    self.errorMessage = "No energy products found"
+                } else {
+                    // Adjust index if out of bounds
+                    if self.currentEnergySiteIndex >= energySites.count {
+                        self.currentEnergySiteIndex = 0
+                        UserDefaults.standard.set(0, forKey: "currentEnergySiteIndex")
+                    }
+                    self.fetchData()
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Data Fetching
+
+    func fetchData() {
+        self.errorMessage = nil
+        switch loginMode {
+        case .local:
+            // Ensure login before fetching data
+            login { success in
+                if success {
+                    self.fetchLocalDataAfterLogin()
+                    self.fetchLocalBatteryPercentage()
+                    self.fetchLocalGridStatus()
+                }
+                // If login fails, errorMessage is already set by the login function
+            }
+        case .fleetAPI:
+            if accessToken.isEmpty {
+                // No token, initiate login
+                login { success in
+                    if success {
+                        self.fetchEnergyProducts()
+                    }
+                    // If login fails, errorMessage is already set by the login function
+                }
+            }
+            if let expirationDate = UserDefaults.standard.object(forKey: "fleetAPI_tokenExpiration") as? Date,
+               Date() >= expirationDate {
+                self.refreshAccessToken()
+            }
+            if !self.energySites.isEmpty {
+                let currentSite = self.energySites[self.currentEnergySiteIndex]
+                if let id = currentSite.energySiteId, let name = currentSite.siteName {
+                    self.energySiteId = String(id)
+                    self.siteName = name
+                    self.fetchFleetAPIData()
+                }
+            } else {
+                self.fetchEnergyProducts()
+            }
+        }
+    }
+
+    private func fetchLocalDataAfterLogin() {
+        if ipAddress.isEmpty {
+            errorMessage = "Missing IP address"
+        }
+        guard let url = URL(string: "https://\(ipAddress)/api/meters/aggregates") else {
+            errorMessage = "Invalid data URL"
+            return
+        }
+
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
 
-        // Use Combine to fetch and decode the data
-        urlSession.dataTaskPublisher(for: request)
+        localURLSession.dataTaskPublisher(for: request)
             .map { $0.data }
             .decode(type: PowerwallData.self, decoder: JSONDecoder())
             .receive(on: DispatchQueue.main)
             .sink { [weak self] completion in
                 if case .failure(let error) = completion {
-                    self?.errorMessage = "Failed to fetch data: \(error.localizedDescription)"
+                    self?.errorMessage = "Failed to fetch local data: \(error.localizedDescription)"
                 }
             } receiveValue: { [weak self] data in
                 self?.data = data
-                self?.errorMessage = nil
             }
             .store(in: &cancellables)
     }
 
     // Fetches battery percentage from the /api/system_status/soe endpoint
-    private func fetchBatteryPercentage() {
+    private func fetchLocalBatteryPercentage() {
         guard let url = URL(string: "https://\(ipAddress)/api/system_status/soe") else {
             self.errorMessage = "Invalid battery percentage URL"
             return
@@ -149,7 +386,7 @@ class PowerwallViewModel: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
 
-        urlSession.dataTaskPublisher(for: request)
+        localURLSession.dataTaskPublisher(for: request)
             .map { $0.data }
             .decode(type: BatteryPercentage.self, decoder: JSONDecoder())
             .receive(on: DispatchQueue.main)
@@ -164,7 +401,7 @@ class PowerwallViewModel: ObservableObject {
     }
 
     // Fetches the grid connection status from the /api/system_status/grid_status endpoint
-    private func fetchGridStatus() {
+    private func fetchLocalGridStatus() {
         guard let url = URL(string: "https://\(ipAddress)/api/system_status/grid_status") else {
             self.errorMessage = "Invalid grid status URL"
             return
@@ -173,7 +410,7 @@ class PowerwallViewModel: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
 
-        urlSession.dataTaskPublisher(for: request)
+        localURLSession.dataTaskPublisher(for: request)
             .map { $0.data }
             .decode(type: GridStatus.self, decoder: JSONDecoder())
             .receive(on: DispatchQueue.main)
@@ -185,6 +422,218 @@ class PowerwallViewModel: ObservableObject {
                 self?.gridStatus = status
             }
             .store(in: &cancellables)
+    }
+
+    func isOffGrid() -> Bool {
+        return gridStatus?.status ?? "" == "SystemIslandedActive" || gridStatus?.status ?? "" == "Inactive"
+    }
+
+    func batteryCountString() -> String {
+        guard let batteryCount: Double = data?.battery.count else {
+            return ""
+        }
+        if batteryCount == 0 {
+            return ""
+        }
+        return String(format: " · %.0fx", batteryCount)
+    }
+
+    private func getHistoryDateRange() -> (start: String, end: String) {
+        // For the last 48 hours
+        let now = Date()
+        let end = isoFormatter.string(from: now)
+        let start = isoFormatter.string(from: now.addingTimeInterval(-48 * 3600))
+        return (start, end)
+    }
+
+    private func fetchFleetAPIData() {
+        if accessToken == "" {
+            errorMessage = "Must log in first"
+            return
+        }
+        guard let energySiteId = energySiteId,
+              let url = URL(string: "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/live_status") else {
+            errorMessage = "Must select an energy site first"
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTaskPublisher(for: request)
+            .map { $0.data }
+            .decode(type: FleetEnergySiteResponse.self, decoder: JSONDecoder())
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] completion in
+                if case .failure(let error) = completion {
+                    if (error as? URLError)?.code == .userAuthenticationRequired {
+                        self?.refreshAccessToken() // Attempt to refresh token
+                    } else {
+                        self?.errorMessage = "Failed to fetch Fleet API data: \(error.localizedDescription)"
+                    }
+                }
+            } receiveValue: { [weak self] data in
+                let powerwall = PowerwallData(
+                    battery: PowerwallData.Battery(instantPower: data.response.batteryPower, count: 0),
+                    load: PowerwallData.Load(instantPower: data.response.loadPower),
+                    solar: PowerwallData.Solar(instantPower: data.response.solarPower, energyExported: 0),
+                    site: PowerwallData.Site(instantPower: data.response.gridPower)
+                )
+                self?.data = powerwall
+                self?.batteryPercentage = BatteryPercentage(percentage: data.response.batteryPercentage)
+                self?.gridStatus = GridStatus(status: data.response.gridStatus)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func fetchPowerHistory(completion: @escaping (Result<[HistoricalDataPoint], Error>) -> Void) {
+        guard let energySiteId = energySiteId else {
+            completion(.failure(NSError(domain: "Missing energySiteId", code: 0, userInfo: nil)))
+            return
+        }
+
+        let (start, end) = getHistoryDateRange()
+        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/calendar_history?kind=energy&period=day&start_date=\(start)&end_date=\(end)&time_zone=Australia/Adelaide"
+        guard let url = URL(string: urlString) else {
+            completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            guard let data = data else {
+                completion(.failure(NSError(domain: "No data", code: 0, userInfo: nil)))
+                return
+            }
+            do {
+                let powerResponse = try JSONDecoder().decode(PowerHistoryResponse.self, from: data)
+                let dataPoints = powerResponse.response.time_series.map { point in
+                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.batteryPower - point.batteryFromSolar - point.batteryFromGrid, from: (point.batteryFromGrid + self.wiggleWatts) > point.batteryFromSolar ? PowerFrom.grid : PowerFrom.solar)
+                }
+                completion(.success(dataPoints))
+            } catch {
+                completion(.failure(error))
+            }
+        }.resume()
+    }
+
+    private func fetchSOEHistory(completion: @escaping (Result<[HistoricalDataPoint], Error>) -> Void) {
+        guard let energySiteId = energySiteId else {
+            completion(.failure(NSError(domain: "Missing energySiteId", code: 0, userInfo: nil)))
+            return
+        }
+
+        let (start, end) = getHistoryDateRange()
+        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/calendar_history?kind=soe&period=day&start_date=\(start)&end_date=\(end)&time_zone=Australia/Adelaide"
+        guard let url = URL(string: urlString) else {
+            completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            guard let data = data else {
+                completion(.failure(NSError(domain: "No data", code: 0, userInfo: nil)))
+                return
+            }
+            do {
+                let soeResponse = try JSONDecoder().decode(SOEHistoryResponse.self, from: data)
+                let dataPoints = soeResponse.response.time_series.map { point in
+                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.soe, from: nil)
+                }
+                completion(.success(dataPoints))
+            } catch {
+                completion(.failure(error))
+            }
+        }.resume()
+    }
+
+    func fetchFleetAPIHistory() {
+        fetchPowerHistory { result in
+            switch result {
+            case .success(let dataPoints):
+                DispatchQueue.main.async {
+                    self.batteryPowerHistory = dataPoints
+                }
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to fetch battery power history: \(error.localizedDescription)"
+                }
+            }
+        }
+
+        fetchSOEHistory { result in
+            switch result {
+            case .success(let dataPoints):
+                DispatchQueue.main.async {
+                    self.batteryPercentageHistory = dataPoints
+                }
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to fetch battery percentage history: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Data Models
+
+struct TokenResponse: Codable {
+    let access_token: String
+    let refresh_token: String?
+    let expires_in: Int?
+}
+
+struct ProductsResponse: Codable {
+    let response: [Product]
+    let count: Int
+}
+
+struct Product: Codable {
+    let deviceType: String?
+    let energySiteId: Int?
+    let siteName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case deviceType = "device_type"
+        case energySiteId = "energy_site_id"
+        case siteName = "site_name"
+    }
+}
+
+// Fleet response model
+struct FleetEnergySiteResponse: Codable {
+    let response: FleetLiveStatus
+}
+
+struct FleetLiveStatus: Codable {
+    let batteryPower: Double
+    let batteryPercentage: Double
+    let solarPower: Double
+    let loadPower: Double
+    let gridPower: Double
+    let gridStatus: String
+
+    enum CodingKeys: String, CodingKey {
+        case batteryPower = "battery_power"
+        case batteryPercentage = "percentage_charged"
+        case solarPower = "solar_power"
+        case loadPower = "load_power"
+        case gridPower = "grid_power"
+        case gridStatus = "grid_status"
     }
 }
 
@@ -243,4 +692,53 @@ struct GridStatus: Codable {
     enum CodingKeys: String, CodingKey {
         case status = "grid_status"
     }
+}
+
+// Historical power data from energy_history with kind="power"
+struct PowerHistoryResponse: Codable {
+    let response: PowerHistory
+}
+
+struct PowerHistory: Codable {
+    let time_series: [PowerDataPoint]
+}
+
+struct PowerDataPoint: Codable {
+    let timestamp: String
+    let batteryPower: Double
+    let batteryFromSolar: Double
+    let batteryFromGrid: Double
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case batteryPower = "battery_energy_exported"
+        case batteryFromSolar = "battery_energy_imported_from_solar"
+        case batteryFromGrid = "battery_energy_imported_from_grid"
+    }
+}
+
+// Historical state of charge data from energy_history with kind="soe"
+struct SOEHistoryResponse: Codable {
+    let response: SOEHistory
+}
+
+struct SOEHistory: Codable {
+    let time_series: [SOEDataPoint]
+}
+
+struct SOEDataPoint: Codable {
+    let timestamp: String
+    let soe: Double
+}
+
+// Generic structure for graph data points
+enum PowerFrom: String, CaseIterable {
+    case grid = "grid"
+    case solar = "solar"
+}
+
+struct HistoricalDataPoint {
+    let date: Date
+    let value: Double
+    let from: PowerFrom?
 }

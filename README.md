@@ -11,23 +11,30 @@ An AppleTV application to view the current state of your Tesla Powerwall via you
 
 ## Setup
 
+### Local network
+
 * [Connecting Powerwall to Wi-Fi](https://www.tesla.com/en_au/support/energy/powerwall/mobile-app/connecting-powerwall-wi-fi)
 * [Local API details](https://github.com/vloschiavo/powerwall2)
 * Then Visit the local network IP address of your Tesla Gateway and setup your username and password.
 
-## Sign in
+In this application:
 
-Use the details above to add to this application:
+* Select the "Local" tab in the Settings screen
+* Enter the IP Address of your Tesla Gateway
+* Enter the Username/email address you signed up with
+* Enter the Password you set (it may be the default Gateway password if you didn't change it)
+* Tap save
 
-* IP Address of your Tesla Gateway
-* Username/email address you signed up with
-* Password you set
+### Tesla Fleet API
+
+* Select the "Fleet API" tab in the Settings screen
+* The application will now ask you to login via your iPhone or iPad with your Tesla credentials via the Tesla website
+* Once approved, an access token will be saved to your AppleTV Keychain so it can access your Powerwall via the Tesla Fleet API cloud
+
+None of your Tesla credentials will be saved in the application or anywhere else. Only the access token, refresh token, and expiry date will be saved so that you don't need to authenticate each time you open the application.
 
 ## Privacy
 
-This application collects no personal data, and all information entered into it is only used to connect directly to your Powerwall via your own WiFi network.
+This application collects no personal data, and all information entered into it is only used to connect directly to your Powerwall via your own WiFi network, or directly to official Tesla Fleet API servers to retrieve Powerwall data remotely.
 
-## TODO
-
-* Add the ability to sign in with your Tesla Fleet API Key
-
+All connection tokens are only stored in your AppleTV's Keychain.
