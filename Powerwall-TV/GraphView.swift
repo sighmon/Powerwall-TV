@@ -11,9 +11,13 @@ import Charts
 
 struct GraphView: View {
     @ObservedObject var viewModel: PowerwallViewModel
+    @FocusState private var isGraphFocused: Bool
 
     func colorForPoint(_ point: HistoricalDataPoint) -> Color {
         if point.value >= 0 {
+            if point.to == PowerTo.grid {
+                return .gray
+            }
             return .blue
         } else if point.from == PowerFrom.solar {
             return .yellow
@@ -27,7 +31,7 @@ struct GraphView: View {
             // Battery Power Flow Chart
             Text("Powerwall")
                 .font(.title)
-            Text("YESTERDAY → TODAY · ENERGY FLOW · kWh")
+            Text("\(viewModel.currentDateLabel) · ENERGY FLOW · kWh")
                 .opacity(0.6)
                 .fontWeight(.bold)
                 .font(.footnote)
@@ -218,6 +222,17 @@ struct GraphView: View {
             if viewModel.loginMode == .fleetAPI {
                 viewModel.fetchFleetAPIHistory()
             }
+            isGraphFocused = true
+        }
+        .focusable() // Still needed to make it focusable
+        .focused($isGraphFocused) // Bind focus state
+        .onMoveCommand { direction in
+            if direction == .left {
+                viewModel.goToPreviousDay()
+            }
+            if direction == .right {
+                viewModel.goToNextDay()
+            }
         }
     }
 }
@@ -233,7 +248,7 @@ func interpolateZeroCrossing(start: HistoricalDataPoint, end: HistoricalDataPoin
     let crossingTime = startTime + ratio * (endTime - startTime)
     let crossingDate = Date(timeIntervalSince1970: crossingTime)
 
-    return HistoricalDataPoint(date: crossingDate, value: 0, from: start.from)
+    return HistoricalDataPoint(date: crossingDate, value: 0, from: start.from, to: start.to)
 }
 
 // Sample data generation functions
@@ -245,7 +260,8 @@ func generateSampleData() -> [HistoricalDataPoint] {
         let date = calendar.date(byAdding: .hour, value: -i, to: now)!
         let value = Double.random(in: -1000...1000) // Random power in watts
         let from = ((i % 2) == 0) ? PowerFrom.solar : PowerFrom.grid
-        dataPoints.append(HistoricalDataPoint(date: date, value: value, from: from))
+        let to = ((i % 2) == 0) ? PowerTo.grid : PowerTo.home
+        dataPoints.append(HistoricalDataPoint(date: date, value: value, from: from, to: to))
     }
     return dataPoints
 }
@@ -257,7 +273,7 @@ func generateSamplePercentageData() -> [HistoricalDataPoint] {
     for i in 0..<48 {
         let date = calendar.date(byAdding: .hour, value: -i, to: now)!
         let value = Double.random(in: 0...100) // Random percentage between 0% and 100%
-        dataPoints.append(HistoricalDataPoint(date: date, value: value, from: nil))
+        dataPoints.append(HistoricalDataPoint(date: date, value: value, from: nil, to: nil))
     }
     return dataPoints
 }
