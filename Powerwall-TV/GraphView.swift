@@ -9,6 +9,8 @@
 import SwiftUI
 import Charts
 
+var valuetoKw: Double = 84
+
 struct GraphView: View {
     @ObservedObject var viewModel: PowerwallViewModel
     @FocusState private var isGraphFocused: Bool
@@ -40,7 +42,7 @@ struct GraphView: View {
                 ForEach(viewModel.batteryPowerHistory, id: \.date) { point in
                     PointMark(
                         x: .value("Time", point.date),
-                        y: .value("Power (kW)", point.value / 100)
+                        y: .value("Power (kW)", point.value / valuetoKw)
                     )
                     .opacity(0) // Hide the points
                 }
@@ -61,7 +63,7 @@ struct GraphView: View {
                                     let zeroCrossing = interpolateZeroCrossing(start: start, end: end)
 
                                     // First segment: start to zeroCrossing
-                                    if let startPoint = proxy.position(for: (x: start.date, y: start.value / 100)),
+                                    if let startPoint = proxy.position(for: (x: start.date, y: start.value / valuetoKw)),
                                        let zeroPoint = proxy.position(for: (x: zeroCrossing.date, y: zeroCrossing.value / 100)) {
                                         let color = colorForPoint(start)
                                         let areaPath = Path { p in
@@ -92,7 +94,7 @@ struct GraphView: View {
 
                                     // Second segment: zeroCrossing to end
                                     if let zeroPoint = proxy.position(for: (x: zeroCrossing.date, y: zeroCrossing.value / 100)),
-                                       let endPoint = proxy.position(for: (x: end.date, y: end.value / 100)) {
+                                       let endPoint = proxy.position(for: (x: end.date, y: end.value / valuetoKw)) {
                                         let color = colorForPoint(end) // Updated to use end point
                                         let areaPath = Path { p in
                                             p.move(to: zeroPoint)
@@ -121,8 +123,8 @@ struct GraphView: View {
                                     }
                                 } else {
                                     // No zero crossing, draw the full segment
-                                    if let startPoint = proxy.position(for: (x: start.date, y: start.value / 100)),
-                                       let endPoint = proxy.position(for: (x: end.date, y: end.value / 100)) {
+                                    if let startPoint = proxy.position(for: (x: start.date, y: start.value / valuetoKw)),
+                                       let endPoint = proxy.position(for: (x: end.date, y: end.value / valuetoKw)) {
                                         let color = colorForPoint(start)
                                         let areaPath = Path { p in
                                             p.move(to: startPoint)
@@ -241,8 +243,8 @@ struct GraphView: View {
 func interpolateZeroCrossing(start: HistoricalDataPoint, end: HistoricalDataPoint) -> HistoricalDataPoint {
     let startTime = start.date.timeIntervalSince1970
     let endTime = end.date.timeIntervalSince1970
-    let startValue = start.value / 100 // Convert to kW
-    let endValue = end.value / 100
+    let startValue = start.value / valuetoKw // Convert to kW
+    let endValue = end.value / valuetoKw
 
     let ratio = startValue / (startValue - endValue)
     let crossingTime = startTime + ratio * (endTime - startTime)
