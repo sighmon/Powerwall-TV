@@ -63,12 +63,16 @@ struct SettingsView: View {
                         // Save login mode to UserDefaults
                         UserDefaults.standard.set(loginMode.rawValue, forKey: "loginMode")
 
-                        // Save or clear gateway settings based on login mode
+                        // Save settings
                         if loginMode == .local {
                             UserDefaults.standard.set(ipAddress, forKey: "gatewayIP")
                             UserDefaults.standard.set(username, forKey: "username")
                             KeychainWrapper.standard.set(password, forKey: "gatewayPassword")
                         }
+                        if loginMode == .fleetAPI {
+                            KeychainWrapper.standard.set(accessToken, forKey: "fleetAPI_accessToken")
+                        }
+
                         UserDefaults.standard.set(preventScreenSaver, forKey: "preventScreenSaver")
 
                         // Dismiss the settings view
