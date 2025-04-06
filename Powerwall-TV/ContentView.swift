@@ -285,7 +285,8 @@ struct ContentView: View {
                     username: $viewModel.username,
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
-                    preventScreenSaver: $viewModel.preventScreenSaver
+                    preventScreenSaver: $viewModel.preventScreenSaver,
+                    showingConfirmation: false
                 )
             }
             .sheet(isPresented: $showingGraph) {
