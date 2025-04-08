@@ -15,6 +15,7 @@ struct SettingsView: View {
     @Binding var password: String
     @Binding var accessToken: String
     @Binding var preventScreenSaver: Bool
+    @State var showingConfirmation: Bool
     @Environment(\.presentationMode) var presentationMode
 
     var body: some View {
@@ -55,6 +56,30 @@ struct SettingsView: View {
                                 .foregroundColor(.gray)
                     }
                 }
+
+                if loginMode == .fleetAPI {
+                    Section(header: Text("Delete all settings")) {
+                        Button("Delete") {
+                                showingConfirmation = true
+                            }
+                            .confirmationDialog(
+                                "Are you sure you want to delete all settings?",
+                                isPresented: $showingConfirmation,
+                                titleVisibility: .visible
+                            ) {
+                                Button("Delete", role: .destructive) {
+                                    accessToken = ""
+                                    KeychainWrapper.standard.set("", forKey: "fleetAPI_accessToken")
+                                    KeychainWrapper.standard.set("", forKey: "fleetAPI_refreshToken")
+                                    UserDefaults.standard.set(nil, forKey: "currentEnergySiteIndex")
+                                    UserDefaults.standard.set(nil, forKey: "fleetAPI_tokenExpiration")
+                                }
+                                Button("Cancel", role: .cancel) {
+                                    // Do nothing, dialog will dismiss
+                                }
+                            }
+                    }
+                }
             }
             .navigationTitle("Settings")
             .toolbar {
@@ -63,12 +88,16 @@ struct SettingsView: View {
                         // Save login mode to UserDefaults
                         UserDefaults.standard.set(loginMode.rawValue, forKey: "loginMode")
 
-                        // Save or clear gateway settings based on login mode
+                        // Save settings
                         if loginMode == .local {
                             UserDefaults.standard.set(ipAddress, forKey: "gatewayIP")
                             UserDefaults.standard.set(username, forKey: "username")
                             KeychainWrapper.standard.set(password, forKey: "gatewayPassword")
                         }
+                        if loginMode == .fleetAPI {
+                            KeychainWrapper.standard.set(accessToken, forKey: "fleetAPI_accessToken")
+                        }
+
                         UserDefaults.standard.set(preventScreenSaver, forKey: "preventScreenSaver")
 
                         // Dismiss the settings view
@@ -98,7 +127,8 @@ struct SettingsView_Previews: PreviewProvider {
             username: .constant("user@example.com"),
             password: .constant("password"),
             accessToken: .constant("accessToken"),
-            preventScreenSaver: .constant(false)
+            preventScreenSaver: .constant(false),
+            showingConfirmation: false
         )
     }
 }

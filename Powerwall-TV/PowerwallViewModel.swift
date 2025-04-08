@@ -46,6 +46,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var siteName: String?
     @Published var batteryPowerHistory: [HistoricalDataPoint] = []
     @Published var batteryPercentageHistory: [HistoricalDataPoint] = []
+    @Published var currentEndDate: Date = Date()
 
     private let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -438,11 +439,40 @@ class PowerwallViewModel: ObservableObject {
         return String(format: " · %.0fx", batteryCount)
     }
 
-    private func getHistoryDateRange() -> (start: String, end: String) {
-        // For the last 48 hours
+    func goToPreviousDay() {
+        currentEndDate = currentEndDate.addingTimeInterval(-24 * 3600) // Subtract 24 hours
+        fetchFleetAPIHistory()
+    }
+
+    func goToNextDay() {
+        let nextEndDate = currentEndDate.addingTimeInterval(24 * 3600) // Add 24 hours
         let now = Date()
-        let end = isoFormatter.string(from: now)
-        let start = isoFormatter.string(from: now.addingTimeInterval(-48 * 3600))
+        if nextEndDate > now {
+            currentEndDate = now // Clamp to current date/time
+        } else {
+            currentEndDate = nextEndDate
+        }
+        fetchFleetAPIHistory()
+    }
+
+    // Computed property to display the current date label
+    var currentDateLabel: String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(currentEndDate) {
+            return "Today"
+        } else if calendar.isDateInYesterday(currentEndDate) {
+            return "Yesterday"
+        } else {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            return formatter.string(from: currentEndDate)
+        }
+    }
+
+    // Updated getHistoryDateRange to use currentEndDate
+    private func getHistoryDateRange() -> (start: String, end: String) {
+        let end = isoFormatter.string(from: currentEndDate)
+        let start = isoFormatter.string(from: currentEndDate.addingTimeInterval(-24 * 3600))
         return (start, end)
     }
 
@@ -493,7 +523,8 @@ class PowerwallViewModel: ObservableObject {
         }
 
         let (start, end) = getHistoryDateRange()
-        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/calendar_history?kind=energy&period=day&start_date=\(start)&end_date=\(end)&time_zone=Australia/Adelaide"
+        let timeZone = TimeZone.current.identifier.isEmpty ? "UTC" : TimeZone.current.identifier
+        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/calendar_history?kind=energy&period=day&start_date=\(start)&end_date=\(end)&time_zone=\(timeZone)"
         guard let url = URL(string: urlString) else {
             completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
             return
@@ -514,7 +545,12 @@ class PowerwallViewModel: ObservableObject {
             do {
                 let powerResponse = try JSONDecoder().decode(PowerHistoryResponse.self, from: data)
                 let dataPoints = powerResponse.response.time_series.map { point in
-                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.batteryPower - point.batteryFromSolar - point.batteryFromGrid, from: (point.batteryFromGrid + self.wiggleWatts) > point.batteryFromSolar ? PowerFrom.grid : PowerFrom.solar)
+                    HistoricalDataPoint(
+                        date: self.isoFormatter.date(from: point.timestamp)!,
+                        value: point.batteryPower - point.batteryFromSolar - point.batteryFromGrid,
+                        from: (point.batteryFromGrid + self.wiggleWatts) > point.batteryFromSolar ? PowerFrom.grid : PowerFrom.solar,
+                        to: point.batteryToGrid > self.wiggleWatts ? PowerTo.grid : PowerTo.home
+                    )
                 }
                 completion(.success(dataPoints))
             } catch {
@@ -551,7 +587,7 @@ class PowerwallViewModel: ObservableObject {
             do {
                 let soeResponse = try JSONDecoder().decode(SOEHistoryResponse.self, from: data)
                 let dataPoints = soeResponse.response.time_series.map { point in
-                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.soe, from: nil)
+                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.soe, from: nil, to: nil)
                 }
                 completion(.success(dataPoints))
             } catch {
@@ -708,12 +744,14 @@ struct PowerDataPoint: Codable {
     let batteryPower: Double
     let batteryFromSolar: Double
     let batteryFromGrid: Double
+    let batteryToGrid: Double
 
     enum CodingKeys: String, CodingKey {
         case timestamp
         case batteryPower = "battery_energy_exported"
         case batteryFromSolar = "battery_energy_imported_from_solar"
         case batteryFromGrid = "battery_energy_imported_from_grid"
+        case batteryToGrid = "grid_energy_exported_from_battery"
     }
 }
 
@@ -737,8 +775,14 @@ enum PowerFrom: String, CaseIterable {
     case solar = "solar"
 }
 
+enum PowerTo: String, CaseIterable {
+    case grid = "grid"
+    case home = "home"
+}
+
 struct HistoricalDataPoint {
     let date: Date
     let value: Double
     let from: PowerFrom?
+    let to: PowerTo?
 }
