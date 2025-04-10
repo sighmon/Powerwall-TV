@@ -26,7 +26,9 @@ struct Powerwall_TVApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .frame(width: 1280, height: 720)
         }
         .modelContainer(sharedModelContainer)
+        .windowResizability(.contentSize)
     }
 }

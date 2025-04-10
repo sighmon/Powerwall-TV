@@ -18,6 +18,12 @@ struct SettingsView: View {
     @State var showingConfirmation: Bool
     @Environment(\.presentationMode) var presentationMode
 
+#if os(macOS)
+    private let toolbarPlacement = ToolbarItemPlacement.automatic
+#else
+    private let toolbarPlacement = ToolbarItemPlacement.navigationBarTrailing
+#endif
+
     var body: some View {
         NavigationView {
             Form {
@@ -83,7 +89,7 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: toolbarPlacement) {
                     Button("Save") {
                         // Save login mode to UserDefaults
                         UserDefaults.standard.set(loginMode.rawValue, forKey: "loginMode")
