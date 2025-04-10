@@ -36,8 +36,13 @@ struct SolarToGateway: Shape {
 struct GatewayToGrid: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
+#if os(macOS)
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY + 15))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + 33))
+#else
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
         path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + 35))
+#endif
         path.addArc(
             center: CGPoint(x: rect.minX + 6, y: rect.minY + 39),
             radius: 5.1,
