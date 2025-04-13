@@ -26,7 +26,9 @@ struct Powerwall_TVApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+#if os(macOS)
                 .frame(width: 1280, height: 720)
+#endif
         }
         .modelContainer(sharedModelContainer)
 #if os(macOS)
