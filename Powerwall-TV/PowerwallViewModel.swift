@@ -58,7 +58,12 @@ class PowerwallViewModel: ObservableObject {
 
     // URLSession instances
     private let localURLSession: URLSession  // For local, insecure connections
-    private let fleetURLSession = URLSession.shared  // For Fleet API
+    private let fleetURLSession: URLSession = {  // For Fleet API
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 9 // seconds (e.g., request-level timeout)
+        config.timeoutIntervalForResource = 9 // seconds (e.g., download task timeout)
+        return URLSession(configuration: config)
+    }()
 
     init() {
         let delegate = InsecureURLSessionDelegate() // Custom delegate for local SSL bypass
@@ -165,8 +170,9 @@ class PowerwallViewModel: ObservableObject {
 
             self.exchangeCodeForToken(code: code)
         }
-
+#if os(macOS)
         authSession.presentationContextProvider = self
+#endif
         authSession.start()
     }
 
@@ -788,6 +794,7 @@ struct HistoricalDataPoint {
     let to: PowerTo?
 }
 
+#if os(macOS)
 extension PowerwallViewModel: ASWebAuthenticationPresentationContextProviding {
     func isEqual(_ object: Any?) -> Bool {
         return true
@@ -845,3 +852,4 @@ extension PowerwallViewModel: ASWebAuthenticationPresentationContextProviding {
         return NSApplication.shared.windows.first ?? ASPresentationAnchor()
     }
 }
+#endif

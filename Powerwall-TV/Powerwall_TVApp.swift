@@ -29,6 +29,8 @@ struct Powerwall_TVApp: App {
                 .frame(width: 1280, height: 720)
         }
         .modelContainer(sharedModelContainer)
+#if os(macOS)
         .windowResizability(.contentSize)
+#endif
     }
 }
