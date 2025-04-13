@@ -166,6 +166,7 @@ class PowerwallViewModel: ObservableObject {
             self.exchangeCodeForToken(code: code)
         }
 
+        authSession.presentationContextProvider = self
         authSession.start()
     }
 
@@ -785,4 +786,62 @@ struct HistoricalDataPoint {
     let value: Double
     let from: PowerFrom?
     let to: PowerTo?
+}
+
+extension PowerwallViewModel: ASWebAuthenticationPresentationContextProviding {
+    func isEqual(_ object: Any?) -> Bool {
+        return true
+    }
+
+    var hash: Int {
+        return 0
+    }
+
+    var superclass: AnyClass? {
+        return PowerwallViewModel.self
+    }
+
+    func `self`() -> Self {
+        return self
+    }
+
+    func perform(_ aSelector: Selector!) -> Unmanaged<AnyObject>! {
+        return nil
+    }
+
+    func perform(_ aSelector: Selector!, with object: Any!) -> Unmanaged<AnyObject>! {
+        return nil
+    }
+
+    func perform(_ aSelector: Selector!, with object1: Any!, with object2: Any!) -> Unmanaged<AnyObject>! {
+        return nil
+    }
+
+    func isProxy() -> Bool {
+        return true
+    }
+
+    func isKind(of aClass: AnyClass) -> Bool {
+        return true
+    }
+
+    func isMember(of aClass: AnyClass) -> Bool {
+        return true
+    }
+
+    func conforms(to aProtocol: Protocol) -> Bool {
+        return true
+    }
+
+    func responds(to aSelector: Selector!) -> Bool {
+        return true
+    }
+
+    var description: String {
+        return "Login with your Tesla account to see your Powerwall statistics"
+    }
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        return NSApplication.shared.windows.first ?? ASPresentationAnchor()
+    }
 }
