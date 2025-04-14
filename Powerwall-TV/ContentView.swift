@@ -46,23 +46,39 @@ struct ContentView: View {
                                     if (viewModel.siteName != nil) {
                                         Text(viewModel.siteName ?? "")
                                             .fontWeight(.bold)
+#if os(macOS)
+                                            .font(.title2)
+#else
                                             .font(.headline)
+#endif
                                             .padding(.bottom)
                                     }
                                     if data.solar.energyExported > 0 {
                                         Text("\(data.solar.energyExported / 1000, specifier: "%.0f") kWh")
                                             .fontWeight(.bold)
+#if os(macOS)
+                                            .font(.title2)
+#else
                                             .font(.headline)
+#endif
                                         Text("ENERGY GENERATED")
                                             .opacity(0.6)
                                             .fontWeight(.bold)
+#if os(macOS)
+                                            .font(.subheadline)
+#else
                                             .font(.footnote)
+#endif
                                             .padding(.bottom)
                                     }
                                     if let errorMessage = viewModel.errorMessage {
                                         Text("Error: \(errorMessage)")
                                             .fontWeight(.bold)
+#if os(macOS)
+                                            .font(.subheadline)
+#else
                                             .font(.footnote)
+#endif
                                             .foregroundColor(.red)
                                     }
                                 }
@@ -83,11 +99,19 @@ struct ContentView: View {
                                 VStack {
                                     Text("\(data.solar.instantPower / 1000, specifier: "%.3f") kW")
                                         .fontWeight(.bold)
+#if os(macOS)
+                                        .font(.title2)
+#else
                                         .font(.headline)
+#endif
                                     Text("SOLAR")
                                         .opacity(0.6)
                                         .fontWeight(.bold)
+#if os(macOS)
+                                        .font(.subheadline)
+#else
                                         .font(.footnote)
+#endif
                                 }
                             }
                             Spacer()
@@ -107,11 +131,19 @@ struct ContentView: View {
                                 VStack {
                                     Text("\(data.load.instantPower / 1000, specifier: "%.3f") kW")
                                         .fontWeight(.bold)
+#if os(macOS)
+                                        .font(.title2)
+#else
                                         .font(.headline)
+#endif
                                     Text("HOME")
                                         .opacity(0.6)
                                         .fontWeight(.bold)
+#if os(macOS)
+                                        .font(.subheadline)
+#else
                                         .font(.footnote)
+#endif
                                 }
                             }
                             Spacer()
@@ -127,11 +159,19 @@ struct ContentView: View {
                                 VStack {
                                     Text("\(data.battery.instantPower / 1000, specifier: "%.3f") kW · \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
                                         .fontWeight(.bold)
+#if os(macOS)
+                                        .font(.title2)
+#else
                                         .font(.headline)
+#endif
                                     Text("POWERWALL\(viewModel.batteryCountString())")
                                         .opacity(0.6)
                                         .fontWeight(.bold)
+#if os(macOS)
+                                        .font(.subheadline)
+#else
                                         .font(.footnote)
+#endif
                                 }
                             }
 #if os(macOS)
@@ -175,11 +215,19 @@ struct ContentView: View {
                                 VStack {
                                     Text("\(data.site.instantPower / 1000, specifier: "%.3f") kW")
                                         .fontWeight(.bold)
+#if os(macOS)
+                                        .font(.title2)
+#else
                                         .font(.headline)
+#endif
                                     Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID")
                                         .opacity(viewModel.isOffGrid() ? 1.0 : 0.6)
                                         .fontWeight(.bold)
+#if os(macOS)
+                                        .font(.subheadline)
+#else
                                         .font(.footnote)
+#endif
                                         .foregroundColor(viewModel.isOffGrid() ? .orange : .white)
                                 }
                             }
@@ -346,7 +394,11 @@ struct ContentView: View {
                                 Text("Loading...")
                                     .opacity(0.6)
                                     .fontWeight(.bold)
+#if os(macOS)
+                                    .font(.subheadline)
+#else
                                     .font(.footnote)
+#endif
                             }
                         }
                     }

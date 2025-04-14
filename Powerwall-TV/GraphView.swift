@@ -236,6 +236,9 @@ struct GraphView: View {
                 viewModel.goToNextDay()
             }
         }
+#if os(macOS)
+        .frame(minWidth: 1000)
+#endif
     }
 }
 
