@@ -414,10 +414,19 @@ struct ContentView: View {
                             ZStack {
                                 Circle()
                                     .fill(Color.gray)
+#if os(macOS)
+                                    .frame(width: 15, height: 15)
+#else
                                     .frame(width: 30, height: 30)
+#endif
                                 Image(systemName: "gear")
+#if os(macOS)
+                                    .font(.largeTitle)
+                                    .frame(width: 40, height: 40)
+#else
                                     .font(.title2)
                                     .frame(width: 80, height: 80)
+#endif
                             }
                         }
                         .accessibilityLabel("Settings")
@@ -428,8 +437,13 @@ struct ContentView: View {
                             }) {
                                 ZStack {
                                     Image(systemName: "chart.bar.xaxis.ascending.badge.clock")
+#if os(macOS)
+                                        .font(.title2)
+                                        .frame(width: 40, height: 40)
+#else
                                         .font(.title3)
                                         .frame(width: 80, height: 80)
+#endif
                                 }
                             }
                             .accessibilityLabel("Chart")
