@@ -86,6 +86,9 @@ struct SettingsView: View {
                             }
                     }
                 }
+                Text("Version: \(appVersionAndBuild())")
+                    .font(.footnote)
+                    .opacity(0.6)
             }
             .navigationTitle("Settings")
             .toolbar {
@@ -111,10 +114,8 @@ struct SettingsView: View {
                     }
                 }
             }
+            .padding()
         }
-        Text(appVersionAndBuild())
-            .font(.footnote)
-            .opacity(0.6)
     }
 }
 
