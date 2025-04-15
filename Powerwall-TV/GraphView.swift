@@ -155,7 +155,11 @@ struct GraphView: View {
                             }
                         }
                     }
+#if os(macOS)
+                    .padding(.leading, 22)
+#else
                     .padding(.leading, 40)
+#endif
                 }
             }
             .chartXAxis {
