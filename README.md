@@ -1,8 +1,10 @@
 # Powerwall for AppleTV
 
-An AppleTV application to view the current state of your Tesla Powerwall via your local network.
+An AppleTV/macOS application to view the current state of your Tesla Powerwall via your local network or Tesla Fleet API.
 
 <img src="powerwall-tv.png" width="48%" /> <img src="powerwall-tv.gif" width="48%" />
+
+<img src="powerwall-tv-macos.png" width="48%" /> <img src="powerwall-tv-macos-2.png" width="48%" />
 
 ## Download
 
