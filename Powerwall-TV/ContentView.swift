@@ -17,6 +17,11 @@ struct ContentView: View {
     @State private var showingGraph = false
     @State private var wiggleWatts = 40.0
     @State private var startAnimations = false
+#if os(macOS)
+    private let powerwallPercentageWidth: Double = 4
+#else
+    private let powerwallPercentageWidth: Double = 5
+#endif
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
     init() {
@@ -193,7 +198,7 @@ struct ContentView: View {
                                 GeometryReader { geometry in
                                     Rectangle()
                                         .fill(Color.green) // Lime green color
-                                        .frame(width: 5, height: geometry.size.height * (viewModel.batteryPercentage?.percentage ?? 0 / 100))
+                                        .frame(width: powerwallPercentageWidth, height: geometry.size.height * (viewModel.batteryPercentage?.percentage ?? 0 / 100))
                                         .cornerRadius(1)
                                 }
 #if os(macOS)

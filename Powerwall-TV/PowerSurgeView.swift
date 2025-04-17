@@ -85,6 +85,11 @@ struct PowerSurgeView<Curve: Shape>: View {
     var startOffset: Double
     let curve: Curve
     var shouldStart: Bool
+#if os(macOS)
+    let lineWidth: Double = 5
+#else
+    let lineWidth: Double = 6
+#endif
 
     @State private var startFraction: CGFloat
     @State private var direction: Bool
@@ -126,11 +131,11 @@ struct PowerSurgeView<Curve: Shape>: View {
     var body: some View {
         ZStack {
             curve
-                .stroke(Color.gray, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .stroke(Color.gray, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .opacity(0.0)
             curve
                 .trim(from: startFraction, to: startFraction + 1.0)
-                .stroke(color, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .opacity(opacity)
         }
         .onAppear {
