@@ -486,7 +486,7 @@ struct ContentView: View {
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
                     viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
-                } else if !viewModel.ipAddress.isEmpty {
+                } else if !viewModel.ipAddress.isEmpty || !viewModel.accessToken.isEmpty {
                     viewModel.fetchData()
                 }
             }
