@@ -58,7 +58,12 @@ class PowerwallViewModel: ObservableObject {
 
     // URLSession instances
     private let localURLSession: URLSession  // For local, insecure connections
-    private let fleetURLSession = URLSession.shared  // For Fleet API
+    private let fleetURLSession: URLSession = {  // For Fleet API
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 9 // seconds (e.g., request-level timeout)
+        config.timeoutIntervalForResource = 9 // seconds (e.g., download task timeout)
+        return URLSession(configuration: config)
+    }()
 
     init() {
         let delegate = InsecureURLSessionDelegate() // Custom delegate for local SSL bypass
@@ -165,7 +170,9 @@ class PowerwallViewModel: ObservableObject {
 
             self.exchangeCodeForToken(code: code)
         }
-
+#if os(macOS)
+        authSession.presentationContextProvider = self
+#endif
         authSession.start()
     }
 
@@ -786,3 +793,63 @@ struct HistoricalDataPoint {
     let from: PowerFrom?
     let to: PowerTo?
 }
+
+#if os(macOS)
+extension PowerwallViewModel: ASWebAuthenticationPresentationContextProviding {
+    func isEqual(_ object: Any?) -> Bool {
+        return true
+    }
+
+    var hash: Int {
+        return 0
+    }
+
+    var superclass: AnyClass? {
+        return PowerwallViewModel.self
+    }
+
+    func `self`() -> Self {
+        return self
+    }
+
+    func perform(_ aSelector: Selector!) -> Unmanaged<AnyObject>! {
+        return nil
+    }
+
+    func perform(_ aSelector: Selector!, with object: Any!) -> Unmanaged<AnyObject>! {
+        return nil
+    }
+
+    func perform(_ aSelector: Selector!, with object1: Any!, with object2: Any!) -> Unmanaged<AnyObject>! {
+        return nil
+    }
+
+    func isProxy() -> Bool {
+        return true
+    }
+
+    func isKind(of aClass: AnyClass) -> Bool {
+        return true
+    }
+
+    func isMember(of aClass: AnyClass) -> Bool {
+        return true
+    }
+
+    func conforms(to aProtocol: Protocol) -> Bool {
+        return true
+    }
+
+    func responds(to aSelector: Selector!) -> Bool {
+        return true
+    }
+
+    var description: String {
+        return "Login with your Tesla account to see your Powerwall statistics"
+    }
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        return NSApplication.shared.windows.first ?? ASPresentationAnchor()
+    }
+}
+#endif

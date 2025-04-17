@@ -155,7 +155,11 @@ struct GraphView: View {
                             }
                         }
                     }
+#if os(macOS)
+                    .padding(.leading, 22)
+#else
                     .padding(.leading, 40)
+#endif
                 }
             }
             .chartXAxis {
@@ -236,6 +240,9 @@ struct GraphView: View {
                 viewModel.goToNextDay()
             }
         }
+#if os(macOS)
+        .frame(minWidth: 1000)
+#endif
     }
 }
 
