@@ -476,10 +476,22 @@ class PowerwallViewModel: ObservableObject {
         }
     }
 
+    // Return 23:59:59 on this day if it's not today so we see full graph data
+    private func endOfDayIfNeeded(_ date: Date) -> Date {
+        let cal = Calendar.current
+        guard !cal.isDateInToday(date) else { return date }
+
+        return cal.date(
+            byAdding: DateComponents(day: 1, second: -1),
+            to: cal.startOfDay(for: date)
+        ) ?? date
+    }
+
     // Updated getHistoryDateRange to use currentEndDate
     private func getHistoryDateRange() -> (start: String, end: String) {
-        let end = isoFormatter.string(from: currentEndDate)
-        let start = isoFormatter.string(from: currentEndDate.addingTimeInterval(-24 * 3600))
+        let effectiveEnd = endOfDayIfNeeded(currentEndDate)
+        let end = isoFormatter.string(from: effectiveEnd)
+        let start = isoFormatter.string(from: effectiveEnd.addingTimeInterval(-24 * 3600))
         return (start, end)
     }
 
@@ -490,7 +502,7 @@ class PowerwallViewModel: ObservableObject {
         }
         guard let energySiteId = energySiteId,
               let url = URL(string: "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/live_status") else {
-            errorMessage = "Must select an energy site first"
+            errorMessage = "No energy site ID, refreshing token"
             return
         }
 

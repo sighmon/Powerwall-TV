@@ -15,6 +15,12 @@ struct GraphView: View {
     @ObservedObject var viewModel: PowerwallViewModel
     @FocusState private var isGraphFocused: Bool
 
+#if os(macOS)
+    private let maxChartHeight = (NSScreen.main?.visibleFrame.height ?? 600) / 2
+#else
+    private let maxChartHeight: CGFloat = 600
+#endif
+
     func colorForPoint(_ point: HistoricalDataPoint) -> Color {
         if point.value >= 0 {
             if point.to == PowerTo.grid {
@@ -47,7 +53,7 @@ struct GraphView: View {
                     .opacity(0) // Hide the points
                 }
             }
-            .frame(height: 600)
+            .frame(height: maxChartHeight)
             .chartOverlay { proxy in
                 GeometryReader { geometry in
                     ZStack {
@@ -210,7 +216,7 @@ struct GraphView: View {
                     )
                 }
             }
-            .frame(height: 200)
+            .frame(height: maxChartHeight / 3)
             .foregroundColor(.green)
             .chartXAxis {
                 AxisMarks(values: .stride(by: .hour, count: 3)) { _ in
