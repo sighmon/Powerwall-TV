@@ -542,7 +542,7 @@ class PowerwallViewModel: ObservableObject {
         }
 
         let (start, end) = getHistoryDateRange()
-        let timeZone = TimeZone.current.identifier.isEmpty ? "UTC" : TimeZone.current.identifier
+        let timeZone = TimeZone.current.identifier.isEmpty ? "Etc/UTC" : TimeZone.current.identifier
         let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/calendar_history?kind=energy&period=day&start_date=\(start)&end_date=\(end)&time_zone=\(timeZone)"
         guard let url = URL(string: urlString) else {
             completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
