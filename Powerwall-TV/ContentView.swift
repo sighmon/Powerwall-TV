@@ -23,6 +23,7 @@ struct ContentView: View {
     private let powerwallPercentageWidth: Double = 5
 #endif
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
+    private let timerTodaysTotal = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     init() {
         _viewModel = StateObject(wrappedValue: PowerwallViewModel())
@@ -58,15 +59,17 @@ struct ContentView: View {
 #endif
                                             .padding(.bottom)
                                     }
-                                    if data.solar.energyExported > 0 {
-                                        Text("\(data.solar.energyExported / 1000, specifier: "%.0f") kWh")
+                                    if data.solar.energyExported > 0 || (viewModel.solarEnergyTodayWh != nil) {
+                                        let exportedEnergy = (data.solar.energyExported > 0 ? data.solar.energyExported : viewModel.solarEnergyTodayWh ?? 0) / 1000
+                                        let specifier = exportedEnergy < 1000 ? "%.3f" : "%.0f"
+                                        Text("\(exportedEnergy, specifier: specifier) kWh")
                                             .fontWeight(.bold)
 #if os(macOS)
                                             .font(.title2)
 #else
                                             .font(.headline)
 #endif
-                                        Text("ENERGY GENERATED")
+                                        Text("ENERGY GENERATED \(data.solar.energyExported > 0 ? "" : "TODAY")")
                                             .opacity(0.6)
                                             .fontWeight(.bold)
 #if os(macOS)
@@ -490,6 +493,11 @@ struct ContentView: View {
                     viewModel.fetchData()
                 }
             }
+            .onReceive(timerTodaysTotal) { _ in
+                if !viewModel.accessToken.isEmpty {
+                    viewModel.fetchSolarEnergyToday()
+                }
+            }
             .onAppear {
                 if demo {
                     viewModel.ipAddress = "demo"
@@ -532,11 +540,13 @@ struct ContentView: View {
                     viewModel.currentEnergySiteIndex -= 1
                     UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
                     viewModel.fetchData()
+                    viewModel.fetchSolarEnergyToday()
                 }
                 if direction == .down && viewModel.currentEnergySiteIndex < viewModel.energySites.count - 1 {
                     viewModel.currentEnergySiteIndex += 1
                     UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
                     viewModel.fetchData()
+                    viewModel.fetchSolarEnergyToday()
                 }
             }
         }

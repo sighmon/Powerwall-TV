@@ -47,6 +47,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var batteryPowerHistory: [HistoricalDataPoint] = []
     @Published var batteryPercentageHistory: [HistoricalDataPoint] = []
     @Published var currentEndDate: Date = Date()
+    @Published var solarEnergyTodayWh: Double?
 
     private let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -351,6 +352,9 @@ class PowerwallViewModel: ObservableObject {
                     self.energySiteId = String(id)
                     self.siteName = name
                     self.fetchFleetAPIData()
+                    if (self.solarEnergyTodayWh == nil) {
+                        self.fetchSolarEnergyToday()
+                    }
                 }
             } else {
                 self.fetchEnergyProducts()
@@ -578,6 +582,36 @@ class PowerwallViewModel: ObservableObject {
         }.resume()
     }
 
+    func fetchSolarEnergyToday() {
+        guard let energySiteId = energySiteId else { return }
+
+        // UTC timestamps in ISO-8601 so we match the cloud API
+        let startOfDay = Calendar.current.startOfDay(for: Date())
+        let start = isoFormatter.string(from: startOfDay)
+        let end   = isoFormatter.string(from: Date())
+        let tz    = TimeZone.current.identifier.isEmpty ? "Etc/UTC" : TimeZone.current.identifier
+
+        let urlStr = """
+            https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\
+            \(energySiteId)/calendar_history?kind=energy&period=day&\
+            start_date=\(start)&end_date=\(end)&time_zone=\(tz)
+            """
+        guard let url = URL(string: urlStr) else { return }
+
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTask(with: req) { [weak self] data, _, error in
+            guard let data = data,
+                  let payload = try? JSONDecoder().decode(PowerHistoryResponse.self, from: data)
+            else { return }
+
+            let totalWh = payload.response.time_series.reduce(0) { $0 + ($1.solarEnergyExported ?? 0) }
+
+            DispatchQueue.main.async { self?.solarEnergyTodayWh = totalWh }
+        }.resume()
+    }
+
     private func fetchSOEHistory(completion: @escaping (Result<[HistoricalDataPoint], Error>) -> Void) {
         guard let energySiteId = energySiteId else {
             completion(.failure(NSError(domain: "Missing energySiteId", code: 0, userInfo: nil)))
@@ -764,6 +798,7 @@ struct PowerDataPoint: Codable {
     let batteryFromSolar: Double
     let batteryFromGrid: Double
     let batteryToGrid: Double
+    let solarEnergyExported: Double?
 
     enum CodingKeys: String, CodingKey {
         case timestamp
@@ -771,6 +806,7 @@ struct PowerDataPoint: Codable {
         case batteryFromSolar = "battery_energy_imported_from_solar"
         case batteryFromGrid = "battery_energy_imported_from_grid"
         case batteryToGrid = "grid_energy_exported_from_battery"
+        case solarEnergyExported  = "solar_energy_exported"
     }
 }
 
