@@ -461,6 +461,7 @@ struct ContentView: View {
                 }
             }
             .padding()
+#if os(macOS)
             .sheet(isPresented: $showingSettings) {
                 SettingsView(
                     loginMode: $viewModel.loginMode,
@@ -471,10 +472,46 @@ struct ContentView: View {
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showingConfirmation: false
                 )
+                .background(
+                    Color.clear
+                        .background(.regularMaterial)
+                        .ignoresSafeArea()
+                )
             }
             .sheet(isPresented: $showingGraph) {
                 GraphView(viewModel: viewModel)
+                    .background(
+                        Color.clear
+                            .background(.regularMaterial)
+                            .ignoresSafeArea()
+                    )
             }
+#else
+            .fullScreenCover(isPresented: $showingSettings) {
+                SettingsView(
+                    loginMode: $viewModel.loginMode,
+                    ipAddress: $viewModel.ipAddress,
+                    username: $viewModel.username,
+                    password: $viewModel.password,
+                    accessToken: $viewModel.accessToken,
+                    preventScreenSaver: $viewModel.preventScreenSaver,
+                    showingConfirmation: false
+                )
+                .background(
+                    Color.clear
+                        .background(.regularMaterial)
+                        .ignoresSafeArea()
+                )
+            }
+            .fullScreenCover(isPresented: $showingGraph) {
+                GraphView(viewModel: viewModel)
+                    .background(
+                        Color.clear
+                            .background(.regularMaterial)
+                            .ignoresSafeArea()
+                    )
+            }
+#endif
             .onReceive(timer) { _ in
                 if viewModel.ipAddress == "demo" {
                     let homeLoad = Double(arc4random_uniform(4096)) + 256
