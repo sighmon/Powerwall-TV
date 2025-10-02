@@ -420,16 +420,11 @@ struct ContentView: View {
                             showingSettings = true
                         }) {
                             ZStack {
-                                Circle()
-                                    .fill(Color.gray)
-#if os(macOS)
-                                    .frame(width: 15, height: 15)
-#else
-                                    .frame(width: 30, height: 30)
-#endif
                                 Image(systemName: "gear")
 #if os(macOS)
-                                    .font(.largeTitle)
+                                    .symbolRenderingMode(.hierarchical)
+                                    .foregroundStyle(.primary)
+                                    .font(.system(size: 20, weight: .semibold))
                                     .frame(width: 40, height: 40)
 #else
                                     .font(.title2)
@@ -437,7 +432,10 @@ struct ContentView: View {
 #endif
                             }
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
                         .accessibilityLabel("Settings")
+                        .environment(\.colorScheme, .dark)
 
                         if viewModel.loginMode == .fleetAPI {
                             Button(action: {
@@ -446,7 +444,9 @@ struct ContentView: View {
                                 ZStack {
                                     Image(systemName: "chart.bar.xaxis.ascending.badge.clock")
 #if os(macOS)
-                                        .font(.title2)
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .symbolRenderingMode(.hierarchical)
+                                        .foregroundStyle(.primary)
                                         .frame(width: 40, height: 40)
 #else
                                         .font(.title3)
@@ -454,7 +454,10 @@ struct ContentView: View {
 #endif
                                 }
                             }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
                             .accessibilityLabel("Chart")
+                            .environment(\.colorScheme, .dark)
                         }
                         Spacer()
                     }
