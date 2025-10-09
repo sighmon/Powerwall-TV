@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var showingGraph = false
     @State private var wiggleWatts = 40.0
     @State private var startAnimations = false
+    @FocusState private var hasKeyboardFocus: Bool
 #if os(macOS)
     private let powerwallPercentageWidth: Double = 4
 #else
@@ -591,6 +592,29 @@ struct ContentView: View {
             }
         }
         .background(Color(red: 22/255, green: 23/255, blue: 24/255))
+        .focusable(true)
+        .focused($hasKeyboardFocus)
+        .onAppear {
+            hasKeyboardFocus = true
+        }
+        .onKeyPress(.upArrow, phases: .down) { _ in
+            updateEnergySite(-1)
+            return .handled
+        }
+        .onKeyPress(.downArrow, phases: .down) { _ in
+            updateEnergySite(+1)
+            return .handled
+        }
+    }
+
+    private func updateEnergySite(_ delta: Int) {
+        let next = max(0, min(viewModel.currentEnergySiteIndex + delta,
+                              max(0, viewModel.energySites.count - 1)))
+        guard next != viewModel.currentEnergySiteIndex else { return }
+        viewModel.currentEnergySiteIndex = next
+        UserDefaults.standard.set(next, forKey: "currentEnergySiteIndex")
+        viewModel.fetchData()
+        viewModel.fetchSolarEnergyToday()
     }
 }
 
