@@ -48,6 +48,8 @@ class PowerwallViewModel: ObservableObject {
     @Published var batteryPercentageHistory: [HistoricalDataPoint] = []
     @Published var currentEndDate: Date = Date()
     @Published var solarEnergyTodayWh: Double?
+    private var fleetRegionResolved: Bool = false
+    @Published private(set) var fleetBaseURL: String = "https://fleet-api.prd.na.vn.cloud.tesla.com"
 
     private let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -218,6 +220,7 @@ class PowerwallViewModel: ObservableObject {
                     let expirationDate = Date().addingTimeInterval(TimeInterval(expiresIn))
                     UserDefaults.standard.set(expirationDate, forKey: "fleetAPI_tokenExpiration")
                 }
+                self.resolveRegionBaseURL()
                 self.fetchEnergyProducts()
             }
         }.resume()
@@ -271,9 +274,38 @@ class PowerwallViewModel: ObservableObject {
                     let expirationDate = Date().addingTimeInterval(TimeInterval(expiresIn))
                     UserDefaults.standard.set(expirationDate, forKey: "fleetAPI_tokenExpiration")
                 }
+                self.resolveRegionBaseURL()
                 self.fetchFleetAPIData() // Retry the failed request
             }
         }.resume()
+    }
+
+    private func resolveRegionBaseURL() {
+        if fleetRegionResolved || accessToken.isEmpty {
+            return
+        }
+        let candidates = [
+            "https://fleet-api.prd.na.vn.cloud.tesla.com",
+            "https://fleet-api.prd.eu.vn.cloud.tesla.com"
+            // (China requires separate app/flow)
+        ]
+        for base in candidates {
+            var request = URLRequest(url: URL(string: "\(base)/api/1/users/region")!)
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            let semaphore = DispatchSemaphore(value: 0)
+            fleetURLSession.dataTask(with: request) { data, resp, _ in
+                defer { semaphore.signal() }
+                guard let data = data,
+                      let info = try? JSONDecoder().decode(RegionResponse.self, from: data),
+                      let url = info.response.fleet_api_base_url, !url.isEmpty else { return }
+                DispatchQueue.main.async {
+                    self.fleetBaseURL = url
+                    self.fleetRegionResolved = true
+                }
+            }.resume()
+            semaphore.wait(timeout: .now() + 2) // quick try; fall through to next region if no result
+            if fleetBaseURL.hasPrefix("https://fleet-api.prd.") { break }
+        }
     }
 
     private func fetchEnergyProducts() {
@@ -282,7 +314,7 @@ class PowerwallViewModel: ObservableObject {
             return
         }
 
-        guard let url = URL(string: "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/products") else {
+        guard let url = URL(string: "\(fleetBaseURL)/api/1/products") else {
             errorMessage = "Invalid products URL"
             return
         }
@@ -301,7 +333,7 @@ class PowerwallViewModel: ObservableObject {
                 }
             } receiveValue: { [weak self] productsResponse in
                 guard let self = self else { return }
-                let energySites = productsResponse.response.filter { $0.deviceType == "energy" }
+                let energySites = productsResponse.response.filter { $0.energySiteId != nil }
                 self.energySites = energySites
                 if energySites.isEmpty {
                     self.errorMessage = "No energy products found"
@@ -346,15 +378,16 @@ class PowerwallViewModel: ObservableObject {
                Date() >= expirationDate {
                 self.refreshAccessToken()
             }
+            self.resolveRegionBaseURL()
             if !self.energySites.isEmpty {
                 let currentSite = self.energySites[self.currentEnergySiteIndex]
-                if let id = currentSite.energySiteId, let name = currentSite.siteName {
+                if let id = currentSite.energySiteId {
                     self.energySiteId = String(id)
-                    self.siteName = name
+                    self.siteName = currentSite.siteName ?? "Energy Site \(id)"
                     self.fetchFleetAPIData()
-                    if (self.solarEnergyTodayWh == nil) {
-                        self.fetchSolarEnergyToday()
-                    }
+                    if self.solarEnergyTodayWh == nil { self.fetchSolarEnergyToday() }
+                } else {
+                    self.errorMessage = "No energy_site_id on selected product"
                 }
             } else {
                 self.fetchEnergyProducts()
@@ -505,7 +538,7 @@ class PowerwallViewModel: ObservableObject {
             return
         }
         guard let energySiteId = energySiteId,
-              let url = URL(string: "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/live_status") else {
+              let url = URL(string: "\(fleetBaseURL)/api/1/energy_sites/\(energySiteId)/live_status") else {
             errorMessage = "No energy site ID, refreshing token"
             return
         }
@@ -547,7 +580,7 @@ class PowerwallViewModel: ObservableObject {
 
         let (start, end) = getHistoryDateRange()
         let timeZone = TimeZone.current.identifier.isEmpty ? "Etc/UTC" : TimeZone.current.identifier
-        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/calendar_history?kind=energy&period=day&start_date=\(start)&end_date=\(end)&time_zone=\(timeZone)"
+        let urlString = "\(fleetBaseURL)/api/1/energy_sites/\(energySiteId)/calendar_history?kind=energy&period=day&start_date=\(start)&end_date=\(end)&time_zone=\(timeZone)"
         guard let url = URL(string: urlString) else {
             completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
             return
@@ -592,7 +625,7 @@ class PowerwallViewModel: ObservableObject {
         let tz    = TimeZone.current.identifier.isEmpty ? "Etc/UTC" : TimeZone.current.identifier
 
         let urlStr = """
-            https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\
+            \(fleetBaseURL)/api/1/energy_sites/\
             \(energySiteId)/calendar_history?kind=energy&period=day&\
             start_date=\(start)&end_date=\(end)&time_zone=\(tz)
             """
@@ -619,7 +652,7 @@ class PowerwallViewModel: ObservableObject {
         }
 
         let (start, end) = getHistoryDateRange()
-        let urlString = "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/energy_sites/\(energySiteId)/calendar_history?kind=soe&period=day&start_date=\(start)&end_date=\(end)&time_zone=Australia/Adelaide"
+        let urlString = "\(fleetBaseURL)/api/1/energy_sites/\(energySiteId)/calendar_history?kind=soe&period=day&start_date=\(start)&end_date=\(end)&time_zone=Australia/Adelaide"
         guard let url = URL(string: urlString) else {
             completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
             return
@@ -840,6 +873,14 @@ struct HistoricalDataPoint {
     let value: Double
     let from: PowerFrom?
     let to: PowerTo?
+}
+
+struct RegionResponse: Codable {
+    struct RegionInfo: Codable {
+        let region: String?
+        let fleet_api_base_url: String?
+    }
+    let response: RegionInfo
 }
 
 #if os(macOS)

@@ -78,8 +78,8 @@
             filePath = "Powerwall-TV/PowerwallViewModel.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "305"
-            endingLineNumber = "305"
+            startingLineNumber = "337"
+            endingLineNumber = "337"
             landmarkName = "fetchEnergyProducts()"
             landmarkType = "7">
          </BreakpointContent>
@@ -94,8 +94,8 @@
             filePath = "Powerwall-TV/PowerwallViewModel.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "529"
-            endingLineNumber = "529"
+            startingLineNumber = "562"
+            endingLineNumber = "562"
             landmarkName = "fetchFleetAPIData()"
             landmarkType = "7">
          </BreakpointContent>
