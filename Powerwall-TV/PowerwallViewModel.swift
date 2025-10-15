@@ -170,7 +170,7 @@ class PowerwallViewModel: ObservableObject {
                 }
                 return
             }
-
+            self.resolveRegionBaseURL()
             self.exchangeCodeForToken(code: code)
         }
 #if os(macOS)
@@ -189,7 +189,7 @@ class PowerwallViewModel: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
-        let body = "grant_type=authorization_code&client_id=\(clientID)&client_secret=\(clientSecret)&code=\(code)&redirect_uri=\(redirectURI)&audience=https://fleet-api.prd.na.vn.cloud.tesla.com"
+        let body = "grant_type=authorization_code&client_id=\(clientID)&client_secret=\(clientSecret)&code=\(code)&redirect_uri=\(redirectURI)&audience\(fleetBaseURL)"
         request.httpBody = body.data(using: .utf8)
 
         fleetURLSession.dataTask(with: request) { [weak self] data, _, error in
@@ -220,7 +220,6 @@ class PowerwallViewModel: ObservableObject {
                     let expirationDate = Date().addingTimeInterval(TimeInterval(expiresIn))
                     UserDefaults.standard.set(expirationDate, forKey: "fleetAPI_tokenExpiration")
                 }
-                self.resolveRegionBaseURL()
                 self.fetchEnergyProducts()
             }
         }.resume()
