@@ -280,30 +280,64 @@ class PowerwallViewModel: ObservableObject {
     }
 
     private func resolveRegionBaseURL() {
-        if fleetRegionResolved || accessToken.isEmpty {
-            return
-        }
+        if fleetRegionResolved || accessToken.isEmpty { return }
+
         let candidates = [
             "https://fleet-api.prd.na.vn.cloud.tesla.com",
             "https://fleet-api.prd.eu.vn.cloud.tesla.com"
-            // (China requires separate app/flow)
         ]
+
         for base in candidates {
             var request = URLRequest(url: URL(string: "\(base)/api/1/users/region")!)
             request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
             let semaphore = DispatchSemaphore(value: 0)
-            fleetURLSession.dataTask(with: request) { data, resp, _ in
+
+            fleetURLSession.dataTask(with: request) { data, resp, err in
                 defer { semaphore.signal() }
-                guard let data = data,
-                      let info = try? JSONDecoder().decode(RegionResponse.self, from: data),
-                      let url = info.response.fleet_api_base_url, !url.isEmpty else { return }
-                DispatchQueue.main.async {
-                    self.fleetBaseURL = url
-                    self.fleetRegionResolved = true
+
+                let http = resp as? HTTPURLResponse
+                let code = http?.statusCode ?? -1
+                #if DEBUG
+                print("Region probe → \(base) status=\(code) error=\(String(describing: err))")
+                #endif
+
+                guard err == nil, code == 200, let data = data else {
+                    // Log body for non-200s too
+                    #if DEBUG
+                    if let data = data {
+                        print("Region probe body (\(base)):\n", String(data: data, encoding: .utf8) ?? data.map { String(format:"%02x", $0) }.joined())
+                    }
+                    #endif
+                    return
+                }
+
+                do {
+                    let info = try JSONDecoder().decode(RegionResponse.self, from: data)
+                    if let url = info.response.fleet_api_base_url, !url.isEmpty {
+                        DispatchQueue.main.async {
+                            self.fleetBaseURL = url
+                            self.fleetRegionResolved = true
+                            #if DEBUG
+                            print("Resolved fleet base URL → \(url)")
+                            #endif
+                        }
+                    } else {
+                        #if DEBUG
+                        print("Decoded RegionResponse but fleet_api_base_url was empty/null")
+                        #endif
+                    }
+                } catch {
+                    #if DEBUG
+                    print("Region decode failed: \(error)")
+                    print("Raw body:\n", String(data: data, encoding: .utf8) ?? data.map { String(format:"%02x", $0) }.joined())
+                    #endif
                 }
             }.resume()
-            semaphore.wait(timeout: .now() + 2) // quick try; fall through to next region if no result
-            if fleetBaseURL.hasPrefix("https://fleet-api.prd.") { break }
+
+            _ = semaphore.wait(timeout: .now() + 2) // quick try
+
+            if fleetRegionResolved { break }
         }
     }
 
