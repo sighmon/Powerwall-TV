@@ -49,7 +49,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var currentEndDate: Date = Date()
     @Published var solarEnergyTodayWh: Double?
     private var fleetRegionResolved: Bool = false
-    @Published var fleetBaseURL: String = UserDefaults.standard.string(forKey: "fleetBaseURL") ?? "https://fleet-api.prd.eu.vn.cloud.tesla.com"
+    @Published var fleetBaseURL: String = UserDefaults.standard.string(forKey: "fleetBaseURL") ?? "https://fleet-api.prd.na.vn.cloud.tesla.com"
 
     private let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
