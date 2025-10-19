@@ -49,7 +49,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var currentEndDate: Date = Date()
     @Published var solarEnergyTodayWh: Double?
     private var fleetRegionResolved: Bool = false
-    @Published private(set) var fleetBaseURL: String = "https://fleet-api.prd.na.vn.cloud.tesla.com"
+    @Published var fleetBaseURL: String = UserDefaults.standard.string(forKey: "fleetBaseURL") ?? "https://fleet-api.prd.eu.vn.cloud.tesla.com"
 
     private let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -170,7 +170,6 @@ class PowerwallViewModel: ObservableObject {
                 }
                 return
             }
-            self.resolveRegionBaseURL()
             self.exchangeCodeForToken(code: code)
         }
 #if os(macOS)
@@ -185,11 +184,13 @@ class PowerwallViewModel: ObservableObject {
             return
         }
 
+        let usedAudience = fleetBaseURL
+
         var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
-        let body = "grant_type=authorization_code&client_id=\(clientID)&client_secret=\(clientSecret)&code=\(code)&redirect_uri=\(redirectURI)&audience\(fleetBaseURL)"
+        let body = "grant_type=authorization_code&client_id=\(clientID)&client_secret=\(clientSecret)&code=\(code)&redirect_uri=\(redirectURI)&audience=\(fleetBaseURL)"
         request.httpBody = body.data(using: .utf8)
 
         fleetURLSession.dataTask(with: request) { [weak self] data, _, error in
@@ -220,7 +221,18 @@ class PowerwallViewModel: ObservableObject {
                     let expirationDate = Date().addingTimeInterval(TimeInterval(expiresIn))
                     UserDefaults.standard.set(expirationDate, forKey: "fleetAPI_tokenExpiration")
                 }
-                self.fetchEnergyProducts()
+                self.resolveRegionBaseURL()
+                if self.fleetBaseURL != usedAudience {
+                    // Clear tokens and re-login with correct audience
+                    self.accessToken = ""
+                    KeychainWrapper.standard.set("", forKey: "fleetAPI_accessToken")
+                    KeychainWrapper.standard.set("", forKey: "fleetAPI_refreshToken")
+                    UserDefaults.standard.removeObject(forKey: "currentEnergySiteIndex")
+                    UserDefaults.standard.removeObject(forKey: "fleetAPI_tokenExpiration")
+                    self.loginWithTeslaFleetAPI()
+                } else {
+                    self.fetchEnergyProducts()
+                }
             }
         }.resume()
     }
@@ -318,6 +330,7 @@ class PowerwallViewModel: ObservableObject {
                         DispatchQueue.main.async {
                             self.fleetBaseURL = url
                             self.fleetRegionResolved = true
+                            UserDefaults.standard.set(self.fleetBaseURL, forKey: "fleetBaseURL")
                             #if DEBUG
                             print("Resolved fleet base URL → \(url)")
                             #endif

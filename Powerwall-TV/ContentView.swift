@@ -473,6 +473,7 @@ struct ContentView: View {
                     username: $viewModel.username,
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
+                    fleetBaseURL: $viewModel.fleetBaseURL,
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showingConfirmation: false
                 )

@@ -14,6 +14,7 @@ struct SettingsView: View {
     @Binding var username: String
     @Binding var password: String
     @Binding var accessToken: String
+    @Binding var fleetBaseURL: String
     @Binding var preventScreenSaver: Bool
     @State var showingConfirmation: Bool
     @Environment(\.presentationMode) var presentationMode
@@ -85,6 +86,9 @@ struct SettingsView: View {
             Text("Version: \(appVersionAndBuild())")
                 .font(.footnote)
                 .opacity(0.6)
+            Text("Base: \(fleetBaseURL)")
+                .font(.footnote)
+                .opacity(0.6)
         }
     }
 #if os(macOS)
@@ -133,6 +137,7 @@ struct SettingsView: View {
         KeychainWrapper.standard.set("", forKey: "fleetAPI_refreshToken")
         UserDefaults.standard.removeObject(forKey: "currentEnergySiteIndex")
         UserDefaults.standard.removeObject(forKey: "fleetAPI_tokenExpiration")
+        UserDefaults.standard.removeObject(forKey: "fleetBaseURL")
     }
 }
 
@@ -151,6 +156,7 @@ struct SettingsView_Previews: PreviewProvider {
             username: .constant("user@example.com"),
             password: .constant("password"),
             accessToken: .constant("accessToken"),
+            fleetBaseURL: .constant("https://fleet-api.prd.na.vn.cloud.tesla.com"),
             preventScreenSaver: .constant(false),
             showingConfirmation: false
         )
