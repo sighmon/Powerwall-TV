@@ -473,6 +473,7 @@ struct ContentView: View {
                     username: $viewModel.username,
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
+                    fleetBaseURL: $viewModel.fleetBaseURL,
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showingConfirmation: false
                 )
@@ -498,6 +499,7 @@ struct ContentView: View {
                     username: $viewModel.username,
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
+                    fleetBaseURL: $viewModel.fleetBaseURL,
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showingConfirmation: false
                 )
@@ -592,6 +594,7 @@ struct ContentView: View {
             }
         }
         .background(Color(red: 22/255, green: 23/255, blue: 24/255))
+#if os(macOS)
         .focusable(true)
         .focused($hasKeyboardFocus)
         .onAppear {
@@ -605,6 +608,7 @@ struct ContentView: View {
             updateEnergySite(+1)
             return .handled
         }
+#endif
     }
 
     private func updateEnergySite(_ delta: Int) {
