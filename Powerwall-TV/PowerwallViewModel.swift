@@ -25,6 +25,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var username: String = UserDefaults.standard.string(forKey: "username") ?? "customer"
     @Published var password: String = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
+    @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
     @Published var currentEnergySiteIndex: Int = UserDefaults.standard.integer(forKey: "currentEnergySiteIndex")
     @Published var energySites: [Product] = []
 

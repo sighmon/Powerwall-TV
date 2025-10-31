@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var showingGraph = false
     @State private var wiggleWatts = 40.0
     @State private var startAnimations = false
+    @State private var precision = "%.3f"
     @FocusState private var hasKeyboardFocus: Bool
 #if os(macOS)
     private let powerwallPercentageWidth: Double = 4
@@ -62,7 +63,7 @@ struct ContentView: View {
                                     }
                                     if data.solar.energyExported > 0 || (viewModel.solarEnergyTodayWh != nil) {
                                         let exportedEnergy = (data.solar.energyExported > 0 ? data.solar.energyExported : viewModel.solarEnergyTodayWh ?? 0) / 1000
-                                        let specifier = exportedEnergy < 1000 ? "%.3f" : "%.0f"
+                                        let specifier = exportedEnergy < 1000 ? precision : "%.0f"
                                         Text("\(exportedEnergy, specifier: specifier) kWh")
                                             .fontWeight(.bold)
 #if os(macOS)
@@ -106,7 +107,7 @@ struct ContentView: View {
                                 Spacer().frame(width: 340)
 #endif
                                 VStack {
-                                    Text("\(data.solar.instantPower / 1000, specifier: "%.3f") kW")
+                                    Text("\(data.solar.instantPower / 1000, specifier: precision) kW")
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
@@ -138,7 +139,7 @@ struct ContentView: View {
                                 Spacer().frame(width: 980)
 #endif
                                 VStack {
-                                    Text("\(data.load.instantPower / 1000, specifier: "%.3f") kW")
+                                    Text("\(data.load.instantPower / 1000, specifier: precision) kW")
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
@@ -166,7 +167,7 @@ struct ContentView: View {
                                 Spacer().frame(width: 120)
 #endif
                                 VStack {
-                                    Text("\(data.battery.instantPower / 1000, specifier: "%.3f") kW · \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
+                                    Text("\(data.battery.instantPower / 1000, specifier: precision) kW · \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
@@ -222,7 +223,7 @@ struct ContentView: View {
                                 Spacer().frame(width: 980)
 #endif
                                 VStack {
-                                    Text("\(data.site.instantPower / 1000, specifier: "%.3f") kW")
+                                    Text("\(data.site.instantPower / 1000, specifier: precision) kW")
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
@@ -475,6 +476,7 @@ struct ContentView: View {
                     accessToken: $viewModel.accessToken,
                     fleetBaseURL: $viewModel.fleetBaseURL,
                     preventScreenSaver: $viewModel.preventScreenSaver,
+                    showLessPrecision: $viewModel.showLessPrecision,
                     showingConfirmation: false
                 )
                 .background(
@@ -501,6 +503,7 @@ struct ContentView: View {
                     accessToken: $viewModel.accessToken,
                     fleetBaseURL: $viewModel.fleetBaseURL,
                     preventScreenSaver: $viewModel.preventScreenSaver,
+                    showLessPrecision: $viewModel.showLessPrecision,
                     showingConfirmation: false
                 )
                 .background(
@@ -519,6 +522,7 @@ struct ContentView: View {
             }
 #endif
             .onReceive(timer) { _ in
+                precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
                 if viewModel.ipAddress == "demo" {
                     let homeLoad = Double(arc4random_uniform(4096)) + 256
                     viewModel.data = PowerwallData(
@@ -542,6 +546,7 @@ struct ContentView: View {
                 }
             }
             .onAppear {
+                precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
                 if demo {
                     viewModel.ipAddress = "demo"
                 }

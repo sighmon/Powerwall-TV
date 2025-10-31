@@ -16,6 +16,7 @@ struct SettingsView: View {
     @Binding var accessToken: String
     @Binding var fleetBaseURL: String
     @Binding var preventScreenSaver: Bool
+    @Binding var showLessPrecision: Bool
     @State var showingConfirmation: Bool
     @Environment(\.presentationMode) var presentationMode
 
@@ -58,6 +59,7 @@ struct SettingsView: View {
 
             // New section for screen saver prevention
             Section(header: Text("Display Settings")) {
+                Toggle("Show less precision", isOn: $showLessPrecision)
                 Toggle("Prevent screen saver from showing", isOn: $preventScreenSaver)
                 if preventScreenSaver {
                     Text("Warning: keeping the screen on may increase power usage and risk burn-in.")
@@ -128,6 +130,7 @@ struct SettingsView: View {
             KeychainWrapper.standard.set(accessToken, forKey: "fleetAPI_accessToken")
         }
         UserDefaults.standard.set(preventScreenSaver, forKey: "preventScreenSaver")
+        UserDefaults.standard.set(showLessPrecision, forKey: "showLessPrecision")
         presentationMode.wrappedValue.dismiss()
     }
 
@@ -158,6 +161,7 @@ struct SettingsView_Previews: PreviewProvider {
             accessToken: .constant("accessToken"),
             fleetBaseURL: .constant("https://fleet-api.prd.na.vn.cloud.tesla.com"),
             preventScreenSaver: .constant(false),
+            showLessPrecision: .constant(false),
             showingConfirmation: false
         )
     }
