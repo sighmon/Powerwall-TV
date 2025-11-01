@@ -15,7 +15,6 @@ struct Powerwall_TVApp: App {
             Item.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
@@ -25,14 +24,13 @@ struct Powerwall_TVApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
 #if os(macOS)
-                .frame(width: 1280, height: 720)
+            ScaledContentView()
+                .frame(minWidth: 1280, minHeight: 720)
+#else
+            ContentView()
 #endif
         }
         .modelContainer(sharedModelContainer)
-#if os(macOS)
-        .windowResizability(.contentSize)
-#endif
     }
 }

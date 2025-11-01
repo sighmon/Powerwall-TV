@@ -59,7 +59,7 @@ struct SettingsView: View {
 
             // New section for screen saver prevention
             Section(header: Text("Display Settings")) {
-                Toggle("Show less precision", isOn: $showLessPrecision)
+                Toggle("Limit data to one decimal place", isOn: $showLessPrecision)
                 Toggle("Prevent screen saver from showing", isOn: $preventScreenSaver)
                 if preventScreenSaver {
                     Text("Warning: keeping the screen on may increase power usage and risk burn-in.")
