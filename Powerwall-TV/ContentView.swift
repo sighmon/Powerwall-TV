@@ -602,6 +602,7 @@ struct ContentView: View {
 #if os(macOS)
         .focusable(true)
         .focused($hasKeyboardFocus)
+        .focusEffectDisabled()
         .onAppear {
             hasKeyboardFocus = true
         }
