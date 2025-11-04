@@ -10,6 +10,7 @@ import SwiftData
 
 @main
 struct Powerwall_TVApp: App {
+    @StateObject private var viewModel = PowerwallViewModel()
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Item.self,
@@ -25,12 +26,15 @@ struct Powerwall_TVApp: App {
     var body: some Scene {
         WindowGroup {
 #if os(macOS)
-            ScaledContentView()
+            ScaledContentView(viewModel: viewModel)
                 .frame(minWidth: 1280, minHeight: 720)
 #else
-            ContentView()
+            ContentView(viewModel: viewModel)
 #endif
         }
         .modelContainer(sharedModelContainer)
+#if os(macOS)
+        MenuBar(viewModel: viewModel)
+#endif
     }
 }

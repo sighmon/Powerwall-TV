@@ -10,7 +10,7 @@ import SwiftData
 
 
 struct ContentView: View {
-    @StateObject private var viewModel: PowerwallViewModel
+    @ObservedObject var viewModel: PowerwallViewModel
     @State private var demo = false
     @State private var animations = true
     @State private var showingSettings = false
@@ -26,10 +26,6 @@ struct ContentView: View {
 #endif
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
     private let timerTodaysTotal = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
-
-    init() {
-        _viewModel = StateObject(wrappedValue: PowerwallViewModel())
-    }
 
     var body: some View {
         ZStack {
@@ -477,6 +473,7 @@ struct ContentView: View {
                     fleetBaseURL: $viewModel.fleetBaseURL,
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showLessPrecision: $viewModel.showLessPrecision,
+                    showInMenuBar: $viewModel.showInMenuBar,
                     showingConfirmation: false
                 )
                 .background(
@@ -504,6 +501,7 @@ struct ContentView: View {
                     fleetBaseURL: $viewModel.fleetBaseURL,
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showLessPrecision: $viewModel.showLessPrecision,
+                    showInMenuBar: $viewModel.showInMenuBar,
                     showingConfirmation: false
                 )
                 .background(
@@ -628,7 +626,83 @@ struct ContentView: View {
     }
 }
 
+#if os(macOS)
+@SceneBuilder
+func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
+    MenuBarExtra(content: {
+        // The dropdown content when the user clicks the menu bar item.
+        if viewModel.showInMenuBar {
+            let precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
+            VStack(alignment: .center, spacing: 8) {
+                // Current numbers
+                let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
+                Gauge(value: batteryPercentage, in: 0...100) {
+                    Label("Battery", systemImage: "bolt.fill")
+                } currentValueLabel: {
+                    Text("\(batteryPercentage, specifier: "%.0f")%")
+                        .monospacedDigit()
+                }
+                    .tint(batteryPercentage >= 60 ? .green : (batteryPercentage >= 25 ? .yellow : .red))
+                    .gaugeStyle(.accessoryCircular)
+                    .frame(width: 56, height: 56)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("\((viewModel.data?.solar.instantPower ?? 0) / 1000, specifier: precision) kW")
+                            .fontWeight(.bold)
+                            .font(.title2)
+                        Text("SOLAR")
+                            .opacity(0.6)
+                            .fontWeight(.bold)
+                            .font(.subheadline)
+                    }
+                    HStack {
+                        Text("\((viewModel.data?.load.instantPower ?? 0) / 1000, specifier: precision) kW")
+                            .fontWeight(.bold)
+                            .font(.title2)
+                        Text("HOME")
+                            .opacity(0.6)
+                            .fontWeight(.bold)
+                            .font(.subheadline)
+                    }
+                    HStack {
+                        Text("\((viewModel.data?.site.instantPower ?? 0) / 1000, specifier: precision) kW")
+                            .fontWeight(.bold)
+                            .font(.title2)
+                        Text("GRID")
+                            .opacity(0.6)
+                            .fontWeight(.bold)
+                            .font(.subheadline)
+                    }
+                    HStack {
+                        Text("\((viewModel.data?.battery.instantPower ?? 0) / 1000, specifier: precision) kW")
+                            .fontWeight(.bold)
+                            .font(.title2)
+                        Text("POWERWALL")
+                            .opacity(0.6)
+                            .fontWeight(.bold)
+                            .font(.subheadline)
+                    }
+                }
+            }
+            .padding(20)
+        }
+    }, label: {
+        if viewModel.showInMenuBar {
+            // This is the text/icon that shows in the menu bar itself.
+            let solarKW = (viewModel.data?.solar.instantPower ?? 0) / 1000
+            let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
+            Text("☀︎ \(solarKW, specifier: "%.1f") kW · \(batteryPercentage, specifier: "%.0f")%")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+        }
+    })
+    // Show as a popover window style
+    .menuBarExtraStyle(.window)
+}
+#endif
+
 #Preview {
-    ContentView()
+    ContentView(viewModel: PowerwallViewModel())
         .modelContainer(for: Item.self, inMemory: true)
 }

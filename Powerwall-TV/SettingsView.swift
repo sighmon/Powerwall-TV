@@ -17,6 +17,7 @@ struct SettingsView: View {
     @Binding var fleetBaseURL: String
     @Binding var preventScreenSaver: Bool
     @Binding var showLessPrecision: Bool
+    @Binding var showInMenuBar: Bool
     @State var showingConfirmation: Bool
     @Environment(\.presentationMode) var presentationMode
 
@@ -59,6 +60,9 @@ struct SettingsView: View {
 
             // New section for screen saver prevention
             Section(header: Text("Display Settings")) {
+#if os(macOS)
+                Toggle("Show in menu bar", isOn: $showInMenuBar)
+#endif
                 Toggle("Limit data to one decimal place", isOn: $showLessPrecision)
                 Toggle("Prevent screen saver from showing", isOn: $preventScreenSaver)
                 if preventScreenSaver {
@@ -131,6 +135,7 @@ struct SettingsView: View {
         }
         UserDefaults.standard.set(preventScreenSaver, forKey: "preventScreenSaver")
         UserDefaults.standard.set(showLessPrecision, forKey: "showLessPrecision")
+        UserDefaults.standard.set(showInMenuBar, forKey: "showInMenuBar")
         presentationMode.wrappedValue.dismiss()
     }
 
@@ -162,6 +167,7 @@ struct SettingsView_Previews: PreviewProvider {
             fleetBaseURL: .constant("https://fleet-api.prd.na.vn.cloud.tesla.com"),
             preventScreenSaver: .constant(false),
             showLessPrecision: .constant(false),
+            showInMenuBar: .constant(false),
             showingConfirmation: false
         )
     }

@@ -10,6 +10,7 @@ import SwiftUI
 import SwiftData
 
 struct ScaledContentView: View {
+    @ObservedObject var viewModel: PowerwallViewModel
     var body: some View {
 #if os(macOS)
         GeometryReader { proxy in
@@ -43,7 +44,7 @@ struct ScaledContentView: View {
 
                 // The designed layout, at base 1280x720 coordinates,
                 // then scaled up.
-                ContentView()
+                ContentView(viewModel: viewModel)
                     .frame(width: baseWidth, height: baseHeight)
                     .scaleEffect(scale, anchor: .center)
                     .frame(width: scaledWidth, height: scaledHeight)
@@ -53,7 +54,7 @@ struct ScaledContentView: View {
         }
 #else
         // tvOS
-        ContentView()
+        ContentView(viewModel: viewModel)
             .ignoresSafeArea()
 #endif
     }
