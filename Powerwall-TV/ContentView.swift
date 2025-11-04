@@ -633,7 +633,7 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
         // The dropdown content when the user clicks the menu bar item.
         if viewModel.showInMenuBar {
             let precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
-            VStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .center, spacing: 20) {
                 // Current numbers
                 let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
                 Gauge(value: batteryPercentage, in: 0...100) {
@@ -646,8 +646,8 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                     .gaugeStyle(.accessoryCircular)
                     .frame(width: 56, height: 56)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
+                HStack(alignment: .center, spacing: 20) {
+                    VStack {
                         Text("\((viewModel.data?.solar.instantPower ?? 0) / 1000, specifier: precision) kW")
                             .fontWeight(.bold)
                             .font(.title2)
@@ -656,7 +656,9 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                             .fontWeight(.bold)
                             .font(.subheadline)
                     }
-                    HStack {
+                        .frame(width: 100)
+
+                    VStack {
                         Text("\((viewModel.data?.load.instantPower ?? 0) / 1000, specifier: precision) kW")
                             .fontWeight(.bold)
                             .font(.title2)
@@ -665,16 +667,12 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                             .fontWeight(.bold)
                             .font(.subheadline)
                     }
-                    HStack {
-                        Text("\((viewModel.data?.site.instantPower ?? 0) / 1000, specifier: precision) kW")
-                            .fontWeight(.bold)
-                            .font(.title2)
-                        Text("GRID")
-                            .opacity(0.6)
-                            .fontWeight(.bold)
-                            .font(.subheadline)
-                    }
-                    HStack {
+                        .frame(width: 100)
+                }
+                    .padding(.bottom, 20)
+
+                HStack(alignment: .center, spacing: 20) {
+                    VStack {
                         Text("\((viewModel.data?.battery.instantPower ?? 0) / 1000, specifier: precision) kW")
                             .fontWeight(.bold)
                             .font(.title2)
@@ -683,9 +681,22 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                             .fontWeight(.bold)
                             .font(.subheadline)
                     }
+                        .frame(width: 100)
+
+                    VStack {
+                        Text("\((viewModel.data?.site.instantPower ?? 0) / 1000, specifier: precision) kW")
+                            .fontWeight(.bold)
+                            .font(.title2)
+                        Text("GRID")
+                            .opacity(0.6)
+                            .fontWeight(.bold)
+                            .font(.subheadline)
+                    }
+                        .frame(width: 100)
                 }
             }
             .padding(20)
+            .frame(width: 250)
         }
     }, label: {
         if viewModel.showInMenuBar {
