@@ -621,12 +621,14 @@ struct ContentView: View {
                     UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
                     viewModel.fetchData()
                     viewModel.fetchSolarEnergyToday()
+                    viewModel.fetchSiteInfo()
                 }
                 if direction == .down && viewModel.currentEnergySiteIndex < viewModel.energySites.count - 1 {
                     viewModel.currentEnergySiteIndex += 1
                     UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
                     viewModel.fetchData()
                     viewModel.fetchSolarEnergyToday()
+                    viewModel.fetchSiteInfo()
                 }
             }
         }
