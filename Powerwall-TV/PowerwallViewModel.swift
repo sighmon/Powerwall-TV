@@ -50,6 +50,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var batteryPercentageHistory: [HistoricalDataPoint] = []
     @Published var currentEndDate: Date = Date()
     @Published var solarEnergyTodayWh: Double?
+    @Published var batteryCount: Double?
     private var fleetRegionResolved: Bool = false
     @Published var fleetBaseURL: String = UserDefaults.standard.string(forKey: "fleetBaseURL") ?? "https://fleet-api.prd.na.vn.cloud.tesla.com"
 
@@ -433,7 +434,12 @@ class PowerwallViewModel: ObservableObject {
                     self.energySiteId = String(id)
                     self.siteName = currentSite.siteName ?? "Energy Site \(id)"
                     self.fetchFleetAPIData()
-                    if self.solarEnergyTodayWh == nil { self.fetchSolarEnergyToday() }
+                    if self.solarEnergyTodayWh == nil {
+                        self.fetchSolarEnergyToday()
+                    }
+                    if self.batteryCount == nil {
+                        self.fetchSiteInfo()
+                    }
                 } else {
                     self.errorMessage = "No energy_site_id on selected product"
                 }
@@ -608,10 +614,11 @@ class PowerwallViewModel: ObservableObject {
                 }
             } receiveValue: { [weak self] data in
                 let powerwall = PowerwallData(
-                    battery: PowerwallData.Battery(instantPower: data.response.batteryPower, count: 0),
+                    battery: PowerwallData.Battery(instantPower: data.response.batteryPower, count: self?.batteryCount ?? 0),
                     load: PowerwallData.Load(instantPower: data.response.loadPower),
                     solar: PowerwallData.Solar(instantPower: data.response.solarPower, energyExported: 0),
-                    site: PowerwallData.Site(instantPower: data.response.gridPower)
+                    site: PowerwallData.Site(instantPower: data.response.gridPower),
+                    wallConnectors: data.response.wallConnectors
                 )
                 self?.data = powerwall
                 self?.batteryPercentage = BatteryPercentage(percentage: data.response.batteryPercentage)
@@ -690,6 +697,24 @@ class PowerwallViewModel: ObservableObject {
             let totalWh = payload.response.time_series.reduce(0) { $0 + ($1.solarEnergyExported ?? 0) }
 
             DispatchQueue.main.async { self?.solarEnergyTodayWh = totalWh }
+        }.resume()
+    }
+
+    func fetchSiteInfo() {
+        guard let energySiteId = energySiteId else { return }
+
+        let urlStr = "\(fleetBaseURL)/api/1/energy_sites/\(energySiteId)/site_info"
+        guard let url = URL(string: urlStr) else { return }
+
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTask(with: req) { [weak self] data, _, error in
+            guard let data = data,
+                  let payload = try? JSONDecoder().decode(SiteInfoResponse.self, from: data)
+            else { return }
+
+            DispatchQueue.main.async { self?.batteryCount = payload.response.batteryCount }
         }.resume()
     }
 
@@ -796,6 +821,7 @@ struct FleetLiveStatus: Codable {
     let loadPower: Double
     let gridPower: Double
     let gridStatus: String
+    let wallConnectors: [WallConnector]
 
     enum CodingKeys: String, CodingKey {
         case batteryPower = "battery_power"
@@ -804,6 +830,21 @@ struct FleetLiveStatus: Codable {
         case loadPower = "load_power"
         case gridPower = "grid_power"
         case gridStatus = "grid_status"
+        case wallConnectors = "wall_connectors"
+    }
+}
+
+struct WallConnector: Codable {
+    let vin: String?
+    let din: String?
+    let wallConnectorState: Double?
+    let wallConnectorPower: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case vin
+        case din
+        case wallConnectorState = "wall_connector_state"
+        case wallConnectorPower = "wall_connector_power"
     }
 }
 
@@ -848,6 +889,30 @@ struct PowerwallData: Codable {
         }
     }
     let site: Site
+    let wallConnectors: [WallConnector]
+
+    init(
+        battery: Battery,
+        load: Load,
+        solar: Solar,
+        site: Site,
+        wallConnectors: [WallConnector]? = []
+    ) {
+        self.battery = battery
+        self.load = load
+        self.solar = solar
+        self.site = site
+        self.wallConnectors = wallConnectors ?? []
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        battery = try c.decode(Battery.self, forKey: .battery)
+        load    = try c.decode(Load.self,   forKey: .load)
+        solar   = try c.decode(Solar.self,  forKey: .solar)
+        site    = try c.decode(Site.self,   forKey: .site)
+        wallConnectors = try c.decodeIfPresent([WallConnector].self, forKey: .wallConnectors) ?? []
+    }
 }
 
 // Data model for battery percentage
@@ -861,6 +926,24 @@ struct GridStatus: Codable {
 
     enum CodingKeys: String, CodingKey {
         case status = "grid_status"
+    }
+}
+
+struct SiteInfoResponse: Codable {
+    let response: SiteInfo
+}
+
+struct SiteInfo: Codable {
+    let id: String?
+    let siteName: String?
+    let version: String?
+    let batteryCount: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case siteName = "site_name"
+        case version
+        case batteryCount = "battery_count"
     }
 }
 

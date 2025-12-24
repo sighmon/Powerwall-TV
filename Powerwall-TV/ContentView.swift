@@ -135,7 +135,7 @@ struct ContentView: View {
                                 Spacer().frame(width: 980)
 #endif
                                 VStack {
-                                    Text("\(data.load.instantPower / 1000, specifier: precision) kW")
+                                    Text("\(self.homeEnergyToDisplay(data: data) / 1000, specifier: precision) kW")
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
@@ -183,6 +183,38 @@ struct ContentView: View {
 #if os(macOS)
                             Spacer().frame(height: 60)
 #endif
+                        }
+                        if !data.wallConnectors.isEmpty {
+                            VStack {
+    #if os(macOS)
+                                Spacer().frame(height: 60)
+    #endif
+                                HStack {
+                                    VStack {
+                                        Text("\((self.wallConnectorEnergyToDisplay(data: data)) / 1000, specifier: precision) kW")
+                                            .fontWeight(.bold)
+    #if os(macOS)
+                                            .font(.title2)
+    #else
+                                            .font(.headline)
+    #endif
+                                        Text("ELECTRIC VEHICLE")
+                                            .opacity(0.6)
+                                            .fontWeight(.bold)
+    #if os(macOS)
+                                            .font(.subheadline)
+    #else
+                                            .font(.footnote)
+    #endif
+                                    }
+    #if os(macOS)
+                                    Spacer().frame(width: 220)
+    #else
+                                    Spacer().frame(width: 340)
+    #endif
+                                }
+                                Spacer()
+                            }
                         }
                         HStack {
 #if os(macOS)
@@ -530,7 +562,8 @@ struct ContentView: View {
                             instantPower: homeLoad * 0.7,
                             energyExported: 409600
                         ),
-                        site: PowerwallData.Site(instantPower: homeLoad * 0.1)
+                        site: PowerwallData.Site(instantPower: homeLoad * 0.1),
+                        wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: homeLoad * 0.05)]
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
                     viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
@@ -558,7 +591,8 @@ struct ContentView: View {
                             instantPower: 2048,
                             energyExported: 4096000
                         ),
-                        site: PowerwallData.Site(instantPower: 0)
+                        site: PowerwallData.Site(instantPower: 0),
+                        wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: 512)]
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
                     viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
@@ -623,6 +657,15 @@ struct ContentView: View {
         UserDefaults.standard.set(next, forKey: "currentEnergySiteIndex")
         viewModel.fetchData()
         viewModel.fetchSolarEnergyToday()
+        viewModel.fetchSiteInfo()
+    }
+
+    private func homeEnergyToDisplay(data: PowerwallData) -> Double {
+        return data.load.instantPower - self.wallConnectorEnergyToDisplay(data: data)
+    }
+
+    private func wallConnectorEnergyToDisplay(data: PowerwallData) -> Double {
+        return data.wallConnectors.reduce(0.0) { $0 + ($1.wallConnectorPower ?? 0.0) }
     }
 }
 
