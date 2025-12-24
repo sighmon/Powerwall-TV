@@ -33,6 +33,19 @@ struct SolarToGateway: Shape {
     }
 }
 
+struct ChargerToCar: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.move(to: CGPoint(x: rect.midX, y: rect.maxY - 40))
+        path.addCurve(to: CGPoint(x: rect.midX - 10, y: (rect.maxY - 45) * 0.35),
+                      control1: CGPoint(x: rect.midX - 5, y: rect.maxY - 50),
+                      control2: CGPoint(x: rect.midX - 10, y: rect.maxY - 50)
+        )
+        return path
+    }
+}
+
 struct GatewayToGrid: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()

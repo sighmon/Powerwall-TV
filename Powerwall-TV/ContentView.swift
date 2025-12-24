@@ -30,11 +30,11 @@ struct ContentView: View {
     var body: some View {
         ZStack {
 #if os(macOS)
-            Image(nsImage: NSImage(named: "home.png")!)
+            Image(nsImage: NSImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyToDisplay(data: viewModel.data) > 10 ? "home-charger.png" : "home-charger-empty.png")!)
                 .resizable()
                 .scaledToFit()
 #else
-            Image(uiImage: UIImage(named: "home.png")!)
+            Image(uiImage: UIImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyToDisplay(data: viewModel.data) > 10 ? "home-charger.png" : "home-charger-empty.png")!)
                 .resizable()
                 .ignoresSafeArea()
 #endif
@@ -198,7 +198,7 @@ struct ContentView: View {
     #else
                                             .font(.headline)
     #endif
-                                        Text("ELECTRIC VEHICLE")
+                                        Text("VEHICLE")
                                             .opacity(0.6)
                                             .fontWeight(.bold)
     #if os(macOS)
@@ -208,9 +208,9 @@ struct ContentView: View {
     #endif
                                     }
     #if os(macOS)
-                                    Spacer().frame(width: 220)
+                                    Spacer().frame(width: 260)
     #else
-                                    Spacer().frame(width: 340)
+                                    Spacer().frame(width: 390)
     #endif
                                 }
                                 Spacer()
@@ -272,6 +272,36 @@ struct ContentView: View {
 #if os(macOS)
                             Spacer().frame(height: 20)
 #endif
+                        }
+                        // Wall Connector to car animation
+                        if animations && self.wallConnectorEnergyToDisplay(data: data) > 10 {
+                            HStack {
+                                VStack {
+#if os(macOS)
+                                    Spacer().frame(height: 190)
+#else
+                                    Spacer().frame(height: 265)
+#endif
+                                    PowerSurgeView(
+                                        color: data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
+                                        isForward: self.wallConnectorEnergyToDisplay(data: data) < 0,
+                                        duration: 2,
+                                        curve: ChargerToCar(),
+                                        shouldStart: startAnimations
+                                    )
+#if os(macOS)
+                                    .frame(width: 40, height: 115)
+#else
+                                    .frame(width: 45, height: 155)
+#endif
+                                    .id("charger_\(self.wallConnectorEnergyToDisplay(data: data) < 0)_\(startAnimations)")
+                                }
+#if os(macOS)
+                                Spacer().frame(width: 305)
+#else
+                                Spacer().frame(width: 465)
+#endif
+                            }
                         }
                         // Solar to Gateway animation
                         if animations && data.solar.instantPower > 10 {
@@ -666,8 +696,8 @@ struct ContentView: View {
         return data.load.instantPower - self.wallConnectorEnergyToDisplay(data: data)
     }
 
-    private func wallConnectorEnergyToDisplay(data: PowerwallData) -> Double {
-        return data.wallConnectors.reduce(0.0) { $0 + ($1.wallConnectorPower ?? 0.0) }
+    private func wallConnectorEnergyToDisplay(data: PowerwallData?) -> Double {
+        return data?.wallConnectors.reduce(0.0) { $0 + ($1.wallConnectorPower ?? 0.0) } ?? 0.0
     }
 }
 
