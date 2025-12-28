@@ -86,6 +86,7 @@ struct ContentView: View {
                                             .font(.footnote)
 #endif
                                             .foregroundColor(.red)
+                                            .frame(width: 200)
                                     }
                                 }
                                 Spacer()
@@ -702,14 +703,105 @@ struct ContentView: View {
 }
 
 #if os(macOS)
-@SceneBuilder
-func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
-    MenuBarExtra(content: {
-        // The dropdown content when the user clicks the menu bar item.
-        if viewModel.showInMenuBar {
-            let precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
-            VStack(alignment: .center, spacing: 20) {
-                // Current numbers
+enum MenuBarLabelMetric: String, CaseIterable, Identifiable {
+    case solar, load, site, battery
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .solar: return "Solar"
+        case .load: return "Home"
+        case .site: return "Grid"
+        case .battery: return "Battery"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .solar: return "sun.max.fill"
+        case .load: return "house.fill"
+        case .site: return "bolt.horizontal.fill"
+        case .battery: return "battery.100percent"
+        }
+    }
+
+    var shortPrefix: String {
+        switch self {
+        case .solar: return "☀︎"
+        case .load: return "⌂"
+        case .site: return "⇄"
+        case .battery: return "⚡︎"
+        }
+    }
+}
+
+private struct PowerwallMenuBarLabel: View {
+    @ObservedObject var viewModel: PowerwallViewModel
+    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricRaw: String = MenuBarLabelMetric.solar.rawValue
+
+    private var metric: MenuBarLabelMetric {
+        MenuBarLabelMetric(rawValue: menuBarLabelMetricRaw) ?? .solar
+    }
+
+    private func batteryTrendGlyph(wiggleWatts: Double) -> String {
+        let battWatts = viewModel.data?.battery.instantPower ?? 0
+        if battWatts > wiggleWatts { return "↓" }
+        if battWatts < -wiggleWatts { return "↑" }
+        return ""
+    }
+
+    var body: some View {
+        guard viewModel.showInMenuBar else { return AnyView(EmptyView()) }
+
+        let precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
+        let trend = batteryTrendGlyph(wiggleWatts: 175.0)
+
+        let solarKW = (viewModel.data?.solar.instantPower ?? 0) / 1000
+        let loadKW  = (viewModel.data?.load.instantPower ?? 0) / 1000
+        let siteKW  = (viewModel.data?.site.instantPower ?? 0) / 1000
+        let batteryKW  = (viewModel.data?.battery.instantPower ?? 0) / 1000
+        let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
+
+        let left: String = {
+            switch metric {
+            case .solar:   return "\(metric.shortPrefix) \(solarKW, default: precision) kW"
+            case .load:    return "\(metric.shortPrefix) \(loadKW, default: precision) kW"
+            case .site:    return "\(metric.shortPrefix) \(siteKW, default: precision) kW"
+            case .battery: return "\(metric.shortPrefix) \(batteryKW, default: precision) kW"
+            }
+        }()
+
+        return AnyView(
+            Text("\(left) · \(batteryPercentage, specifier: "%.0f")% \(trend)")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+        )
+    }
+}
+
+private struct PowerwallMenuBarPopover: View {
+    @ObservedObject var viewModel: PowerwallViewModel
+    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricRaw: String = MenuBarLabelMetric.solar.rawValue
+
+    var body: some View {
+        guard viewModel.showInMenuBar else { return AnyView(EmptyView()) }
+
+        let precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
+
+        return AnyView(
+            VStack(alignment: .center, spacing: 16) {
+
+                Picker("Menu bar label", selection: $menuBarLabelMetricRaw) {
+                    ForEach(MenuBarLabelMetric.allCases) { option in
+                        Label(option.title, systemImage: option.symbol)
+                            .tag(option.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Divider()
+
                 let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
                 Gauge(value: batteryPercentage, in: 0...100) {
                     Label("Battery", systemImage: "bolt.fill")
@@ -717,9 +809,9 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                     Text("\(batteryPercentage, specifier: "%.0f")%")
                         .monospacedDigit()
                 }
-                    .tint(batteryPercentage >= 60 ? .green : (batteryPercentage >= 25 ? .yellow : .red))
-                    .gaugeStyle(.accessoryCircular)
-                    .frame(width: 56, height: 56)
+                .tint(batteryPercentage >= 60 ? .green : (batteryPercentage >= 25 ? .yellow : .red))
+                .gaugeStyle(.accessoryCircular)
+                .frame(width: 56, height: 56)
 
                 HStack(alignment: .center, spacing: 20) {
                     VStack {
@@ -731,7 +823,7 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                             .fontWeight(.bold)
                             .font(.subheadline)
                     }
-                        .frame(width: 100)
+                    .frame(width: 100)
 
                     VStack {
                         Text("\((viewModel.data?.load.instantPower ?? 0) / 1000, specifier: precision) kW")
@@ -742,9 +834,9 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                             .fontWeight(.bold)
                             .font(.subheadline)
                     }
-                        .frame(width: 100)
+                    .frame(width: 100)
                 }
-                    .padding(.bottom, 20)
+                .padding(.bottom, 10)
 
                 HStack(alignment: .center, spacing: 20) {
                     VStack {
@@ -756,7 +848,7 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                             .fontWeight(.bold)
                             .font(.subheadline)
                     }
-                        .frame(width: 100)
+                    .frame(width: 100)
 
                     VStack {
                         Text("\((viewModel.data?.site.instantPower ?? 0) / 1000, specifier: precision) kW")
@@ -767,23 +859,22 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                             .fontWeight(.bold)
                             .font(.subheadline)
                     }
-                        .frame(width: 100)
+                    .frame(width: 100)
                 }
             }
             .padding(20)
             .frame(width: 250)
-        }
-    }, label: {
-        if viewModel.showInMenuBar {
-            // This is the text/icon that shows in the menu bar itself.
-            let solarKW = (viewModel.data?.solar.instantPower ?? 0) / 1000
-            let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
-            Text("☀︎ \(solarKW, specifier: "%.1f") kW · \(batteryPercentage, specifier: "%.0f")%")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-        }
-    })
-    // Show as a popover window style
+        )
+    }
+}
+
+@SceneBuilder
+func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
+    MenuBarExtra {
+        PowerwallMenuBarPopover(viewModel: viewModel)
+    } label: {
+        PowerwallMenuBarLabel(viewModel: viewModel)
+    }
     .menuBarExtraStyle(.window)
 }
 #endif
