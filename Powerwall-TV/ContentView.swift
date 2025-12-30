@@ -537,7 +537,8 @@ struct ContentView: View {
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showLessPrecision: $viewModel.showLessPrecision,
                     showInMenuBar: $viewModel.showInMenuBar,
-                    showingConfirmation: false
+                    showingConfirmation: false,
+                    viewModel: viewModel
                 )
                 .background(
                     Color.clear
@@ -565,7 +566,8 @@ struct ContentView: View {
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showLessPrecision: $viewModel.showLessPrecision,
                     showInMenuBar: $viewModel.showInMenuBar,
-                    showingConfirmation: false
+                    showingConfirmation: false,
+                    viewModel: viewModel
                 )
                 .background(
                     Color.clear
@@ -763,11 +765,18 @@ private struct PowerwallMenuBarLabel: View {
         let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
 
         let left: String = {
+            func fmt(_ value: Double) -> String {
+                String(format: precision, value)
+            }
             switch metric {
-            case .solar:   return "\(metric.shortPrefix) \(solarKW, default: precision) kW"
-            case .load:    return "\(metric.shortPrefix) \(loadKW, default: precision) kW"
-            case .site:    return "\(metric.shortPrefix) \(siteKW, default: precision) kW"
-            case .battery: return "\(metric.shortPrefix) \(batteryKW, default: precision) kW"
+            case .solar:
+                return "\(metric.shortPrefix) \(fmt(solarKW)) kW"
+            case .load:
+                return "\(metric.shortPrefix) \(fmt(loadKW)) kW"
+            case .site:
+                return "\(metric.shortPrefix) \(fmt(siteKW)) kW"
+            case .battery:
+                return "\(metric.shortPrefix) \(fmt(batteryKW)) kW"
             }
         }()
 
