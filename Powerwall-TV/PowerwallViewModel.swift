@@ -51,6 +51,8 @@ class PowerwallViewModel: ObservableObject {
     @Published var currentEndDate: Date = Date()
     @Published var solarEnergyTodayWh: Double?
     @Published var batteryCount: Double?
+    @Published var version: String?
+    @Published var installationDate: Date?
     private var fleetRegionResolved: Bool = false
     @Published var fleetBaseURL: String = UserDefaults.standard.string(forKey: "fleetBaseURL") ?? "https://fleet-api.prd.na.vn.cloud.tesla.com"
 
@@ -710,11 +712,17 @@ class PowerwallViewModel: ObservableObject {
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
 
         fleetURLSession.dataTask(with: req) { [weak self] data, _, error in
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
             guard let data = data,
-                  let payload = try? JSONDecoder().decode(SiteInfoResponse.self, from: data)
+                  let payload = try? decoder.decode(SiteInfoResponse.self, from: data)
             else { return }
 
-            DispatchQueue.main.async { self?.batteryCount = payload.response.batteryCount }
+            DispatchQueue.main.async {
+                self?.batteryCount = payload.response.batteryCount
+                self?.version = payload.response.version
+                self?.installationDate = payload.response.installationDate
+            }
         }.resume()
     }
 
@@ -938,12 +946,14 @@ struct SiteInfo: Codable {
     let siteName: String?
     let version: String?
     let batteryCount: Double?
+    let installationDate: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
         case siteName = "site_name"
         case version
         case batteryCount = "battery_count"
+        case installationDate = "installation_date"
     }
 }
 

@@ -20,6 +20,7 @@ struct SettingsView: View {
     @Binding var showInMenuBar: Bool
     @State var showingConfirmation: Bool
     @Environment(\.presentationMode) var presentationMode
+    @ObservedObject var viewModel: PowerwallViewModel
 
     var body: some View {
 #if os(macOS)
@@ -89,12 +90,17 @@ struct SettingsView: View {
                         }
                 }
             }
-            Text("Version: \(appVersionAndBuild())")
-                .font(.footnote)
-                .opacity(0.6)
-            Text("Base: \(fleetBaseURL)")
-                .font(.footnote)
-                .opacity(0.6)
+            Group {
+                Text("Version: \(appVersionAndBuild())")
+                Text("Firmware: \(viewModel.version ?? "-")")
+                Text("Installed: \(viewModel.installationDate?.formatted(date: .long, time: .omitted) ?? "-")")
+                Text("Base: \(fleetBaseURL)")
+            }
+            .font(.footnote)
+            .opacity(0.6)
+#if os(macOS)
+            .textSelection(.enabled)
+#endif
         }
     }
 #if os(macOS)
@@ -168,7 +174,8 @@ struct SettingsView_Previews: PreviewProvider {
             preventScreenSaver: .constant(false),
             showLessPrecision: .constant(false),
             showInMenuBar: .constant(false),
-            showingConfirmation: false
+            showingConfirmation: false,
+            viewModel: PowerwallViewModel()
         )
     }
 }
