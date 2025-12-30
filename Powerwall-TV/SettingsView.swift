@@ -90,17 +90,23 @@ struct SettingsView: View {
                         }
                 }
             }
-            Group {
-                Text("Version: \(appVersionAndBuild())")
-                Text("Firmware: \(viewModel.version ?? "-")")
-                Text("Installed: \(viewModel.installationDate?.formatted(date: .long, time: .omitted) ?? "-")")
-                Text("Base: \(fleetBaseURL)")
-            }
-            .font(.footnote)
-            .opacity(0.6)
-#if os(macOS)
-            .textSelection(.enabled)
+
+            Section(header: Text("Information")) {
+                Group {
+                    Text("Version: \(appVersionAndBuild())")
+                    Text("Firmware: \(viewModel.version ?? "-")")
+                    Text("Installed: \(viewModel.installationDate?.formatted(date: .long, time: .omitted) ?? "-")")
+                    Text("Base: \(fleetBaseURL)")
+#if os(tvOS)
+                    Button("Save") { saveAndDismiss() }
 #endif
+                }
+                .font(.footnote)
+                .opacity(0.6)
+#if os(macOS)
+                .textSelection(.enabled)
+#endif
+            }
         }
     }
 #if os(macOS)
