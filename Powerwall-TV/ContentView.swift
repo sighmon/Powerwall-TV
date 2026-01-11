@@ -30,11 +30,11 @@ struct ContentView: View {
     var body: some View {
         ZStack {
 #if os(macOS)
-            Image(nsImage: NSImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyToDisplay(data: viewModel.data) > 10 ? "home-charger.png" : "home-charger-empty.png")!)
+            Image(nsImage: NSImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyTotal(data: viewModel.data) > 10 || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in" ? "home-charger.png" : "home-charger-empty.png")!)
                 .resizable()
                 .scaledToFit()
 #else
-            Image(uiImage: UIImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyToDisplay(data: viewModel.data) > 10 ? "home-charger.png" : "home-charger-empty.png")!)
+            Image(uiImage: UIImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyTotal(data: viewModel.data) > 10 || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in" ? "home-charger.png" : "home-charger-empty.png")!)
                 .resizable()
                 .ignoresSafeArea()
 #endif
@@ -192,14 +192,14 @@ struct ContentView: View {
     #endif
                                 HStack {
                                     VStack {
-                                        Text("\((self.wallConnectorEnergyToDisplay(data: data)) / 1000, specifier: precision) kW")
+                                        Text(self.wallConnectorDisplay(data: data, precision: precision))
                                             .fontWeight(.bold)
     #if os(macOS)
                                             .font(.title2)
     #else
                                             .font(.headline)
     #endif
-                                        Text("VEHICLE")
+                                        Text("VEHICLE\(data.wallConnectors.count > 1 ? "S (\(data.wallConnectors.count))" : "")")
                                             .opacity(0.6)
                                             .fontWeight(.bold)
     #if os(macOS)
@@ -275,7 +275,7 @@ struct ContentView: View {
 #endif
                         }
                         // Wall Connector to car animation
-                        if animations && self.wallConnectorEnergyToDisplay(data: data) > 10 {
+                        if animations && self.wallConnectorEnergyTotal(data: data) > 10 {
                             HStack {
                                 VStack {
 #if os(macOS)
@@ -285,7 +285,7 @@ struct ContentView: View {
 #endif
                                     PowerSurgeView(
                                         color: data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
-                                        isForward: self.wallConnectorEnergyToDisplay(data: data) < 0,
+                                        isForward: self.wallConnectorEnergyTotal(data: data) < 0,
                                         duration: 2,
                                         curve: ChargerToCar(),
                                         shouldStart: startAnimations
@@ -295,7 +295,7 @@ struct ContentView: View {
 #else
                                     .frame(width: 45, height: 155)
 #endif
-                                    .id("charger_\(self.wallConnectorEnergyToDisplay(data: data) < 0)_\(startAnimations)")
+                                    .id("charger_\(self.wallConnectorEnergyTotal(data: data) < 0)_\(startAnimations)")
                                 }
 #if os(macOS)
                                 Spacer().frame(width: 305)
@@ -696,11 +696,28 @@ struct ContentView: View {
     }
 
     private func homeEnergyToDisplay(data: PowerwallData) -> Double {
-        return data.load.instantPower - self.wallConnectorEnergyToDisplay(data: data)
+        return data.load.instantPower - self.wallConnectorEnergyTotal(data: data)
     }
 
-    private func wallConnectorEnergyToDisplay(data: PowerwallData?) -> Double {
+    private func wallConnectorEnergyTotal(data: PowerwallData?) -> Double {
         return data?.wallConnectors.reduce(0.0) { $0 + ($1.wallConnectorPower ?? 0.0) } ?? 0.0
+    }
+
+    private func wallConnectorDisplay(data: PowerwallData?, precision: String) -> String {
+        let hasCharging = data?.wallConnectors.contains { $0.wallConnectorState == 1.0 } ?? false
+        if hasCharging {
+            let powerKW = self.wallConnectorEnergyTotal(data: data!) / 1000
+            return "\(fmt(powerKW)) kW"
+        }
+        let hasPluggedIn = data?.wallConnectors.contains { $0.wallConnectorState == 4.0 } ?? false
+        if hasPluggedIn {
+            return "Plugged in"
+        }
+        return "Idle"
+    }
+
+    func fmt(_ value: Double) -> String {
+        String(format: precision, value)
     }
 }
 
