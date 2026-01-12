@@ -10,7 +10,6 @@ import Foundation
 import Combine
 import AuthenticationServices
 
-// Enum to define login options
 enum LoginMode: String, CaseIterable {
     case local = "local"
     case fleetAPI = "fleetAPI"
@@ -22,6 +21,7 @@ class PowerwallViewModel: ObservableObject {
     // Local login
     @Published var loginMode: LoginMode = LoginMode(rawValue: UserDefaults.standard.string(forKey: "loginMode") ?? "local") ?? .local
     @Published var ipAddress: String = UserDefaults.standard.string(forKey: "gatewayIP") ?? ""
+    @Published var wallConnectorIPAddress: String = UserDefaults.standard.string(forKey: "wallConnectorIP") ?? ""
     @Published var username: String = UserDefaults.standard.string(forKey: "username") ?? "customer"
     @Published var password: String = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
@@ -472,12 +472,13 @@ class PowerwallViewModel: ObservableObject {
                     self?.errorMessage = "Failed to fetch local data: \(error.localizedDescription)"
                 }
             } receiveValue: { [weak self] data in
-                self?.data = data
+                guard let self = self else { return }
+                self.data = data
+                self.fetchLocalWallConnectorVitalsAndMerge(into: data)
             }
             .store(in: &cancellables)
     }
 
-    // Fetches battery percentage from the /api/system_status/soe endpoint
     private func fetchLocalBatteryPercentage() {
         guard let url = URL(string: "https://\(ipAddress)/api/system_status/soe") else {
             self.errorMessage = "Invalid battery percentage URL"
@@ -501,7 +502,6 @@ class PowerwallViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    // Fetches the grid connection status from the /api/system_status/grid_status endpoint
     private func fetchLocalGridStatus() {
         guard let url = URL(string: "https://\(ipAddress)/api/system_status/grid_status") else {
             self.errorMessage = "Invalid grid status URL"
@@ -537,6 +537,55 @@ class PowerwallViewModel: ObservableObject {
             return ""
         }
         return String(format: " · %.0fx", batteryCount)
+    }
+
+    private func fetchLocalWallConnectorVitalsAndMerge(into base: PowerwallData) {
+        let wallConnectorIP = wallConnectorIPAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !wallConnectorIP.isEmpty else {
+            return
+        }
+
+        guard let url = URL(string: "https://\(wallConnectorIP)/api/1/vitals") else {
+            self.errorMessage = "Invalid Wall Connector vitals URL"
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+
+        localURLSession.dataTaskPublisher(for: request)
+            .map { $0.data }
+            .decode(type: WallConnectorVitals.self, decoder: JSONDecoder())
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] completion in
+                guard let self = self else { return }
+                if case .failure(let error) = completion {
+                    // Don’t wipe existing Powerwall data if WC fails; just attach an error.
+                    self.errorMessage = "Failed to fetch Wall Connector vitals: \(error.localizedDescription)"
+                }
+            } receiveValue: { [weak self] vitals in
+                guard let self = self else { return }
+
+                // Map vitals into your existing WallConnector model.
+                // vin/din aren't available via vitals; we’ll use the IP as a stable "din".
+                let wallConnector = WallConnector(
+                    vin: nil,
+                    din: wallConnectorIP,
+                    wallConnectorState: 0.0, // Double(vitals.evseState), // Note: this doesn't match the Fleet API!
+                    wallConnectorPower: vitals.wallConnectorPower
+                )
+
+                let merged = PowerwallData(
+                    battery: base.battery,
+                    load: base.load,
+                    solar: base.solar,
+                    site: base.site,
+                    wallConnectors: [wallConnector]
+                )
+
+                self.data = merged
+            }
+            .store(in: &cancellables)
     }
 
     func goToPreviousDay() {
@@ -817,7 +866,6 @@ struct Product: Codable {
     }
 }
 
-// Fleet response model
 struct FleetEnergySiteResponse: Codable {
     let response: FleetLiveStatus
 }
@@ -856,7 +904,6 @@ struct WallConnector: Codable {
     }
 }
 
-// Define the data model (adjust according to your API response)
 struct PowerwallData: Codable {
     struct Battery: Codable {
         let instantPower: Double
@@ -984,7 +1031,6 @@ struct PowerDataPoint: Codable {
     }
 }
 
-// Historical state of charge data from energy_history with kind="soe"
 struct SOEHistoryResponse: Codable {
     let response: SOEHistory
 }
@@ -998,7 +1044,6 @@ struct SOEDataPoint: Codable {
     let soe: Double
 }
 
-// Generic structure for graph data points
 enum PowerFrom: String, CaseIterable {
     case grid = "grid"
     case solar = "solar"
@@ -1022,6 +1067,34 @@ struct RegionResponse: Codable {
         let fleet_api_base_url: String?
     }
     let response: RegionInfo
+}
+
+struct WallConnectorVitals: Codable {
+    let contactorClosed: Bool
+    let vehicleConnected: Bool
+    let session: Int
+    let gridVolts: Double
+    let gridHertz: Double
+    let vehicleCurrentAmps: Double
+    let uptime: Int
+    let evseState: Int
+
+    enum CodingKeys: String, CodingKey {
+        case contactorClosed = "contactor_closed"
+        case vehicleConnected = "vehicle_connected"
+        case session = "session_s"
+        case gridVolts = "grid_v"
+        case gridHertz = "grid_hz"
+        case vehicleCurrentAmps = "vehicle_current_a"
+        case uptime = "uptime_s"
+        case evseState = "evse_state"
+    }
+}
+
+extension WallConnectorVitals {
+    // Approximate instantaneous charging power (W).
+    // Uses `grid_v * vehicle_current_a` which is a decent single-phase estimate.
+    var wallConnectorPower: Double { gridVolts * vehicleCurrentAmps }
 }
 
 #if os(macOS)

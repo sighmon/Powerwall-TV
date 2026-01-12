@@ -11,6 +11,7 @@ import SwiftUI
 struct SettingsView: View {
     @Binding var loginMode: LoginMode
     @Binding var ipAddress: String
+    @Binding var wallConnectorIPAddress: String
     @Binding var username: String
     @Binding var password: String
     @Binding var accessToken: String
@@ -51,6 +52,10 @@ struct SettingsView: View {
                         .textContentType(.username)
                     SecureField("Password", text: $password)
                         .textContentType(.password)
+                }
+                Section(header: Text("Wall Connector Settings")) {
+                    TextField("IP Address", text: $wallConnectorIPAddress)
+                        .textContentType(.URL)
                 }
             } else {
                 Section(header: Text("Fleet API Settings")) {
@@ -140,6 +145,7 @@ struct SettingsView: View {
         UserDefaults.standard.set(loginMode.rawValue, forKey: "loginMode")
         if loginMode == .local {
             UserDefaults.standard.set(ipAddress, forKey: "gatewayIP")
+            UserDefaults.standard.set(wallConnectorIPAddress, forKey: "wallConnectorIP")
             UserDefaults.standard.set(username, forKey: "username")
             KeychainWrapper.standard.set(password, forKey: "gatewayPassword")
         } else {
@@ -173,6 +179,7 @@ struct SettingsView_Previews: PreviewProvider {
         SettingsView(
             loginMode: .constant(LoginMode.local),
             ipAddress: .constant("192.168.1.100"),
+            wallConnectorIPAddress: .constant("192.168.1.101"),
             username: .constant("user@example.com"),
             password: .constant("password"),
             accessToken: .constant("accessToken"),

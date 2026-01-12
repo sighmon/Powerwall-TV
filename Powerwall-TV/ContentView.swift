@@ -530,6 +530,7 @@ struct ContentView: View {
                 SettingsView(
                     loginMode: $viewModel.loginMode,
                     ipAddress: $viewModel.ipAddress,
+                    wallConnectorIPAddress: $viewModel.wallConnectorIPAddress,
                     username: $viewModel.username,
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
@@ -559,6 +560,7 @@ struct ContentView: View {
                 SettingsView(
                     loginMode: $viewModel.loginMode,
                     ipAddress: $viewModel.ipAddress,
+                    wallConnectorIPAddress: $viewModel.wallConnectorIPAddress,
                     username: $viewModel.username,
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
