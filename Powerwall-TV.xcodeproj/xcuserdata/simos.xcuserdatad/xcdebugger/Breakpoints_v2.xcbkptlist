@@ -94,8 +94,8 @@
             filePath = "Powerwall-TV/PowerwallViewModel.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "533"
-            endingLineNumber = "533"
+            startingLineNumber = "532"
+            endingLineNumber = "532"
             landmarkName = "batteryCountString()"
             landmarkType = "7">
          </BreakpointContent>

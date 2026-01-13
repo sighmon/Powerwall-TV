@@ -473,7 +473,6 @@ class PowerwallViewModel: ObservableObject {
                 }
             } receiveValue: { [weak self] data in
                 guard let self = self else { return }
-                self.data = data
                 self.fetchLocalWallConnectorVitalsAndMerge(into: data)
             }
             .store(in: &cancellables)
@@ -542,10 +541,11 @@ class PowerwallViewModel: ObservableObject {
     private func fetchLocalWallConnectorVitalsAndMerge(into base: PowerwallData) {
         let wallConnectorIP = wallConnectorIPAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !wallConnectorIP.isEmpty else {
+            self.data = base
             return
         }
 
-        guard let url = URL(string: "https://\(wallConnectorIP)/api/1/vitals") else {
+        guard let url = URL(string: "http://\(wallConnectorIP)/api/1/vitals") else {
             self.errorMessage = "Invalid Wall Connector vitals URL"
             return
         }
@@ -571,7 +571,7 @@ class PowerwallViewModel: ObservableObject {
                 let wallConnector = WallConnector(
                     vin: nil,
                     din: wallConnectorIP,
-                    wallConnectorState: 0.0, // Double(vitals.evseState), // Note: this doesn't match the Fleet API!
+                    wallConnectorState: 1.0, // Double(vitals.evseState), // Note: this doesn't match the Fleet API!
                     wallConnectorPower: vitals.wallConnectorPower
                 )
 
