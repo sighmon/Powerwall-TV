@@ -436,9 +436,7 @@ class PowerwallViewModel: ObservableObject {
                     self.energySiteId = String(id)
                     self.siteName = currentSite.siteName ?? "Energy Site \(id)"
                     self.fetchFleetAPIData()
-                    if self.solarEnergyTodayWh == nil {
-                        self.fetchSolarEnergyToday()
-                    }
+                    self.fetchSolarEnergyToday()
                     if self.batteryCount == nil {
                         self.fetchSiteInfo()
                     }
