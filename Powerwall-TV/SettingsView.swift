@@ -11,6 +11,7 @@ import SwiftUI
 struct SettingsView: View {
     @Binding var loginMode: LoginMode
     @Binding var ipAddress: String
+    @Binding var wallConnectorIPAddress: String
     @Binding var username: String
     @Binding var password: String
     @Binding var accessToken: String
@@ -20,6 +21,7 @@ struct SettingsView: View {
     @Binding var showInMenuBar: Bool
     @State var showingConfirmation: Bool
     @Environment(\.presentationMode) var presentationMode
+    @ObservedObject var viewModel: PowerwallViewModel
 
     var body: some View {
 #if os(macOS)
@@ -50,6 +52,10 @@ struct SettingsView: View {
                         .textContentType(.username)
                     SecureField("Password", text: $password)
                         .textContentType(.password)
+                }
+                Section(header: Text("Wall Connector Settings")) {
+                    TextField("IP Address", text: $wallConnectorIPAddress)
+                        .textContentType(.URL)
                 }
             } else {
                 Section(header: Text("Fleet API Settings")) {
@@ -89,12 +95,23 @@ struct SettingsView: View {
                         }
                 }
             }
-            Text("Version: \(appVersionAndBuild())")
+
+            Section(header: Text("Information")) {
+                Group {
+                    Text("Version: \(appVersionAndBuild())")
+                    Text("Firmware: \(viewModel.version ?? "-")")
+                    Text("Installed: \(viewModel.installationDate?.formatted(date: .long, time: .omitted) ?? "-")")
+                    Text("Base: \(fleetBaseURL)")
+#if os(tvOS)
+                    Button("Save") { saveAndDismiss() }
+#endif
+                }
                 .font(.footnote)
                 .opacity(0.6)
-            Text("Base: \(fleetBaseURL)")
-                .font(.footnote)
-                .opacity(0.6)
+#if os(macOS)
+                .textSelection(.enabled)
+#endif
+            }
         }
     }
 #if os(macOS)
@@ -128,6 +145,7 @@ struct SettingsView: View {
         UserDefaults.standard.set(loginMode.rawValue, forKey: "loginMode")
         if loginMode == .local {
             UserDefaults.standard.set(ipAddress, forKey: "gatewayIP")
+            UserDefaults.standard.set(wallConnectorIPAddress, forKey: "wallConnectorIP")
             UserDefaults.standard.set(username, forKey: "username")
             KeychainWrapper.standard.set(password, forKey: "gatewayPassword")
         } else {
@@ -161,6 +179,7 @@ struct SettingsView_Previews: PreviewProvider {
         SettingsView(
             loginMode: .constant(LoginMode.local),
             ipAddress: .constant("192.168.1.100"),
+            wallConnectorIPAddress: .constant("192.168.1.101"),
             username: .constant("user@example.com"),
             password: .constant("password"),
             accessToken: .constant("accessToken"),
@@ -168,7 +187,8 @@ struct SettingsView_Previews: PreviewProvider {
             preventScreenSaver: .constant(false),
             showLessPrecision: .constant(false),
             showInMenuBar: .constant(false),
-            showingConfirmation: false
+            showingConfirmation: false,
+            viewModel: PowerwallViewModel()
         )
     }
 }

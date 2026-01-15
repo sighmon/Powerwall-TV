@@ -30,11 +30,11 @@ struct ContentView: View {
     var body: some View {
         ZStack {
 #if os(macOS)
-            Image(nsImage: NSImage(named: "home.png")!)
+            Image(nsImage: NSImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyTotal(data: viewModel.data) > 10 || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in" ? "home-charger.png" : "home-charger-empty.png")!)
                 .resizable()
                 .scaledToFit()
 #else
-            Image(uiImage: UIImage(named: "home.png")!)
+            Image(uiImage: UIImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyTotal(data: viewModel.data) > 10 || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in" ? "home-charger.png" : "home-charger-empty.png")!)
                 .resizable()
                 .ignoresSafeArea()
 #endif
@@ -86,6 +86,7 @@ struct ContentView: View {
                                             .font(.footnote)
 #endif
                                             .foregroundColor(.red)
+                                            .frame(width: 200)
                                     }
                                 }
                                 Spacer()
@@ -135,7 +136,7 @@ struct ContentView: View {
                                 Spacer().frame(width: 980)
 #endif
                                 VStack {
-                                    Text("\(data.load.instantPower / 1000, specifier: precision) kW")
+                                    Text("\(self.homeEnergyToDisplay(data: data) / 1000, specifier: precision) kW")
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
@@ -183,6 +184,38 @@ struct ContentView: View {
 #if os(macOS)
                             Spacer().frame(height: 60)
 #endif
+                        }
+                        if !data.wallConnectors.isEmpty {
+                            VStack {
+    #if os(macOS)
+                                Spacer().frame(height: 60)
+    #endif
+                                HStack {
+                                    VStack {
+                                        Text(self.wallConnectorDisplay(data: data, precision: precision))
+                                            .fontWeight(.bold)
+    #if os(macOS)
+                                            .font(.title2)
+    #else
+                                            .font(.headline)
+    #endif
+                                        Text("VEHICLE\(data.wallConnectors.count > 1 ? "S (\(data.wallConnectors.count))" : "")")
+                                            .opacity(0.6)
+                                            .fontWeight(.bold)
+    #if os(macOS)
+                                            .font(.subheadline)
+    #else
+                                            .font(.footnote)
+    #endif
+                                    }
+    #if os(macOS)
+                                    Spacer().frame(width: 260)
+    #else
+                                    Spacer().frame(width: 390)
+    #endif
+                                }
+                                Spacer()
+                            }
                         }
                         HStack {
 #if os(macOS)
@@ -240,6 +273,36 @@ struct ContentView: View {
 #if os(macOS)
                             Spacer().frame(height: 20)
 #endif
+                        }
+                        // Wall Connector to car animation
+                        if animations && self.wallConnectorEnergyTotal(data: data) > 10 {
+                            HStack {
+                                VStack {
+#if os(macOS)
+                                    Spacer().frame(height: 190)
+#else
+                                    Spacer().frame(height: 265)
+#endif
+                                    PowerSurgeView(
+                                        color: data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
+                                        isForward: self.wallConnectorEnergyTotal(data: data) < 0,
+                                        duration: 2,
+                                        curve: ChargerToCar(),
+                                        shouldStart: startAnimations
+                                    )
+#if os(macOS)
+                                    .frame(width: 40, height: 115)
+#else
+                                    .frame(width: 45, height: 155)
+#endif
+                                    .id("charger_\(self.wallConnectorEnergyTotal(data: data) < 0)_\(startAnimations)")
+                                }
+#if os(macOS)
+                                Spacer().frame(width: 305)
+#else
+                                Spacer().frame(width: 465)
+#endif
+                            }
                         }
                         // Solar to Gateway animation
                         if animations && data.solar.instantPower > 10 {
@@ -467,6 +530,7 @@ struct ContentView: View {
                 SettingsView(
                     loginMode: $viewModel.loginMode,
                     ipAddress: $viewModel.ipAddress,
+                    wallConnectorIPAddress: $viewModel.wallConnectorIPAddress,
                     username: $viewModel.username,
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
@@ -474,7 +538,8 @@ struct ContentView: View {
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showLessPrecision: $viewModel.showLessPrecision,
                     showInMenuBar: $viewModel.showInMenuBar,
-                    showingConfirmation: false
+                    showingConfirmation: false,
+                    viewModel: viewModel
                 )
                 .background(
                     Color.clear
@@ -495,6 +560,7 @@ struct ContentView: View {
                 SettingsView(
                     loginMode: $viewModel.loginMode,
                     ipAddress: $viewModel.ipAddress,
+                    wallConnectorIPAddress: $viewModel.wallConnectorIPAddress,
                     username: $viewModel.username,
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
@@ -502,7 +568,8 @@ struct ContentView: View {
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showLessPrecision: $viewModel.showLessPrecision,
                     showInMenuBar: $viewModel.showInMenuBar,
-                    showingConfirmation: false
+                    showingConfirmation: false,
+                    viewModel: viewModel
                 )
                 .background(
                     Color.clear
@@ -530,7 +597,8 @@ struct ContentView: View {
                             instantPower: homeLoad * 0.7,
                             energyExported: 409600
                         ),
-                        site: PowerwallData.Site(instantPower: homeLoad * 0.1)
+                        site: PowerwallData.Site(instantPower: homeLoad * 0.1),
+                        wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: homeLoad * 0.05)]
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
                     viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
@@ -558,7 +626,8 @@ struct ContentView: View {
                             instantPower: 2048,
                             energyExported: 4096000
                         ),
-                        site: PowerwallData.Site(instantPower: 0)
+                        site: PowerwallData.Site(instantPower: 0),
+                        wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: 512)]
                     )
                     viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
                     viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
@@ -587,12 +656,14 @@ struct ContentView: View {
                     UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
                     viewModel.fetchData()
                     viewModel.fetchSolarEnergyToday()
+                    viewModel.fetchSiteInfo()
                 }
                 if direction == .down && viewModel.currentEnergySiteIndex < viewModel.energySites.count - 1 {
                     viewModel.currentEnergySiteIndex += 1
                     UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
                     viewModel.fetchData()
                     viewModel.fetchSolarEnergyToday()
+                    viewModel.fetchSiteInfo()
                 }
             }
         }
@@ -623,18 +694,142 @@ struct ContentView: View {
         UserDefaults.standard.set(next, forKey: "currentEnergySiteIndex")
         viewModel.fetchData()
         viewModel.fetchSolarEnergyToday()
+        viewModel.fetchSiteInfo()
+    }
+
+    private func homeEnergyToDisplay(data: PowerwallData) -> Double {
+        return data.load.instantPower - self.wallConnectorEnergyTotal(data: data)
+    }
+
+    private func wallConnectorEnergyTotal(data: PowerwallData?) -> Double {
+        return data?.wallConnectors.reduce(0.0) { $0 + ($1.wallConnectorPower ?? 0.0) } ?? 0.0
+    }
+
+    private func wallConnectorDisplay(data: PowerwallData?, precision: String) -> String {
+        let hasCharging = data?.wallConnectors.contains { $0.wallConnectorState == 1.0 } ?? false
+        if hasCharging {
+            let powerKW = self.wallConnectorEnergyTotal(data: data!) / 1000
+            return "\(fmt(powerKW)) kW"
+        }
+        let hasPluggedIn = data?.wallConnectors.contains { $0.wallConnectorState == 4.0 } ?? false
+        if hasPluggedIn {
+            return "Plugged in"
+        }
+        return "Idle"
+    }
+
+    func fmt(_ value: Double) -> String {
+        String(format: precision, value)
     }
 }
 
 #if os(macOS)
-@SceneBuilder
-func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
-    MenuBarExtra(content: {
-        // The dropdown content when the user clicks the menu bar item.
-        if viewModel.showInMenuBar {
-            let precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
-            VStack(alignment: .center, spacing: 20) {
-                // Current numbers
+enum MenuBarLabelMetric: String, CaseIterable, Identifiable {
+    case solar, load, site, battery
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .solar: return "Solar"
+        case .load: return "Home"
+        case .site: return "Grid"
+        case .battery: return "Battery"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .solar: return "sun.max.fill"
+        case .load: return "house.fill"
+        case .site: return "bolt.horizontal.fill"
+        case .battery: return "battery.100percent"
+        }
+    }
+
+    var shortPrefix: String {
+        switch self {
+        case .solar: return "☀︎"
+        case .load: return "⌂"
+        case .site: return "⇄"
+        case .battery: return "⚡︎"
+        }
+    }
+}
+
+private struct PowerwallMenuBarLabel: View {
+    @ObservedObject var viewModel: PowerwallViewModel
+    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricRaw: String = MenuBarLabelMetric.solar.rawValue
+
+    private var metric: MenuBarLabelMetric {
+        MenuBarLabelMetric(rawValue: menuBarLabelMetricRaw) ?? .solar
+    }
+
+    private func batteryTrendGlyph(wiggleWatts: Double) -> String {
+        let battWatts = viewModel.data?.battery.instantPower ?? 0
+        if battWatts > wiggleWatts { return "↓" }
+        if battWatts < -wiggleWatts { return "↑" }
+        return ""
+    }
+
+    var body: some View {
+        guard viewModel.showInMenuBar else { return AnyView(EmptyView()) }
+
+        let precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
+        let trend = batteryTrendGlyph(wiggleWatts: 175.0)
+
+        let solarKW = (viewModel.data?.solar.instantPower ?? 0) / 1000
+        let loadKW  = (viewModel.data?.load.instantPower ?? 0) / 1000
+        let siteKW  = (viewModel.data?.site.instantPower ?? 0) / 1000
+        let batteryKW  = (viewModel.data?.battery.instantPower ?? 0) / 1000
+        let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
+
+        let left: String = {
+            func fmt(_ value: Double) -> String {
+                String(format: precision, value)
+            }
+            switch metric {
+            case .solar:
+                return "\(metric.shortPrefix) \(fmt(solarKW)) kW"
+            case .load:
+                return "\(metric.shortPrefix) \(fmt(loadKW)) kW"
+            case .site:
+                return "\(metric.shortPrefix) \(fmt(siteKW)) kW"
+            case .battery:
+                return "\(metric.shortPrefix) \(fmt(batteryKW)) kW"
+            }
+        }()
+
+        return AnyView(
+            Text("\(left) · \(batteryPercentage, specifier: "%.0f")% \(trend)")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+        )
+    }
+}
+
+private struct PowerwallMenuBarPopover: View {
+    @ObservedObject var viewModel: PowerwallViewModel
+    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricRaw: String = MenuBarLabelMetric.solar.rawValue
+
+    var body: some View {
+        guard viewModel.showInMenuBar else { return AnyView(EmptyView()) }
+
+        let precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
+
+        return AnyView(
+            VStack(alignment: .center, spacing: 16) {
+
+                Picker("Menu bar label", selection: $menuBarLabelMetricRaw) {
+                    ForEach(MenuBarLabelMetric.allCases) { option in
+                        Label(option.title, systemImage: option.symbol)
+                            .tag(option.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Divider()
+
                 let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
                 Gauge(value: batteryPercentage, in: 0...100) {
                     Label("Battery", systemImage: "bolt.fill")
@@ -642,9 +837,9 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                     Text("\(batteryPercentage, specifier: "%.0f")%")
                         .monospacedDigit()
                 }
-                    .tint(batteryPercentage >= 60 ? .green : (batteryPercentage >= 25 ? .yellow : .red))
-                    .gaugeStyle(.accessoryCircular)
-                    .frame(width: 56, height: 56)
+                .tint(batteryPercentage >= 60 ? .green : (batteryPercentage >= 25 ? .yellow : .red))
+                .gaugeStyle(.accessoryCircular)
+                .frame(width: 56, height: 56)
 
                 HStack(alignment: .center, spacing: 20) {
                     VStack {
@@ -656,7 +851,7 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                             .fontWeight(.bold)
                             .font(.subheadline)
                     }
-                        .frame(width: 100)
+                    .frame(width: 100)
 
                     VStack {
                         Text("\((viewModel.data?.load.instantPower ?? 0) / 1000, specifier: precision) kW")
@@ -667,9 +862,9 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                             .fontWeight(.bold)
                             .font(.subheadline)
                     }
-                        .frame(width: 100)
+                    .frame(width: 100)
                 }
-                    .padding(.bottom, 20)
+                .padding(.bottom, 10)
 
                 HStack(alignment: .center, spacing: 20) {
                     VStack {
@@ -681,7 +876,7 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                             .fontWeight(.bold)
                             .font(.subheadline)
                     }
-                        .frame(width: 100)
+                    .frame(width: 100)
 
                     VStack {
                         Text("\((viewModel.data?.site.instantPower ?? 0) / 1000, specifier: precision) kW")
@@ -692,23 +887,22 @@ func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
                             .fontWeight(.bold)
                             .font(.subheadline)
                     }
-                        .frame(width: 100)
+                    .frame(width: 100)
                 }
             }
             .padding(20)
             .frame(width: 250)
-        }
-    }, label: {
-        if viewModel.showInMenuBar {
-            // This is the text/icon that shows in the menu bar itself.
-            let solarKW = (viewModel.data?.solar.instantPower ?? 0) / 1000
-            let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
-            Text("☀︎ \(solarKW, specifier: "%.1f") kW · \(batteryPercentage, specifier: "%.0f")%")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-        }
-    })
-    // Show as a popover window style
+        )
+    }
+}
+
+@SceneBuilder
+func MenuBar(viewModel: PowerwallViewModel) -> some Scene {
+    MenuBarExtra {
+        PowerwallMenuBarPopover(viewModel: viewModel)
+    } label: {
+        PowerwallMenuBarLabel(viewModel: viewModel)
+    }
     .menuBarExtraStyle(.window)
 }
 #endif
