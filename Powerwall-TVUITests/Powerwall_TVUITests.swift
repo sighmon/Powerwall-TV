@@ -23,12 +23,37 @@ final class Powerwall_TVUITests: XCTestCase {
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testDemoModeShowsSampleData() throws {
         let app = XCUIApplication()
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
+        openSettingsIfNeeded(app)
+        setGatewayIP(app, to: "demo")
+        saveAndDismiss(app)
+
+        XCTAssertTrue(app.staticTexts["Home sweet home"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["OFF-GRID"].waitForExistence(timeout: 3))
+    }
+
+    @MainActor
+    func testPrecisionTogglePersistsAcrossRelaunch() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        openSettingsIfNeeded(app)
+        let precisionToggle = app.checkBoxes["Limit data to one decimal place"]
+        XCTAssertTrue(precisionToggle.waitForExistence(timeout: 3))
+
+        if precisionToggle.value as? String != "1" {
+            precisionToggle.tap()
+        }
+        saveAndDismiss(app)
+
+        app.terminate()
+        app.launch()
+
+        openSettingsIfNeeded(app)
+        XCTAssertEqual(app.checkBoxes["Limit data to one decimal place"].value as? String, "1")
     }
 
     @MainActor
@@ -39,5 +64,33 @@ final class Powerwall_TVUITests: XCTestCase {
                 XCUIApplication().launch()
             }
         }
+    }
+
+    @MainActor
+    private func openSettingsIfNeeded(_ app: XCUIApplication) {
+        if app.buttons["Save"].exists {
+            return
+        }
+        let settingsButton = app.buttons["Settings"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 3))
+        settingsButton.tap()
+        XCTAssertTrue(app.buttons["Save"].waitForExistence(timeout: 3))
+    }
+
+    @MainActor
+    private func setGatewayIP(_ app: XCUIApplication, to value: String) {
+        let ipFields = app.textFields.matching(identifier: "IP Address")
+        XCTAssertTrue(ipFields.element(boundBy: 0).waitForExistence(timeout: 3))
+        let gatewayField = ipFields.element(boundBy: 0)
+        gatewayField.tap()
+        gatewayField.typeKey("a", modifierFlags: .command)
+        gatewayField.typeText(value)
+    }
+
+    @MainActor
+    private func saveAndDismiss(_ app: XCUIApplication) {
+        let saveButton = app.buttons["Save"]
+        XCTAssertTrue(saveButton.waitForExistence(timeout: 3))
+        saveButton.tap()
     }
 }

@@ -63,6 +63,9 @@ class PowerwallViewModel: ObservableObject {
     }()
 
     private var cancellables = Set<AnyCancellable>()
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
 
     // URLSession instances
     private let localURLSession: URLSession  // For local, insecure connections
@@ -297,6 +300,7 @@ class PowerwallViewModel: ObservableObject {
     }
 
     private func resolveRegionBaseURL() {
+        if Self.isRunningTests { return }
         if fleetRegionResolved || accessToken.isEmpty { return }
 
         let candidates = [

@@ -1,5 +1,9 @@
 # Powerwall for AppleTV
 
+[![CI](https://github.com/sighmon/Powerwall-TV/actions/workflows/ci.yml/badge.svg)](https://github.com/sighmon/Powerwall-TV/actions/workflows/ci.yml)
+[![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://apps.apple.com/us/app/powerwall-tv/id6743396507)
+[![TestFlight](https://img.shields.io/badge/TestFlight-Join_beta-0A84FF?logo=apple&logoColor=white)](https://testflight.apple.com/join/4EFw1RBR)
+
 An AppleTV/macOS application to view the current state of your Tesla Powerwall via your local network or Tesla Fleet API.
 
 <img src="powerwall-tv.png" width="48%" /> <img src="powerwall-tv.gif" width="48%" />
@@ -34,6 +38,22 @@ In this application:
 * Once approved, an access token will be saved to your AppleTV Keychain so it can access your Powerwall via the Tesla Fleet API cloud
 
 None of your Tesla credentials will be saved in the application or anywhere else. Only the access token, refresh token, and expiry date will be saved so that you don't need to authenticate each time you open the application.
+
+## CI note
+
+CI uses a stub `Secrets` implementation so builds can run without local credentials. The stub reads `TESLA_CLIENT_ID` and `TESLA_CLIENT_SECRET` when the `CI` build flag is set.
+
+## Local development
+
+Create `Powerwall-TV/Secrets.swift` with your Fleet API credentials. The file is git-ignored.
+
+```swift
+// Powerwall-TV/Secrets.swift
+enum Secrets {
+    static let clientID = "<your-client-id>"
+    static let clientSecret = "<your-client-secret>"
+}
+```
 
 ## Privacy
 

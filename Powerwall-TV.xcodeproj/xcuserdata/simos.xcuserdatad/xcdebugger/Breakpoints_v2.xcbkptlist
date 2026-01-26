@@ -96,7 +96,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "530"
             endingLineNumber = "530"
-            landmarkName = "batteryCountString()"
+            landmarkName = "isOffGrid()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
