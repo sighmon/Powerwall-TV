@@ -39,6 +39,22 @@ In this application:
 
 None of your Tesla credentials will be saved in the application or anywhere else. Only the access token, refresh token, and expiry date will be saved so that you don't need to authenticate each time you open the application.
 
+## CI note
+
+CI uses a stub `Secrets` implementation so builds can run without local credentials. The stub reads `TESLA_CLIENT_ID` and `TESLA_CLIENT_SECRET` when the `CI` build flag is set.
+
+## Local development
+
+Create `Powerwall-TV/Secrets.swift` with your Fleet API credentials. The file is git-ignored.
+
+```swift
+// Powerwall-TV/Secrets.swift
+enum Secrets {
+    static let clientID = "<your-client-id>"
+    static let clientSecret = "<your-client-secret>"
+}
+```
+
 ## Privacy
 
 This application collects no personal data, and all information entered into it is only used to connect directly to your Powerwall via your own WiFi network, or directly to official Tesla Fleet API servers to retrieve Powerwall data remotely.
