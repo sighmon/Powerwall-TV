@@ -1,5 +1,9 @@
 # Powerwall for AppleTV
 
+[![CI](https://github.com/sighmon/Powerwall-TV/actions/workflows/ci.yml/badge.svg)](https://github.com/sighmon/Powerwall-TV/actions/workflows/ci.yml)
+[![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://apps.apple.com/us/app/powerwall-tv/id6743396507)
+[![TestFlight](https://img.shields.io/badge/TestFlight-Join_beta-0A84FF?logo=apple&logoColor=white)](https://testflight.apple.com/join/4EFw1RBR)
+
 An AppleTV/macOS application to view the current state of your Tesla Powerwall via your local network or Tesla Fleet API.
 
 <img src="powerwall-tv.png" width="48%" /> <img src="powerwall-tv.gif" width="48%" />

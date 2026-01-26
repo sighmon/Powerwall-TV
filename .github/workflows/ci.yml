@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit tests
+        run: |
+          xcodebuild test \
+            -project Powerwall-TV.xcodeproj \
+            -scheme Powerwall-TV \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            -skip-testing:Powerwall-TVUITests \
+            -skipPackagePluginValidation \
+            -skipMacroValidation
