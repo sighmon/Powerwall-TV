@@ -94,8 +94,31 @@ struct GraphView: View {
             } else {
                 return .gray
             }
-        case .solar, .home, .grid:
+        case .solar:
             return graph.color
+        case .home:
+            switch point.source {
+            case .battery:
+                return .green
+            case .solar:
+                return .yellow
+            case .grid:
+                return .gray
+            case .none:
+                return .gray
+            }
+        case .grid:
+            if point.value >= 0 {
+                return .gray
+            }
+            switch point.source {
+            case .solar:
+                return .yellow
+            case .battery:
+                return .green
+            case .grid, .none:
+                return .gray
+            }
         }
     }
 
@@ -352,7 +375,7 @@ func interpolateZeroCrossing(start: HistoricalDataPoint, end: HistoricalDataPoin
     let crossingTime = startTime + ratio * (endTime - startTime)
     let crossingDate = Date(timeIntervalSince1970: crossingTime)
 
-    return HistoricalDataPoint(date: crossingDate, value: 0, from: start.from, to: start.to)
+    return HistoricalDataPoint(date: crossingDate, value: 0, from: start.from, to: start.to, source: start.source)
 }
 
 // Sample data generation functions
@@ -365,7 +388,7 @@ func generateSampleData() -> [HistoricalDataPoint] {
         let value = Double.random(in: -1000...1000) // Random power in watts
         let from = ((i % 2) == 0) ? PowerFrom.solar : PowerFrom.grid
         let to = ((i % 2) == 0) ? PowerTo.grid : PowerTo.home
-        dataPoints.append(HistoricalDataPoint(date: date, value: value, from: from, to: to))
+        dataPoints.append(HistoricalDataPoint(date: date, value: value, from: from, to: to, source: nil))
     }
     return dataPoints
 }
@@ -377,7 +400,7 @@ func generateSamplePercentageData() -> [HistoricalDataPoint] {
     for i in 0..<48 {
         let date = calendar.date(byAdding: .hour, value: -i, to: now)!
         let value = Double.random(in: 0...100) // Random percentage between 0% and 100%
-        dataPoints.append(HistoricalDataPoint(date: date, value: value, from: nil, to: nil))
+        dataPoints.append(HistoricalDataPoint(date: date, value: value, from: nil, to: nil, source: nil))
     }
     return dataPoints
 }

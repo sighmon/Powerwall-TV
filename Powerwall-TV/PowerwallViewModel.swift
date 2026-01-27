@@ -716,7 +716,8 @@ class PowerwallViewModel: ObservableObject {
                         date: self.isoFormatter.date(from: point.timestamp)!,
                         value: point.batteryPower - point.batteryFromSolar - point.batteryFromGrid,
                         from: (point.batteryFromGrid + self.wiggleWatts) > point.batteryFromSolar ? PowerFrom.grid : PowerFrom.solar,
-                        to: point.batteryToGrid > self.wiggleWatts ? PowerTo.grid : PowerTo.home
+                        to: point.batteryToGrid > self.wiggleWatts ? PowerTo.grid : PowerTo.home,
+                        source: nil
                     )
                 }
                 let solarPoints = powerResponse.response.time_series.map { point in
@@ -724,7 +725,8 @@ class PowerwallViewModel: ObservableObject {
                         date: self.isoFormatter.date(from: point.timestamp)!,
                         value: point.solarEnergyExported ?? 0,
                         from: PowerFrom.solar,
-                        to: PowerTo.home
+                        to: PowerTo.home,
+                        source: .solar
                     )
                 }
                 let homePoints = powerResponse.response.time_series.map { point in
@@ -732,11 +734,18 @@ class PowerwallViewModel: ObservableObject {
                     let fromSolar = point.consumerEnergyImportedFromSolar ?? 0
                     let fromBattery = point.consumerEnergyImportedFromBattery ?? 0
                     let totalHome = fromGrid + fromSolar + fromBattery
+                    let source: PowerSource? = {
+                        if fromSolar >= fromGrid && fromSolar >= fromBattery { return .solar }
+                        if fromBattery >= fromGrid { return .battery }
+                        if fromGrid > 0 { return .grid }
+                        return nil
+                    }()
                     return HistoricalDataPoint(
                         date: self.isoFormatter.date(from: point.timestamp)!,
                         value: totalHome > 0 ? totalHome : (point.consumerEnergyImported ?? 0),
                         from: nil,
-                        to: nil
+                        to: nil,
+                        source: source
                     )
                 }
                 let gridPoints = powerResponse.response.time_series.map { point in
@@ -744,11 +753,19 @@ class PowerwallViewModel: ObservableObject {
                     let exportedFromBattery = point.batteryToGrid
                     let exportedTotal = exportedFromSolar + exportedFromBattery
                     let exported = exportedTotal > 0 ? exportedTotal : (point.gridEnergyExported ?? 0)
+                    let source: PowerSource? = {
+                        if exportedFromSolar > 0 || exportedFromBattery > 0 {
+                            return exportedFromSolar >= exportedFromBattery ? .solar : .battery
+                        }
+                        if (point.gridEnergyImported ?? 0) > 0 { return .grid }
+                        return nil
+                    }()
                     return HistoricalDataPoint(
                         date: self.isoFormatter.date(from: point.timestamp)!,
                         value: (point.gridEnergyImported ?? 0) - exported,
                         from: PowerFrom.grid,
-                        to: PowerTo.home
+                        to: PowerTo.home,
+                        source: source
                     )
                 }
                 DispatchQueue.main.async {
@@ -845,7 +862,7 @@ class PowerwallViewModel: ObservableObject {
             do {
                 let soeResponse = try JSONDecoder().decode(SOEHistoryResponse.self, from: data)
                 let dataPoints = soeResponse.response.time_series.map { point in
-                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.soe, from: nil, to: nil)
+                    HistoricalDataPoint(date: self.isoFormatter.date(from: point.timestamp)!, value: point.soe, from: nil, to: nil, source: nil)
                 }
                 completion(.success(dataPoints))
             } catch {
@@ -1110,11 +1127,18 @@ enum PowerTo: String, CaseIterable {
     case home = "home"
 }
 
+enum PowerSource: String, CaseIterable {
+    case grid = "grid"
+    case solar = "solar"
+    case battery = "battery"
+}
+
 struct HistoricalDataPoint {
     let date: Date
     let value: Double
     let from: PowerFrom?
     let to: PowerTo?
+    let source: PowerSource?
 }
 
 struct RegionResponse: Codable {
