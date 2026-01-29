@@ -74,13 +74,14 @@ struct Powerwall_TVTests {
     @Test func interpolateZeroCrossingFindsMidpoint() {
         let startDate = Date(timeIntervalSince1970: 0)
         let endDate = Date(timeIntervalSince1970: 100)
-        let start = HistoricalDataPoint(date: startDate, value: 100, from: .solar, to: .home)
-        let end = HistoricalDataPoint(date: endDate, value: -100, from: .solar, to: .home)
+        let start = HistoricalDataPoint(date: startDate, value: 100, from: .solar, to: .home, source: .solar)
+        let end = HistoricalDataPoint(date: endDate, value: -100, from: .solar, to: .home, source: .solar)
 
         let crossing = interpolateZeroCrossing(start: start, end: end)
         #expect(crossing.value == 0)
         #expect(crossing.from == .solar)
         #expect(crossing.to == .home)
+        #expect(crossing.source == .solar)
         #expect(abs(crossing.date.timeIntervalSince1970 - 50) < 0.0001)
     }
 

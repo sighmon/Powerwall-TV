@@ -676,10 +676,12 @@ struct ContentView: View {
             hasKeyboardFocus = true
         }
         .onKeyPress(.upArrow, phases: .down) { _ in
+            guard !showingGraph else { return .ignored }
             updateEnergySite(-1)
             return .handled
         }
         .onKeyPress(.downArrow, phases: .down) { _ in
+            guard !showingGraph else { return .ignored }
             updateEnergySite(+1)
             return .handled
         }
