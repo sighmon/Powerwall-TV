@@ -77,15 +77,16 @@ struct ContentView: View {
 #endif
                                             .padding(.bottom)
                                     }
-                                    if let errorMessage = viewModel.errorMessage {
-                                        Text("Error: \(errorMessage)")
+                                    if let message = viewModel.errorMessage ?? viewModel.infoMessage {
+                                        Text("Error: \(message)")
                                             .fontWeight(.bold)
 #if os(macOS)
                                             .font(.subheadline)
 #else
                                             .font(.footnote)
 #endif
-                                            .foregroundColor(.red)
+                                            .foregroundColor(viewModel.errorMessage != nil ? .red : .green)
+                                            .opacity(viewModel.errorMessage != nil ? 1.0 : 0.6)
                                             .frame(width: 200)
                                     }
                                 }
@@ -164,13 +165,25 @@ struct ContentView: View {
                                 Spacer().frame(width: 120)
 #endif
                                 VStack {
-                                    Text("\(data.battery.instantPower / 1000, specifier: precision) kW · \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
-                                        .fontWeight(.bold)
+                                    (
+                                        Text("\(data.battery.instantPower / 1000, specifier: precision) kW ")
+                                            .fontWeight(.bold)
 #if os(macOS)
-                                        .font(.title2)
+                                            .font(.title2)
 #else
-                                        .font(.headline)
+                                            .font(.headline)
 #endif
+                                        + Text(self.batteryArrow(wiggleWatts: 175.0))
+                                            .foregroundColor(.green)
+                                        + Text(" \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
+                                            .fontWeight(.bold)
+#if os(macOS)
+                                            .font(.title2)
+#else
+                                            .font(.headline)
+#endif
+                                    )
+
                                     Text("POWERWALL\(viewModel.batteryCountString())")
                                         .opacity(0.6)
                                         .fontWeight(.bold)
@@ -722,6 +735,13 @@ struct ContentView: View {
 
     func fmt(_ value: Double) -> String {
         String(format: precision, value)
+    }
+
+    func batteryArrow(wiggleWatts: Double) -> String {
+        let battWatts = viewModel.data?.battery.instantPower ?? 0
+        if battWatts > wiggleWatts { return "▼" }
+        if battWatts < -wiggleWatts { return "▲" }
+        return "·"
     }
 }
 

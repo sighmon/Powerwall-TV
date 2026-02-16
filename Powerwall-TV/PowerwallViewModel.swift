@@ -34,6 +34,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var batteryPercentage: BatteryPercentage?
     @Published var gridStatus: GridStatus?
     @Published var errorMessage: String?
+    @Published var infoMessage: String?
 
     // Tesla Fleet API credentials (replace with your actual values)
     private let clientID = Secrets.clientID
@@ -411,6 +412,7 @@ class PowerwallViewModel: ObservableObject {
 
     func fetchData() {
         self.errorMessage = nil
+        self.infoMessage = nil
         switch loginMode {
         case .local:
             // Ensure login before fetching data
@@ -665,7 +667,7 @@ class PowerwallViewModel: ObservableObject {
                     if (error as? URLError)?.code == .userAuthenticationRequired {
                         self?.refreshAccessToken() // Attempt to refresh token
                     } else {
-                        self?.errorMessage = "Failed to fetch Fleet API data: \(error.localizedDescription)"
+                        self?.infoMessage = "Fetching the latest data..."
                     }
                 }
             } receiveValue: { [weak self] data in
