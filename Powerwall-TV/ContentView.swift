@@ -26,6 +26,7 @@ struct ContentView: View {
 #endif
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
     private let timerTodaysTotal = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    private let timerElectricityMaps = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {
@@ -265,14 +266,14 @@ struct ContentView: View {
                                 Spacer().frame(width: 980)
 #endif
                                 VStack {
-                                    Text("\(data.site.instantPower / 1000, specifier: precision) kW")
+                                    Text("\(data.site.instantPower / 1000, specifier: precision) kW\(viewModel.gridFossilFuelPercentage.map { String(format: " · %.1f%%", max(0, min(100, 100 - $0))) } ?? "")")
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
 #else
                                         .font(.headline)
 #endif
-                                    Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID")
+                                    Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID\(viewModel.gridCarbonIntensity.map { " · \($0) gCO2" } ?? "")")
                                         .opacity(viewModel.isOffGrid() ? 1.0 : 0.6)
                                         .fontWeight(.bold)
 #if os(macOS)
@@ -548,6 +549,8 @@ struct ContentView: View {
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
                     fleetBaseURL: $viewModel.fleetBaseURL,
+                    electricityMapsAPIKey: $viewModel.electricityMapsAPIKey,
+                    electricityMapsZone: $viewModel.electricityMapsZone,
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showLessPrecision: $viewModel.showLessPrecision,
                     showInMenuBar: $viewModel.showInMenuBar,
@@ -578,6 +581,8 @@ struct ContentView: View {
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
                     fleetBaseURL: $viewModel.fleetBaseURL,
+                    electricityMapsAPIKey: $viewModel.electricityMapsAPIKey,
+                    electricityMapsZone: $viewModel.electricityMapsZone,
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showLessPrecision: $viewModel.showLessPrecision,
                     showInMenuBar: $viewModel.showInMenuBar,
@@ -624,11 +629,15 @@ struct ContentView: View {
                     viewModel.fetchSolarEnergyToday()
                 }
             }
+            .onReceive(timerElectricityMaps) { _ in
+                viewModel.fetchElectricityMapsData()
+            }
             .onAppear {
                 precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
                 if demo {
                     viewModel.ipAddress = "demo"
                 }
+                viewModel.fetchElectricityMapsData()
                 if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
                     showingSettings = true
                 } else if viewModel.ipAddress == "demo" {

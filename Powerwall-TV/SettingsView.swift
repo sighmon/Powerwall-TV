@@ -16,6 +16,8 @@ struct SettingsView: View {
     @Binding var password: String
     @Binding var accessToken: String
     @Binding var fleetBaseURL: String
+    @Binding var electricityMapsAPIKey: String
+    @Binding var electricityMapsZone: String
     @Binding var preventScreenSaver: Bool
     @Binding var showLessPrecision: Bool
     @Binding var showInMenuBar: Bool
@@ -65,6 +67,12 @@ struct SettingsView: View {
             }
 
             // New section for screen saver prevention
+            Section(header: Text("Electricity Maps Settings")) {
+                SecureField("API key", text: $electricityMapsAPIKey)
+                    .textContentType(.password)
+                TextField("Zone (e.g. AU-SA)", text: $electricityMapsZone)
+            }
+
             Section(header: Text("Display Settings")) {
 #if os(macOS)
                 Toggle("Show in menu bar", isOn: $showInMenuBar)
@@ -151,9 +159,12 @@ struct SettingsView: View {
         } else {
             KeychainWrapper.standard.set(accessToken, forKey: "fleetAPI_accessToken")
         }
+        KeychainWrapper.standard.set(electricityMapsAPIKey, forKey: "electricityMaps_apiKey")
+        UserDefaults.standard.set(electricityMapsZone, forKey: "electricityMaps_zone")
         UserDefaults.standard.set(preventScreenSaver, forKey: "preventScreenSaver")
         UserDefaults.standard.set(showLessPrecision, forKey: "showLessPrecision")
         UserDefaults.standard.set(showInMenuBar, forKey: "showInMenuBar")
+        viewModel.fetchElectricityMapsData()
         presentationMode.wrappedValue.dismiss()
     }
 
@@ -161,9 +172,11 @@ struct SettingsView: View {
         accessToken = ""
         KeychainWrapper.standard.set("", forKey: "fleetAPI_accessToken")
         KeychainWrapper.standard.set("", forKey: "fleetAPI_refreshToken")
+        KeychainWrapper.standard.set("", forKey: "electricityMaps_apiKey")
         UserDefaults.standard.removeObject(forKey: "currentEnergySiteIndex")
         UserDefaults.standard.removeObject(forKey: "fleetAPI_tokenExpiration")
         UserDefaults.standard.removeObject(forKey: "fleetBaseURL")
+        UserDefaults.standard.removeObject(forKey: "electricityMaps_zone")
     }
 }
 
@@ -184,6 +197,8 @@ struct SettingsView_Previews: PreviewProvider {
             password: .constant("password"),
             accessToken: .constant("accessToken"),
             fleetBaseURL: .constant("https://fleet-api.prd.na.vn.cloud.tesla.com"),
+            electricityMapsAPIKey: .constant(""),
+            electricityMapsZone: .constant(""),
             preventScreenSaver: .constant(false),
             showLessPrecision: .constant(false),
             showInMenuBar: .constant(false),
