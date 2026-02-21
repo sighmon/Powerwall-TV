@@ -168,22 +168,16 @@ struct ContentView: View {
                                 VStack {
                                     (
                                         Text("\(data.battery.instantPower / 1000, specifier: precision) kW ")
-                                            .fontWeight(.bold)
-#if os(macOS)
-                                            .font(.title2)
-#else
-                                            .font(.headline)
-#endif
-                                        + Text(self.batteryArrow(wiggleWatts: 175.0))
-                                            .foregroundColor(.green)
+                                        + Text(self.batteryArrow(wiggleWatts: wiggleWatts))
+                                            .foregroundColor(data.battery.instantPower > wiggleWatts || data.battery.instantPower < -wiggleWatts ? .green : .white)
                                         + Text(" \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
-                                            .fontWeight(.bold)
-#if os(macOS)
-                                            .font(.title2)
-#else
-                                            .font(.headline)
-#endif
                                     )
+                                        .fontWeight(.bold)
+#if os(macOS)
+                                        .font(.title2)
+#else
+                                        .font(.headline)
+#endif
 
                                     Text("POWERWALL\(viewModel.batteryCountString())")
                                         .opacity(0.6)
@@ -266,13 +260,29 @@ struct ContentView: View {
                                 Spacer().frame(width: viewModel.gridFossilFuelPercentage != nil ? 1140 : 980)
 #endif
                                 VStack {
-                                    Text("\(data.site.instantPower / 1000, specifier: precision) kW\(viewModel.gridFossilFuelPercentage.map { String(format: " · %.1f%%", max(0, min(100, 100 - $0))) } ?? "")")
+                                    if let fossil = viewModel.gridFossilFuelPercentage {
+                                        let renewables = max(0, min(100, 100 - fossil))
+                                        (
+                                            Text("\(data.site.instantPower / 1000, specifier: precision) kW")
+                                            + Text(" · ")
+                                            + Text(String(format: "%.1f%%", renewables))
+                                                .foregroundColor(renewablesColor(renewables))
+                                        )
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
 #else
                                         .font(.headline)
 #endif
+                                    } else {
+                                        Text("\(data.site.instantPower / 1000, specifier: precision) kW")
+                                            .fontWeight(.bold)
+#if os(macOS)
+                                            .font(.title2)
+#else
+                                            .font(.headline)
+#endif
+                                    }
                                     Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID\(viewModel.gridCarbonIntensity.map { " · \($0) gCO2" } ?? "")")
                                         .opacity(viewModel.isOffGrid() ? 1.0 : 0.6)
                                         .fontWeight(.bold)
@@ -751,6 +761,14 @@ struct ContentView: View {
         if battWatts > wiggleWatts { return "▼" }
         if battWatts < -wiggleWatts { return "▲" }
         return "·"
+    }
+
+    private func renewablesColor(_ renewables: Double) -> Color {
+        let clamped = max(0, min(100, renewables))
+        if clamped < 25 { return .brown }
+        if clamped < 50 { return .orange }
+        if clamped < 75 { return .yellow }
+        return .green
     }
 }
 
