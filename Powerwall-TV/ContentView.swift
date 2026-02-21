@@ -79,7 +79,7 @@ struct ContentView: View {
                                             .padding(.bottom)
                                     }
                                     if let message = viewModel.errorMessage ?? viewModel.infoMessage {
-                                        Text("Error: \(message)")
+                                        Text("\((viewModel.errorMessage != nil) ? "Error: " : "")\(message)")
                                             .fontWeight(.bold)
 #if os(macOS)
                                             .font(.subheadline)
@@ -263,7 +263,7 @@ struct ContentView: View {
 #if os(macOS)
                                 Spacer().frame(width: 510)
 #else
-                                Spacer().frame(width: 980)
+                                Spacer().frame(width: viewModel.gridFossilFuelPercentage != nil ? 1140 : 980)
 #endif
                                 VStack {
                                     Text("\(data.site.instantPower / 1000, specifier: precision) kW\(viewModel.gridFossilFuelPercentage.map { String(format: " · %.1f%%", max(0, min(100, 100 - $0))) } ?? "")")
