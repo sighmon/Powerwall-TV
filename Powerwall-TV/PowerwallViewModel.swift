@@ -29,6 +29,9 @@ class PowerwallViewModel: ObservableObject {
     @Published var showInMenuBar: Bool = UserDefaults.standard.bool(forKey: "showInMenuBar")
     @Published var currentEnergySiteIndex: Int = UserDefaults.standard.integer(forKey: "currentEnergySiteIndex")
     @Published var energySites: [Product] = []
+    @Published var electricityMapsZone: String = UserDefaults.standard.string(forKey: "electricityMaps_zone") ?? ""
+    @Published var gridCarbonIntensity: Int?
+    @Published var gridFossilFuelPercentage: Double?
 
     @Published var data: PowerwallData?
     @Published var batteryPercentage: BatteryPercentage?
@@ -59,6 +62,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var installationDate: Date?
     private var fleetRegionResolved: Bool = false
     @Published var fleetBaseURL: String = UserDefaults.standard.string(forKey: "fleetBaseURL") ?? "https://fleet-api.prd.na.vn.cloud.tesla.com"
+    @Published var electricityMapsAPIKey: String = KeychainWrapper.standard.string(forKey: "electricityMaps_apiKey") ?? ""
 
     private let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -900,6 +904,37 @@ class PowerwallViewModel: ObservableObject {
             }
         }
     }
+
+    func fetchElectricityMapsData() {
+        let apiKey = electricityMapsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let zone = electricityMapsZone.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !apiKey.isEmpty, !zone.isEmpty else {
+            return
+        }
+
+        guard let escapedZone = zone.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://api.electricitymaps.com/v3/home-assistant?zone=\(escapedZone)") else {
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(apiKey, forHTTPHeaderField: "auth-token")
+
+        fleetURLSession.dataTask(with: request) { [weak self] data, _, error in
+            guard let self = self else { return }
+            guard error == nil, let data = data,
+                  let response = try? JSONDecoder().decode(ElectricityMapsResponse.self, from: data) else {
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.gridCarbonIntensity = response.data.carbonIntensity
+                self.gridFossilFuelPercentage = response.data.fossilFuelPercentage
+            }
+        }.resume()
+    }
 }
 
 // MARK: - Data Models
@@ -1149,6 +1184,20 @@ struct RegionResponse: Codable {
         let fleet_api_base_url: String?
     }
     let response: RegionInfo
+}
+
+struct ElectricityMapsResponse: Codable {
+    let data: ElectricityMapsData
+}
+
+struct ElectricityMapsData: Codable {
+    let carbonIntensity: Int
+    let fossilFuelPercentage: Double
+
+    enum CodingKeys: String, CodingKey {
+        case carbonIntensity = "carbonIntensity"
+        case fossilFuelPercentage = "fossilFuelPercentage"
+    }
 }
 
 struct WallConnectorVitals: Codable {

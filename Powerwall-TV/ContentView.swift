@@ -26,6 +26,7 @@ struct ContentView: View {
 #endif
     private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
     private let timerTodaysTotal = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    private let timerElectricityMaps = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {
@@ -78,7 +79,7 @@ struct ContentView: View {
                                             .padding(.bottom)
                                     }
                                     if let message = viewModel.errorMessage ?? viewModel.infoMessage {
-                                        Text("Error: \(message)")
+                                        Text("\((viewModel.errorMessage != nil) ? "Error: " : "")\(message)")
                                             .fontWeight(.bold)
 #if os(macOS)
                                             .font(.subheadline)
@@ -167,22 +168,16 @@ struct ContentView: View {
                                 VStack {
                                     (
                                         Text("\(data.battery.instantPower / 1000, specifier: precision) kW ")
-                                            .fontWeight(.bold)
-#if os(macOS)
-                                            .font(.title2)
-#else
-                                            .font(.headline)
-#endif
-                                        + Text(self.batteryArrow(wiggleWatts: 175.0))
-                                            .foregroundColor(.green)
+                                        + Text(self.batteryArrow(wiggleWatts: wiggleWatts))
+                                            .foregroundColor(data.battery.instantPower > wiggleWatts || data.battery.instantPower < -wiggleWatts ? .green : .white)
                                         + Text(" \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
-                                            .fontWeight(.bold)
-#if os(macOS)
-                                            .font(.title2)
-#else
-                                            .font(.headline)
-#endif
                                     )
+                                        .fontWeight(.bold)
+#if os(macOS)
+                                        .font(.title2)
+#else
+                                        .font(.headline)
+#endif
 
                                     Text("POWERWALL\(viewModel.batteryCountString())")
                                         .opacity(0.6)
@@ -262,17 +257,33 @@ struct ContentView: View {
 #if os(macOS)
                                 Spacer().frame(width: 510)
 #else
-                                Spacer().frame(width: 980)
+                                Spacer().frame(width: viewModel.gridFossilFuelPercentage != nil ? 1140 : 980)
 #endif
                                 VStack {
-                                    Text("\(data.site.instantPower / 1000, specifier: precision) kW")
+                                    if let fossil = viewModel.gridFossilFuelPercentage {
+                                        let renewables = max(0, min(100, 100 - fossil))
+                                        (
+                                            Text("\(data.site.instantPower / 1000, specifier: precision) kW")
+                                            + Text(" · ")
+                                            + Text(String(format: "%.1f%%", renewables))
+                                                .foregroundColor(renewablesColor(renewables))
+                                        )
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
 #else
                                         .font(.headline)
 #endif
-                                    Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID")
+                                    } else {
+                                        Text("\(data.site.instantPower / 1000, specifier: precision) kW")
+                                            .fontWeight(.bold)
+#if os(macOS)
+                                            .font(.title2)
+#else
+                                            .font(.headline)
+#endif
+                                    }
+                                    Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID\(viewModel.gridCarbonIntensity.map { " · \($0) gCO2" } ?? "")")
                                         .opacity(viewModel.isOffGrid() ? 1.0 : 0.6)
                                         .fontWeight(.bold)
 #if os(macOS)
@@ -548,6 +559,8 @@ struct ContentView: View {
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
                     fleetBaseURL: $viewModel.fleetBaseURL,
+                    electricityMapsAPIKey: $viewModel.electricityMapsAPIKey,
+                    electricityMapsZone: $viewModel.electricityMapsZone,
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showLessPrecision: $viewModel.showLessPrecision,
                     showInMenuBar: $viewModel.showInMenuBar,
@@ -578,6 +591,8 @@ struct ContentView: View {
                     password: $viewModel.password,
                     accessToken: $viewModel.accessToken,
                     fleetBaseURL: $viewModel.fleetBaseURL,
+                    electricityMapsAPIKey: $viewModel.electricityMapsAPIKey,
+                    electricityMapsZone: $viewModel.electricityMapsZone,
                     preventScreenSaver: $viewModel.preventScreenSaver,
                     showLessPrecision: $viewModel.showLessPrecision,
                     showInMenuBar: $viewModel.showInMenuBar,
@@ -624,11 +639,15 @@ struct ContentView: View {
                     viewModel.fetchSolarEnergyToday()
                 }
             }
+            .onReceive(timerElectricityMaps) { _ in
+                viewModel.fetchElectricityMapsData()
+            }
             .onAppear {
                 precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
                 if demo {
                     viewModel.ipAddress = "demo"
                 }
+                viewModel.fetchElectricityMapsData()
                 if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
                     showingSettings = true
                 } else if viewModel.ipAddress == "demo" {
@@ -742,6 +761,14 @@ struct ContentView: View {
         if battWatts > wiggleWatts { return "▼" }
         if battWatts < -wiggleWatts { return "▲" }
         return "·"
+    }
+
+    private func renewablesColor(_ renewables: Double) -> Color {
+        let clamped = max(0, min(100, renewables))
+        if clamped < 25 { return .brown }
+        if clamped < 50 { return .orange }
+        if clamped < 75 { return .yellow }
+        return .green
     }
 }
 
