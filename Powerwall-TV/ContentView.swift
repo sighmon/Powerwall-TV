@@ -232,12 +232,16 @@ struct ContentView: View {
                         HStack {
 #if os(macOS)
                             Spacer().frame(width: 40)
+#elseif os(iOS)
+                            Spacer().frame(width: 40)
 #else
                             Spacer().frame(width: 59)
 #endif
                             VStack {
 #if os(macOS)
                                 Spacer().frame(height: 350)
+#elseif os(iOS)
+                                Spacer().frame(height: 375)
 #else
                                 Spacer().frame(height: 526)
 #endif
@@ -249,6 +253,8 @@ struct ContentView: View {
                                 }
 #if os(macOS)
                                     .frame(width: 0.8, height: 0.54)
+#elseif os(iOS)
+                                    .frame(width: 0.8, height: 0.58)
 #else
                                     .frame(width: 0.8, height: 0.84)
 #endif
@@ -308,6 +314,8 @@ struct ContentView: View {
                                 VStack {
 #if os(macOS)
                                     Spacer().frame(height: 190)
+#elseif os(iOS)
+                                    Spacer().frame(height: 200)
 #else
                                     Spacer().frame(height: 265)
 #endif
@@ -320,6 +328,8 @@ struct ContentView: View {
                                     )
 #if os(macOS)
                                     .frame(width: 40, height: 115)
+#elseif os(iOS)
+                                    .frame(width: 40, height: 115)
 #else
                                     .frame(width: 45, height: 155)
 #endif
@@ -327,6 +337,8 @@ struct ContentView: View {
                                 }
 #if os(macOS)
                                 Spacer().frame(width: 305)
+#elseif os(iOS)
+                                Spacer().frame(width: 325)
 #else
                                 Spacer().frame(width: 465)
 #endif
@@ -337,12 +349,16 @@ struct ContentView: View {
                             HStack {
 #if os(macOS)
                                 Spacer().frame(width: 240)
+#elseif os(iOS)
+                                Spacer().frame(width: 260)
 #else
                                 Spacer().frame(width: 370)
 #endif
                                 VStack {
 #if os(macOS)
                                     Spacer().frame(height: 195)
+#elseif os(iOS)
+                                    Spacer().frame(height: 205)
 #else
                                     Spacer().frame(height: 300)
 #endif
@@ -354,6 +370,8 @@ struct ContentView: View {
                                         shouldStart: startAnimations
                                     )
 #if os(macOS)
+                                    .frame(width: 40, height: 190)
+#elseif os(iOS)
                                     .frame(width: 40, height: 190)
 #else
                                     .frame(width: 40, height: 295)
@@ -367,12 +385,16 @@ struct ContentView: View {
                             HStack {
 #if os(macOS)
                                 Spacer().frame(width: 350)
+#elseif os(iOS)
+                                Spacer().frame(width: 370)
 #else
                                 Spacer().frame(width: 530)
 #endif
                                 VStack {
 #if os(macOS)
                                     Spacer().frame(height: 164)
+#elseif os(iOS)
+                                    Spacer().frame(height: 178)
 #else
                                     Spacer().frame(height: 295)
 #endif
@@ -387,6 +409,9 @@ struct ContentView: View {
 #if os(macOS)
                                     .frame(width: 70, height: 2)
                                     .rotationEffect(Angle(degrees: 7))
+#elseif os(iOS)
+                                    .frame(width: 70, height: 2)
+                                    .rotationEffect(Angle(degrees: 7))
 #else
                                     .frame(width: 110, height: 60)
 #endif
@@ -399,12 +424,16 @@ struct ContentView: View {
                             HStack {
 #if os(macOS)
                                 Spacer().frame(width: 150)
+#elseif os(iOS)
+                                Spacer().frame(width: 165)
 #else
                                 Spacer().frame(width: 240)
 #endif
                                 VStack {
 #if os(macOS)
                                     Spacer().frame(height: 260)
+#elseif os(iOS)
+                                    Spacer().frame(height: 267)
 #else
                                     Spacer().frame(height: 360)
 #endif
@@ -419,6 +448,9 @@ struct ContentView: View {
 #if os(macOS)
                                     .frame(width: 72, height: 60)
                                     .rotationEffect(Angle(degrees: 9))
+#elseif os(iOS)
+                                    .frame(width: 78, height: 50)
+                                    .rotationEffect(Angle(degrees: 7))
 #else
                                     .frame(width: 125, height: 60)
 #endif
@@ -431,12 +463,16 @@ struct ContentView: View {
                             HStack {
 #if os(macOS)
                                 Spacer().frame(width: 390)
+#elseif os(iOS)
+                                Spacer().frame(width: 410)
 #else
                                 Spacer().frame(width: 580)
 #endif
                                 VStack {
 #if os(macOS)
                                     Spacer().frame(height: 300)
+#elseif os(iOS)
+                                    Spacer().frame(height: 320)
 #else
                                     Spacer().frame(height: 462)
 #endif
@@ -449,6 +485,9 @@ struct ContentView: View {
                                         shouldStart: startAnimations
                                     )
 #if os(macOS)
+                                    .frame(width: 130, height: 98)
+                                    .rotationEffect(Angle(degrees: 0))
+#elseif os(iOS)
                                     .frame(width: 130, height: 98)
                                     .rotationEffect(Angle(degrees: 0))
 #else
