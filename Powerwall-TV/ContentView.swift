@@ -34,6 +34,10 @@ struct ContentView: View {
             Image(nsImage: NSImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyTotal(data: viewModel.data) > 10 || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in" ? "home-charger.png" : "home-charger-empty.png")!)
                 .resizable()
                 .scaledToFit()
+#elseif os(iOS)
+            Image(uiImage: UIImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyTotal(data: viewModel.data) > 10 || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in" ? "home-charger.png" : "home-charger-empty.png")!)
+                .resizable()
+                .scaledToFit()
 #else
             Image(uiImage: UIImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyTotal(data: viewModel.data) > 10 || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in" ? "home-charger.png" : "home-charger-empty.png")!)
                 .resizable()
@@ -506,7 +510,7 @@ struct ContentView: View {
                         }) {
                             ZStack {
                                 Image(systemName: "gear")
-#if os(macOS)
+#if os(macOS) || os(iOS)
                                     .symbolRenderingMode(.hierarchical)
                                     .foregroundStyle(.primary)
                                     .font(.system(size: 20, weight: .semibold))
@@ -528,7 +532,7 @@ struct ContentView: View {
                             }) {
                                 ZStack {
                                     Image(systemName: "chart.bar.xaxis.ascending.badge.clock")
-#if os(macOS)
+#if os(macOS) || os(iOS)
                                         .font(.system(size: 18, weight: .semibold))
                                         .symbolRenderingMode(.hierarchical)
                                         .foregroundStyle(.primary)
@@ -682,6 +686,15 @@ struct ContentView: View {
             .onDisappear {
                 startAnimations = false
             }
+#if os(iOS)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 20)
+                    .onEnded { value in
+                        handleSiteSwipe(value.translation)
+                    }
+            )
+#endif
+#if !os(iOS)
             .onMoveCommand { direction in
                 if direction == .up && viewModel.currentEnergySiteIndex > 0 {
                     viewModel.currentEnergySiteIndex -= 1
@@ -698,6 +711,7 @@ struct ContentView: View {
                     viewModel.fetchSiteInfo()
                 }
             }
+#endif
         }
         .background(Color(red: 22/255, green: 23/255, blue: 24/255))
 #if os(macOS)
@@ -729,6 +743,19 @@ struct ContentView: View {
         viewModel.fetchData()
         viewModel.fetchSolarEnergyToday()
         viewModel.fetchSiteInfo()
+    }
+
+    private func handleSiteSwipe(_ translation: CGSize) {
+        guard !showingGraph else { return }
+        let threshold: CGFloat = 40
+        let absX = abs(translation.width)
+        let absY = abs(translation.height)
+        guard absY > absX, absY >= threshold else { return }
+        if translation.height < 0 {
+            updateEnergySite(-1)
+        } else {
+            updateEnergySite(+1)
+        }
     }
 
     private func homeEnergyToDisplay(data: PowerwallData) -> Double {

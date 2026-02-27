@@ -129,6 +129,28 @@ struct GraphView: View {
         selectedGraph = graphs[next]
     }
 
+    private func handleSwipe(_ translation: CGSize) {
+        let threshold: CGFloat = 40
+        let absX = abs(translation.width)
+        let absY = abs(translation.height)
+        guard max(absX, absY) >= threshold else { return }
+
+        if absX > absY {
+            if translation.width < 0 {
+                viewModel.goToNextDay()
+            } else {
+                viewModel.goToPreviousDay()
+            }
+            return
+        }
+
+        if translation.height < 0 {
+            cycleGraph(-1)
+        } else {
+            cycleGraph(1)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             // Battery Power Flow Chart
@@ -336,6 +358,15 @@ struct GraphView: View {
         }
         .focusable() // Still needed to make it focusable
         .focused($isGraphFocused) // Bind focus state
+#if os(iOS)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    handleSwipe(value.translation)
+                }
+        )
+#endif
+#if !os(iOS)
         .onMoveCommand { direction in
             if direction == .left {
                 viewModel.goToPreviousDay()
@@ -350,6 +381,7 @@ struct GraphView: View {
                 cycleGraph(1)
             }
         }
+#endif
 #if os(macOS)
         .frame(minWidth: 1000)
         .onKeyPress(.upArrow, phases: .down) { _ in
