@@ -29,802 +29,186 @@ struct ContentView: View {
     private let timerElectricityMaps = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        ZStack {
-#if os(macOS)
-            Image(nsImage: NSImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyTotal(data: viewModel.data) > 10 || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in" ? "home-charger.png" : "home-charger-empty.png")!)
-                .resizable()
-                .scaledToFit()
-#elseif os(iOS)
-            Image(uiImage: UIImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyTotal(data: viewModel.data) > 10 || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in" ? "home-charger.png" : "home-charger-empty.png")!)
-                .resizable()
-                .scaledToFit()
-#else
-            Image(uiImage: UIImage(named: viewModel.data?.wallConnectors.isEmpty ?? true ? "home.png" : wallConnectorEnergyTotal(data: viewModel.data) > 10 || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in" ? "home-charger.png" : "home-charger-empty.png")!)
-                .resizable()
-                .ignoresSafeArea()
-#endif
+        GeometryReader { geometry in
+            let sceneSize = fittedSceneSize(in: geometry.size)
             ZStack {
-                if (viewModel.ipAddress.isEmpty && viewModel.loginMode == .local) {
-                    Text("Please configure the gateway settings.")
-                        .foregroundColor(.gray)
-                } else if let data = viewModel.data {
-                    ZStack {
-                        VStack {
-                            HStack {
-                                VStack {
-#if os(iOS)
-                                    Spacer().frame(height: 80)
-#endif
-                                    if (viewModel.siteName != nil) {
-                                        Text(viewModel.siteName ?? "")
-                                            .fontWeight(.bold)
-#if os(macOS)
-                                            .font(.title2)
-#elseif os(iOS)
-                                            .font(.title2)
-#else
-                                            .font(.headline)
-#endif
-                                            .padding(.bottom)
-                                    }
-                                    if data.solar.energyExported > 0 || (viewModel.solarEnergyTodayWh != nil) {
-                                        let exportedEnergy = (data.solar.energyExported > 0 ? data.solar.energyExported : viewModel.solarEnergyTodayWh ?? 0) / 1000
-                                        let specifier = exportedEnergy < 1000 ? precision : "%.0f"
-                                        Text("\(exportedEnergy, specifier: specifier) kWh")
-                                            .fontWeight(.bold)
-#if os(macOS)
-                                            .font(.title2)
-#elseif os(iOS)
-                                            .font(.title2)
-#else
-                                            .font(.headline)
-#endif
-                                        Text("ENERGY GENERATED \(data.solar.energyExported > 0 ? "" : "TODAY")")
-                                            .opacity(0.6)
-                                            .fontWeight(.bold)
-#if os(macOS)
-                                            .font(.subheadline)
-#elseif os(iOS)
-                                            .font(.subheadline)
-#else
-                                            .font(.footnote)
-#endif
-                                            .padding(.bottom)
-                                    }
-                                    if let message = viewModel.errorMessage ?? viewModel.infoMessage {
-                                        Text("\((viewModel.errorMessage != nil) ? "Error: " : "")\(message)")
-                                            .fontWeight(.bold)
-#if os(macOS)
-                                            .font(.subheadline)
-#elseif os(iOS)
-                                            .font(.subheadline)
-#else
-                                            .font(.footnote)
-#endif
-                                            .foregroundColor(viewModel.errorMessage != nil ? .red : .green)
-                                            .opacity(viewModel.errorMessage != nil ? 1.0 : 0.6)
-                                            .frame(width: 200)
-                                    }
-                                }
-                                Spacer()
-                            }
-                            Spacer()
-                        }
-                        VStack {
-#if os(macOS)
-                            Spacer().frame(height: 60)
-#elseif os(iOS)
-                            Spacer().frame(height: 140)
-#endif
-                            HStack {
-#if os(macOS)
-                                Spacer().frame(width: 220)
-#elseif os(iOS)
-                                Spacer().frame(width: 240)
-#else
-                                Spacer().frame(width: 340)
-#endif
-                                VStack {
-                                    Text("\(data.solar.instantPower / 1000, specifier: precision) kW")
-                                        .fontWeight(.bold)
-#if os(macOS)
-                                        .font(.title2)
-#elseif os(iOS)
-                                        .font(.title2)
-#else
-                                        .font(.headline)
-#endif
-                                    Text("SOLAR")
-                                        .opacity(0.6)
-                                        .fontWeight(.bold)
-#if os(macOS)
-                                        .font(.subheadline)
-#elseif os(iOS)
-                                        .font(.subheadline)
-#else
-                                        .font(.footnote)
-#endif
-                                }
-                            }
-                            Spacer()
-                        }
-                        VStack {
-#if os(macOS)
-                            Spacer().frame(height: 120)
-#elseif os(iOS)
-                            Spacer().frame(height: 240)
-#else
-                            Spacer().frame(height: 100)
-#endif
-                            HStack {
-#if os(macOS)
-                                Spacer().frame(width: 600)
-#elseif os(iOS)
-                                Spacer().frame(width: 700)
-#else
-                                Spacer().frame(width: 980)
-#endif
-                                VStack {
-                                    Text("\(self.homeEnergyToDisplay(data: data) / 1000, specifier: precision) kW")
-                                        .fontWeight(.bold)
-#if os(macOS)
-                                        .font(.title2)
-#elseif os(iOS)
-                                        .font(.title2)
-#else
-                                        .font(.headline)
-#endif
-                                    Text("HOME")
-                                        .opacity(0.6)
-                                        .fontWeight(.bold)
-#if os(macOS)
-                                        .font(.subheadline)
-#elseif os(iOS)
-                                        .font(.subheadline)
-#else
-                                        .font(.footnote)
-#endif
-                                }
-                            }
-                            Spacer()
-                        }
-                        VStack {
-                            Spacer()
-                            HStack {
-#if os(macOS)
-                                Spacer().frame(width: 80)
-#elseif os(iOS)
-                                Spacer().frame(width: 80)
-#else
-                                Spacer().frame(width: 120)
-#endif
-                                VStack {
-                                    (
-                                        Text("\(data.battery.instantPower / 1000, specifier: precision) kW ")
-                                        + Text(self.batteryArrow(wiggleWatts: wiggleWatts))
-                                            .foregroundColor(data.battery.instantPower > wiggleWatts || data.battery.instantPower < -wiggleWatts ? .green : .white)
-                                        + Text(" \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
-                                    )
-                                        .fontWeight(.bold)
-#if os(macOS)
-                                        .font(.title2)
-#elseif os(iOS)
-                                        .font(.title2)
-#else
-                                        .font(.headline)
-#endif
+                Color(red: 22/255, green: 23/255, blue: 24/255)
+                    .ignoresSafeArea()
 
-                                    Text("POWERWALL\(viewModel.batteryCountString())")
-                                        .opacity(0.6)
-                                        .fontWeight(.bold)
-#if os(macOS)
-                                        .font(.subheadline)
-#elseif os(iOS)
-                                        .font(.subheadline)
-#else
-                                        .font(.footnote)
-#endif
-                                }
-                            }
-#if os(macOS)
-                            Spacer().frame(height: 60)
-#elseif os(iOS)
-                            Spacer().frame(height: 140)
-#endif
-                        }
-                        if !data.wallConnectors.isEmpty {
-                            VStack {
-    #if os(macOS)
-                                Spacer().frame(height: 60)
-    #elseif os(iOS)
-                                Spacer().frame(height: 140)
-    #endif
-                                HStack {
-                                    VStack {
-                                        Text(self.wallConnectorDisplay(data: data, precision: precision))
-                                            .fontWeight(.bold)
-    #if os(macOS)
-                                            .font(.title2)
-    #elseif os(iOS)
-                                            .font(.title2)
-    #else
-                                            .font(.headline)
-    #endif
-                                        Text("VEHICLE\(data.wallConnectors.count > 1 ? "S (\(data.wallConnectors.count))" : "")")
-                                            .opacity(0.6)
-                                            .fontWeight(.bold)
-    #if os(macOS)
-                                            .font(.subheadline)
-    #elseif os(iOS)
-                                            .font(.subheadline)
-    #else
-                                            .font(.footnote)
-    #endif
-                                    }
-    #if os(macOS)
-                                    Spacer().frame(width: 260)
-    #elseif os(iOS)
-                                    Spacer().frame(width: 280)
-    #else
-                                    Spacer().frame(width: 390)
-    #endif
-                                }
-                                Spacer()
-                            }
-                        }
-                        HStack {
-#if os(macOS)
-                            Spacer().frame(width: 40)
-#elseif os(iOS)
-                            Spacer().frame(width: 40)
-#else
-                            Spacer().frame(width: 59)
-#endif
-                            VStack {
-#if os(macOS)
-                                Spacer().frame(height: 350)
-#elseif os(iOS)
-                                Spacer().frame(height: 375)
-#else
-                                Spacer().frame(height: 526)
-#endif
-                                GeometryReader { geometry in
-                                    Rectangle()
-                                        .fill(Color.green) // Lime green color
-                                        .frame(width: powerwallPercentageWidth, height: geometry.size.height * (viewModel.batteryPercentage?.percentage ?? 0 / 100))
-                                        .cornerRadius(1)
-                                }
-#if os(macOS)
-                                    .frame(width: 0.8, height: 0.54)
-#elseif os(iOS)
-                                    .frame(width: 0.8, height: 0.58)
-#else
-                                    .frame(width: 0.8, height: 0.84)
-#endif
-                                    .rotationEffect(Angle(degrees: 180))
-                            }
-                        }
-                        VStack {
-                            Spacer()
-                            HStack {
-#if os(macOS)
-                                Spacer().frame(width: 510)
-#elseif os(iOS)
-                                Spacer().frame(width: 550)
-#else
-                                Spacer().frame(width: viewModel.gridFossilFuelPercentage != nil ? 1140 : 980)
-#endif
-                                VStack {
-                                    if let fossil = viewModel.gridFossilFuelPercentage {
-                                        let renewables = max(0, min(100, 100 - fossil))
-                                        (
-                                            Text("\(data.site.instantPower / 1000, specifier: precision) kW")
-                                            + Text(" · ")
-                                            + Text(String(format: "%.1f%%", renewables))
-                                                .foregroundColor(renewablesColor(renewables))
-                                        )
-                                        .fontWeight(.bold)
-#if os(macOS)
-                                        .font(.title2)
-#elseif os(iOS)
-                                        .font(.title2)
-#else
-                                        .font(.headline)
-#endif
-                                    } else {
-                                        Text("\(data.site.instantPower / 1000, specifier: precision) kW")
-                                            .fontWeight(.bold)
-#if os(macOS)
-                                            .font(.title2)
-#elseif os(iOS)
-                                            .font(.title2)
-#else
-                                            .font(.headline)
-#endif
-                                    }
-                                    Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID\(viewModel.gridCarbonIntensity.map { " · \($0) gCO2" } ?? "")")
-                                        .opacity(viewModel.isOffGrid() ? 1.0 : 0.6)
-                                        .fontWeight(.bold)
-#if os(macOS)
-                                        .font(.subheadline)
-#elseif os(iOS)
-                                        .font(.subheadline)
-#else
-                                        .font(.footnote)
-#endif
-                                        .foregroundColor(viewModel.isOffGrid() ? .orange : .white)
-                                }
-                            }
-#if os(macOS)
-                            Spacer().frame(height: 20)
-#elseif os(iOS)
-                            Spacer().frame(height: 100)
-#endif
-                        }
-                        // Wall Connector to car animation
-                        if animations && self.wallConnectorEnergyTotal(data: data) > 10 {
-                            HStack {
-                                VStack {
-#if os(macOS)
-                                    Spacer().frame(height: 190)
-#elseif os(iOS)
-                                    Spacer().frame(height: 200)
-#else
-                                    Spacer().frame(height: 265)
-#endif
-                                    PowerSurgeView(
-                                        color: data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
-                                        isForward: self.wallConnectorEnergyTotal(data: data) < 0,
-                                        duration: 2,
-                                        curve: ChargerToCar(),
-                                        shouldStart: startAnimations
-                                    )
-#if os(macOS)
-                                    .frame(width: 40, height: 115)
-#elseif os(iOS)
-                                    .frame(width: 40, height: 115)
-#else
-                                    .frame(width: 45, height: 155)
-#endif
-                                    .id("charger_\(self.wallConnectorEnergyTotal(data: data) < 0)_\(startAnimations)")
-                                }
-#if os(macOS)
-                                Spacer().frame(width: 305)
-#elseif os(iOS)
-                                Spacer().frame(width: 325)
-#else
-                                Spacer().frame(width: 465)
-#endif
-                            }
-                        }
-                        // Solar to Gateway animation
-                        if animations && data.solar.instantPower > 10 {
-                            HStack {
-#if os(macOS)
-                                Spacer().frame(width: 240)
-#elseif os(iOS)
-                                Spacer().frame(width: 260)
-#else
-                                Spacer().frame(width: 370)
-#endif
-                                VStack {
-#if os(macOS)
-                                    Spacer().frame(height: 195)
-#elseif os(iOS)
-                                    Spacer().frame(height: 205)
-#else
-                                    Spacer().frame(height: 300)
-#endif
-                                    PowerSurgeView(
-                                        color: .yellow,
-                                        isForward: true,
-                                        duration: 2,
-                                        curve: SolarToGateway(),
-                                        shouldStart: startAnimations
-                                    )
-#if os(macOS)
-                                    .frame(width: 40, height: 190)
-#elseif os(iOS)
-                                    .frame(width: 40, height: 190)
-#else
-                                    .frame(width: 40, height: 295)
-#endif
-                                    .id("solar_\(data.solar.instantPower < 0)_\(startAnimations)")
-                                }
-                            }
-                        }
-                        // Gateway to Home animation
-                        if animations && data.load.instantPower > 10 {
-                            HStack {
-#if os(macOS)
-                                Spacer().frame(width: 350)
-#elseif os(iOS)
-                                Spacer().frame(width: 370)
-#else
-                                Spacer().frame(width: 530)
-#endif
-                                VStack {
-#if os(macOS)
-                                    Spacer().frame(height: 164)
-#elseif os(iOS)
-                                    Spacer().frame(height: 178)
-#else
-                                    Spacer().frame(height: 295)
-#endif
-                                    PowerSurgeView(
-                                        color: data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
-                                        isForward: true,
-                                        duration: 2,
-                                        startOffset: 1,
-                                        curve: GatewayToHome(),
-                                        shouldStart: startAnimations
-                                    )
-#if os(macOS)
-                                    .frame(width: 70, height: 2)
-                                    .rotationEffect(Angle(degrees: 7))
-#elseif os(iOS)
-                                    .frame(width: 70, height: 2)
-                                    .rotationEffect(Angle(degrees: 7))
-#else
-                                    .frame(width: 110, height: 60)
-#endif
-                                    .id("home_\(data.load.instantPower < 0)_\(startAnimations)")
-                                }
-                            }
-                        }
-                        // Powerwall to Gateway animation
-                        if animations && (data.battery.instantPower > 10 || data.battery.instantPower < -10) {
-                            HStack {
-#if os(macOS)
-                                Spacer().frame(width: 150)
-#elseif os(iOS)
-                                Spacer().frame(width: 165)
-#else
-                                Spacer().frame(width: 240)
-#endif
-                                VStack {
-#if os(macOS)
-                                    Spacer().frame(height: 260)
-#elseif os(iOS)
-                                    Spacer().frame(height: 267)
-#else
-                                    Spacer().frame(height: 360)
-#endif
-                                    PowerSurgeView(
-                                        color: data.battery.instantPower > 0 ? .green : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .gray,
-                                        isForward: data.battery.instantPower > 0,
-                                        duration: 2,
-                                        startOffset: data.battery.instantPower > 0 ? 0 : 1,
-                                        curve: PowerwallToGateway(),
-                                        shouldStart: startAnimations
-                                    )
-#if os(macOS)
-                                    .frame(width: 72, height: 60)
-                                    .rotationEffect(Angle(degrees: 9))
-#elseif os(iOS)
-                                    .frame(width: 78, height: 50)
-                                    .rotationEffect(Angle(degrees: 7))
-#else
-                                    .frame(width: 125, height: 60)
-#endif
-                                    .id("battery_\(data.battery.instantPower < 0)_\(startAnimations)")
-                                }
-                            }
-                        }
-                        // Gateway to Grid animation
-                        if animations && !viewModel.isOffGrid() && (data.site.instantPower > 10 || data.site.instantPower < -10) {
-                            HStack {
-#if os(macOS)
-                                Spacer().frame(width: 390)
-#elseif os(iOS)
-                                Spacer().frame(width: 410)
-#else
-                                Spacer().frame(width: 580)
-#endif
-                                VStack {
-#if os(macOS)
-                                    Spacer().frame(height: 300)
-#elseif os(iOS)
-                                    Spacer().frame(height: 320)
-#else
-                                    Spacer().frame(height: 462)
-#endif
-                                    PowerSurgeView(
-                                        color: data.site.instantPower > 0 ? .gray : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .green,
-                                        isForward: data.site.instantPower < 0,
-                                        duration: 2,
-                                        startOffset: data.site.instantPower > 0 ? 0 : 1,
-                                        curve: GatewayToGrid(),
-                                        shouldStart: startAnimations
-                                    )
-#if os(macOS)
-                                    .frame(width: 130, height: 98)
-                                    .rotationEffect(Angle(degrees: 0))
-#elseif os(iOS)
-                                    .frame(width: 130, height: 98)
-                                    .rotationEffect(Angle(degrees: 0))
-#else
-                                    .frame(width: 190, height: 120)
-#endif
-                                    .id("grid_\(data.site.instantPower < 0)_\(startAnimations)")
-                                }
-                            }
-                        }
-                        if viewModel.isOffGrid() {
-                            HStack {
-#if os(macOS)
-                                Spacer().frame(width: 380)
-#elseif os(iOS)
-                                Spacer().frame(width: 400)
-#else
-                                Spacer().frame(width: 580)
-#endif
-                                VStack {
-#if os(macOS)
-                                    Spacer().frame(height: 335)
-                                    Image(nsImage: NSImage(named: "off-grid.png")!)
-                                        .resizable()
-                                        .frame(width: 80, height: 48)
-#elseif os(iOS)
-                                    Spacer().frame(height: 355)
-                                    Image(uiImage: UIImage(named: "off-grid.png")!)
-                                        .resizable()
-                                        .frame(width: 80, height: 48)
-#else
-                                    Spacer().frame(height: 505)
-                                    Image(uiImage: UIImage(named: "off-grid.png")!)
-                                        .resizable()
-                                        .frame(width: 100, height: 60)
-#endif
-                                }
-                            }
-                        }
-                    }
-                    .foregroundColor(.white)
-                } else {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer().frame(width: 120)
-                            VStack {
-                                Text("Loading...")
-                                    .opacity(0.6)
-                                    .fontWeight(.bold)
-#if os(macOS)
-                                    .font(.subheadline)
-#elseif os(iOS)
-                                    .font(.subheadline)
-#else
-                                    .font(.footnote)
-#endif
-                            }
-                        }
-                    }
-                    .foregroundColor(.white)
-                }
+                ZStack {
+                    homeBackgroundImage
+                        .frame(width: sceneSize.width, height: sceneSize.height)
 
-                VStack {
-                    Spacer()
-                    HStack {
-                        Button(action: {
-                            showingSettings = true
-                        }) {
-                            ZStack {
-                                Image(systemName: "gear")
-#if os(macOS)
-                                    .symbolRenderingMode(.hierarchical)
-                                    .foregroundStyle(.primary)
-                                    .font(.system(size: 20, weight: .semibold))
-                                    .frame(width: 40, height: 40)
-#elseif os(iOS)
-                                    .symbolRenderingMode(.hierarchical)
-                                    .foregroundStyle(.primary)
-                                    .font(.system(size: 20, weight: .semibold))
-                                    .frame(width: 40, height: 40)
-#else
-                                    .font(.title2)
-                                    .frame(width: 80, height: 80)
-#endif
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                        .accessibilityLabel("Settings")
-                        .environment(\.colorScheme, .dark)
+                    sceneOverlay(in: sceneSize)
+                        .frame(width: sceneSize.width, height: sceneSize.height)
+                }
+                .frame(width: sceneSize.width, height: sceneSize.height)
+                .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
 
-                        if viewModel.loginMode == .fleetAPI {
-                            Button(action: {
-                                showingGraph = true
-                            }) {
-                                ZStack {
-                                    Image(systemName: "chart.bar.xaxis.ascending.badge.clock")
+                controlsOverlay
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding()
+            }
+        }
 #if os(macOS)
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .symbolRenderingMode(.hierarchical)
-                                        .foregroundStyle(.primary)
-                                        .frame(width: 40, height: 40)
-#elseif os(iOS)
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .symbolRenderingMode(.hierarchical)
-                                        .foregroundStyle(.primary)
-                                        .frame(width: 40, height: 40)
-#else
-                                        .font(.title3)
-                                        .frame(width: 80, height: 80)
-#endif
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.large)
-                            .accessibilityLabel("Chart")
-                            .environment(\.colorScheme, .dark)
-                        }
-                        Spacer()
-                    }
-                }
-            }
-            .padding()
-#if os(macOS)
-            .sheet(isPresented: $showingSettings) {
-                SettingsView(
-                    loginMode: $viewModel.loginMode,
-                    ipAddress: $viewModel.ipAddress,
-                    wallConnectorIPAddress: $viewModel.wallConnectorIPAddress,
-                    username: $viewModel.username,
-                    password: $viewModel.password,
-                    accessToken: $viewModel.accessToken,
-                    fleetBaseURL: $viewModel.fleetBaseURL,
-                    electricityMapsAPIKey: $viewModel.electricityMapsAPIKey,
-                    electricityMapsZone: $viewModel.electricityMapsZone,
-                    preventScreenSaver: $viewModel.preventScreenSaver,
-                    showLessPrecision: $viewModel.showLessPrecision,
-                    showInMenuBar: $viewModel.showInMenuBar,
-                    showingConfirmation: false,
-                    viewModel: viewModel
-                )
-                .background(
-                    Color.clear
-                        .background(.regularMaterial)
-                        .ignoresSafeArea()
-                )
-            }
-            .sheet(isPresented: $showingGraph) {
-                GraphView(viewModel: viewModel)
-                    .background(
-                        Color.clear
-                            .background(.regularMaterial)
-                            .ignoresSafeArea()
-                    )
-            }
-#else
-            .fullScreenCover(isPresented: $showingSettings) {
-                SettingsView(
-                    loginMode: $viewModel.loginMode,
-                    ipAddress: $viewModel.ipAddress,
-                    wallConnectorIPAddress: $viewModel.wallConnectorIPAddress,
-                    username: $viewModel.username,
-                    password: $viewModel.password,
-                    accessToken: $viewModel.accessToken,
-                    fleetBaseURL: $viewModel.fleetBaseURL,
-                    electricityMapsAPIKey: $viewModel.electricityMapsAPIKey,
-                    electricityMapsZone: $viewModel.electricityMapsZone,
-                    preventScreenSaver: $viewModel.preventScreenSaver,
-                    showLessPrecision: $viewModel.showLessPrecision,
-                    showInMenuBar: $viewModel.showInMenuBar,
-                    showingConfirmation: false,
-                    viewModel: viewModel
-                )
-                .background(
-                    Color.clear
-                        .background(.regularMaterial)
-                        .ignoresSafeArea()
-                )
-            }
-            .fullScreenCover(isPresented: $showingGraph) {
-                GraphView(viewModel: viewModel)
-                    .background(
-                        Color.clear
-                            .background(.regularMaterial)
-                            .ignoresSafeArea()
-                    )
-            }
-#endif
-            .onReceive(timer) { _ in
-                precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
-                if viewModel.ipAddress == "demo" {
-                    let homeLoad = Double(arc4random_uniform(4096)) + 256
-                    viewModel.data = PowerwallData(
-                        battery: PowerwallData.Battery(instantPower: homeLoad * 0.2, count: 1),
-                        load: PowerwallData.Load(instantPower: homeLoad),
-                        solar: PowerwallData.Solar(
-                            instantPower: homeLoad * 0.7,
-                            energyExported: 409600
-                        ),
-                        site: PowerwallData.Site(instantPower: homeLoad * 0.1),
-                        wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: homeLoad * 0.05)]
-                    )
-                    viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
-                    viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
-                } else if !viewModel.ipAddress.isEmpty || !viewModel.accessToken.isEmpty {
-                    viewModel.fetchData()
-                }
-            }
-            .onReceive(timerTodaysTotal) { _ in
-                if !viewModel.accessToken.isEmpty {
-                    viewModel.fetchSolarEnergyToday()
-                }
-            }
-            .onReceive(timerElectricityMaps) { _ in
-                viewModel.fetchElectricityMapsData()
-            }
-            .onAppear {
-                precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
-                if demo {
-                    viewModel.ipAddress = "demo"
-                }
-                viewModel.fetchElectricityMapsData()
-                if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
-                    showingSettings = true
-                } else if viewModel.ipAddress == "demo" {
-                    viewModel.data = PowerwallData(
-                        battery: PowerwallData.Battery(instantPower: 256, count: 1),
-                        load: PowerwallData.Load(instantPower: 2304),
-                        solar: PowerwallData.Solar(
-                            instantPower: 2048,
-                            energyExported: 4096000
-                        ),
-                        site: PowerwallData.Site(instantPower: 0),
-                        wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: 512)]
-                    )
-                    viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
-                    viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
-                    viewModel.siteName = "Home sweet home"
-                    // viewModel.errorMessage = "An error has occured"
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        startAnimations = true
-                    }
-                } else {
-                    viewModel.fetchData()
-                    // Trigger animations after a slight delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        startAnimations = true
-                    }
-                }
-#if !os(macOS)
-                UIApplication.shared.isIdleTimerDisabled = viewModel.preventScreenSaver
-#endif
-            }
-            .onDisappear {
-                startAnimations = false
-            }
-#if os(iOS)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 20)
-                    .onEnded { value in
-                        handleSiteSwipe(value.translation)
-                    }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(
+                loginMode: $viewModel.loginMode,
+                ipAddress: $viewModel.ipAddress,
+                wallConnectorIPAddress: $viewModel.wallConnectorIPAddress,
+                username: $viewModel.username,
+                password: $viewModel.password,
+                accessToken: $viewModel.accessToken,
+                fleetBaseURL: $viewModel.fleetBaseURL,
+                electricityMapsAPIKey: $viewModel.electricityMapsAPIKey,
+                electricityMapsZone: $viewModel.electricityMapsZone,
+                preventScreenSaver: $viewModel.preventScreenSaver,
+                showLessPrecision: $viewModel.showLessPrecision,
+                showInMenuBar: $viewModel.showInMenuBar,
+                showingConfirmation: false,
+                viewModel: viewModel
             )
+            .background(
+                Color.clear
+                    .background(.regularMaterial)
+                    .ignoresSafeArea()
+            )
+        }
+        .sheet(isPresented: $showingGraph) {
+            GraphView(viewModel: viewModel)
+                .background(
+                    Color.clear
+                        .background(.regularMaterial)
+                        .ignoresSafeArea()
+                )
+        }
+#else
+        .fullScreenCover(isPresented: $showingSettings) {
+            SettingsView(
+                loginMode: $viewModel.loginMode,
+                ipAddress: $viewModel.ipAddress,
+                wallConnectorIPAddress: $viewModel.wallConnectorIPAddress,
+                username: $viewModel.username,
+                password: $viewModel.password,
+                accessToken: $viewModel.accessToken,
+                fleetBaseURL: $viewModel.fleetBaseURL,
+                electricityMapsAPIKey: $viewModel.electricityMapsAPIKey,
+                electricityMapsZone: $viewModel.electricityMapsZone,
+                preventScreenSaver: $viewModel.preventScreenSaver,
+                showLessPrecision: $viewModel.showLessPrecision,
+                showInMenuBar: $viewModel.showInMenuBar,
+                showingConfirmation: false,
+                viewModel: viewModel
+            )
+            .background(
+                Color.clear
+                    .background(.regularMaterial)
+                    .ignoresSafeArea()
+            )
+        }
+        .fullScreenCover(isPresented: $showingGraph) {
+            GraphView(viewModel: viewModel)
+                .background(
+                    Color.clear
+                        .background(.regularMaterial)
+                        .ignoresSafeArea()
+                )
+        }
 #endif
-#if !os(iOS)
-            .onMoveCommand { direction in
-                if direction == .up && viewModel.currentEnergySiteIndex > 0 {
-                    viewModel.currentEnergySiteIndex -= 1
-                    UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
-                    viewModel.fetchData()
-                    viewModel.fetchSolarEnergyToday()
-                    viewModel.fetchSiteInfo()
+        .onReceive(timer) { _ in
+            precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
+            if viewModel.ipAddress == "demo" {
+                let homeLoad = Double(arc4random_uniform(4096)) + 256
+                viewModel.data = PowerwallData(
+                    battery: PowerwallData.Battery(instantPower: homeLoad * 0.2, count: 1),
+                    load: PowerwallData.Load(instantPower: homeLoad),
+                    solar: PowerwallData.Solar(
+                        instantPower: homeLoad * 0.7,
+                        energyExported: 409600
+                    ),
+                    site: PowerwallData.Site(instantPower: homeLoad * 0.1),
+                    wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: homeLoad * 0.05)]
+                )
+                viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
+                viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
+            } else if !viewModel.ipAddress.isEmpty || !viewModel.accessToken.isEmpty {
+                viewModel.fetchData()
+            }
+        }
+        .onReceive(timerTodaysTotal) { _ in
+            if !viewModel.accessToken.isEmpty {
+                viewModel.fetchSolarEnergyToday()
+            }
+        }
+        .onReceive(timerElectricityMaps) { _ in
+            viewModel.fetchElectricityMapsData()
+        }
+        .onAppear {
+            precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
+            if demo {
+                viewModel.ipAddress = "demo"
+            }
+            viewModel.fetchElectricityMapsData()
+            if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
+                showingSettings = true
+            } else if viewModel.ipAddress == "demo" {
+                viewModel.data = PowerwallData(
+                    battery: PowerwallData.Battery(instantPower: 256, count: 1),
+                    load: PowerwallData.Load(instantPower: 2304),
+                    solar: PowerwallData.Solar(
+                        instantPower: 2048,
+                        energyExported: 4096000
+                    ),
+                    site: PowerwallData.Site(instantPower: 1024),
+                    wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: 512)]
+                )
+                viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
+                //viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
+                viewModel.siteName = "Home sweet home"
+                // viewModel.errorMessage = "An error has occured"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    startAnimations = true
                 }
-                if direction == .down && viewModel.currentEnergySiteIndex < viewModel.energySites.count - 1 {
-                    viewModel.currentEnergySiteIndex += 1
-                    UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
-                    viewModel.fetchData()
-                    viewModel.fetchSolarEnergyToday()
-                    viewModel.fetchSiteInfo()
+            } else {
+                viewModel.fetchData()
+                // Trigger animations after a slight delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    startAnimations = true
                 }
             }
+#if !os(macOS)
+            UIApplication.shared.isIdleTimerDisabled = viewModel.preventScreenSaver
 #endif
         }
-        .background(Color(red: 22/255, green: 23/255, blue: 24/255))
+        .onDisappear {
+            startAnimations = false
+        }
+#if os(iOS)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    handleSiteSwipe(value.translation)
+                }
+        )
+#endif
+#if !os(iOS)
+        .onMoveCommand { direction in
+            if direction == .up && viewModel.currentEnergySiteIndex > 0 {
+                viewModel.currentEnergySiteIndex -= 1
+                UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
+                viewModel.fetchData()
+                viewModel.fetchSolarEnergyToday()
+                viewModel.fetchSiteInfo()
+            }
+            if direction == .down && viewModel.currentEnergySiteIndex < viewModel.energySites.count - 1 {
+                viewModel.currentEnergySiteIndex += 1
+                UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
+                viewModel.fetchData()
+                viewModel.fetchSolarEnergyToday()
+                viewModel.fetchSiteInfo()
+            }
+        }
+#endif
 #if os(macOS)
         .focusable(true)
         .focused($hasKeyboardFocus)
@@ -843,6 +227,405 @@ struct ContentView: View {
             return .handled
         }
 #endif
+    }
+
+    @ViewBuilder
+    private var homeBackgroundImage: some View {
+        let imageName = currentHomeImageName
+#if os(macOS)
+        Image(nsImage: NSImage(named: imageName)!)
+            .resizable()
+            .scaledToFit()
+#else
+        Image(uiImage: UIImage(named: imageName)!)
+            .resizable()
+            .scaledToFit()
+#endif
+    }
+
+    private var currentHomeImageName: String {
+        let hasWallConnector = !(viewModel.data?.wallConnectors.isEmpty ?? true)
+        if !hasWallConnector {
+            return "home.png"
+        }
+        let chargerActive = wallConnectorEnergyTotal(data: viewModel.data) > 10
+            || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in"
+        return chargerActive ? "home-charger.png" : "home-charger-empty.png"
+    }
+
+    @ViewBuilder
+    private func sceneOverlay(in sceneSize: CGSize) -> some View {
+        if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
+            Text("Please configure the gateway settings.")
+                .foregroundColor(.gray)
+        } else if let data = viewModel.data {
+            sceneDataOverlay(data: data, sceneSize: sceneSize)
+                .foregroundColor(.white)
+        } else {
+            Text("Loading...")
+                .opacity(0.6)
+                .fontWeight(.bold)
+                .font(labelFont)
+                .foregroundColor(.white)
+                .position(scenePoint(x: 0.05, y: 0.43, in: sceneSize))
+        }
+    }
+
+    private func sceneDataOverlay(data: PowerwallData, sceneSize: CGSize) -> some View {
+        ZStack {
+            siteSummaryView(data: data)
+                .position(scenePoint(x: -0.39, y: -0.40, in: sceneSize))
+
+            solarMetricView(data: data)
+                .position(scenePoint(x: 0.085, y: -0.38, in: sceneSize))
+
+            homeMetricView(data: data)
+                .position(scenePoint(x: 0.26, y: -0.31, in: sceneSize))
+
+            batteryMetricView(data: data)
+                .position(scenePoint(x: 0.03, y: 0.38, in: sceneSize))
+
+            if !data.wallConnectors.isEmpty {
+                wallConnectorMetricView(data: data)
+                    .position(scenePoint(x: -0.104, y: -0.38, in: sceneSize))
+            }
+
+            batteryPercentageIndicator(sceneSize: sceneSize)
+                .position(scenePoint(x: 0.014, y: 0.206, in: sceneSize))
+
+            gridMetricView(data: data)
+                .position(scenePoint(x: viewModel.gridFossilFuelPercentage != nil ? 0.30 : 0.26, y: 0.38, in: sceneSize))
+
+            if animations && wallConnectorEnergyTotal(data: data) > 10 {
+                PowerSurgeView(
+                    color: data.solar.instantPower + wiggleWatts > data.battery.instantPower
+                        ? .yellow
+                        : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
+                    isForward: wallConnectorEnergyTotal(data: data) < 0,
+                    duration: 2,
+                    curve: ChargerToCar(),
+                    shouldStart: startAnimations
+                )
+                .frame(width: sceneWidth(0.024, in: sceneSize), height: sceneHeight(0.145, in: sceneSize))
+                .position(scenePoint(x: -0.12, y: 0.13, in: sceneSize))
+                .id("charger_\(wallConnectorEnergyTotal(data: data) < 0)_\(startAnimations)")
+            }
+
+            if animations && data.solar.instantPower > 10 {
+                PowerSurgeView(
+                    color: .yellow,
+                    isForward: true,
+                    duration: 2,
+                    curve: SolarToGateway(),
+                    shouldStart: startAnimations
+                )
+                .frame(width: sceneWidth(0.021, in: sceneSize), height: sceneHeight(0.242, in: sceneSize))
+                .position(scenePoint(x: 0.095, y: 0.13, in: sceneSize))
+                .id("solar_\(data.solar.instantPower < 0)_\(startAnimations)")
+            }
+
+            if animations && data.load.instantPower > 10 {
+                PowerSurgeView(
+                    color: data.solar.instantPower + wiggleWatts > data.battery.instantPower
+                        ? .yellow
+                        : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
+                    isForward: true,
+                    duration: 2,
+                    startOffset: 1,
+                    curve: GatewayToHome(),
+                    shouldStart: startAnimations
+                )
+                .frame(width: sceneWidth(0.054, in: sceneSize), height: sceneHeight(0.056, in: sceneSize))
+                .rotationEffect(Angle(degrees: 5))
+                .position(scenePoint(x: 0.136, y: 0.14, in: sceneSize))
+                .id("home_\(data.load.instantPower < 0)_\(startAnimations)")
+            }
+
+            if animations && (data.battery.instantPower > 10 || data.battery.instantPower < -10) {
+                PowerSurgeView(
+                    color: data.battery.instantPower > 0
+                        ? .green
+                        : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .gray,
+                    isForward: data.battery.instantPower > 0,
+                    duration: 2,
+                    startOffset: data.battery.instantPower > 0 ? 0 : 1,
+                    curve: PowerwallToGateway(),
+                    shouldStart: startAnimations
+                )
+                .frame(width: sceneWidth(0.060, in: sceneSize), height: sceneHeight(0.056, in: sceneSize))
+                .rotationEffect(Angle(degrees: 7))
+                .position(scenePoint(x: 0.061, y: 0.168, in: sceneSize))
+                .id("battery_\(data.battery.instantPower < 0)_\(startAnimations)")
+            }
+
+            if animations && !viewModel.isOffGrid() && (data.site.instantPower > 10 || data.site.instantPower < -10) {
+                PowerSurgeView(
+                    color: data.site.instantPower > 0
+                        ? .gray
+                        : data.solar.instantPower + wiggleWatts > data.battery.instantPower ? .yellow : .green,
+                    isForward: data.site.instantPower < 0,
+                    duration: 2,
+                    startOffset: data.site.instantPower > 0 ? 0 : 1,
+                    curve: GatewayToGrid(),
+                    shouldStart: startAnimations
+                )
+                .frame(width: sceneWidth(0.102, in: sceneSize), height: sceneHeight(0.134, in: sceneSize))
+                .position(scenePoint(x: 0.152, y: 0.208, in: sceneSize))
+                .id("grid_\(data.site.instantPower < 0)_\(startAnimations)")
+            }
+
+            if viewModel.isOffGrid() {
+                offGridImage(sceneSize: sceneSize)
+                    .position(scenePoint(x: 0.151, y: -0.003, in: sceneSize))
+            }
+        }
+        .frame(width: sceneSize.width, height: sceneSize.height)
+    }
+
+    private func siteSummaryView(data: PowerwallData) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let siteName = viewModel.siteName {
+                Text(siteName)
+                    .fontWeight(.bold)
+                    .font(valueFont)
+                    .padding(.bottom, 4)
+            }
+            if data.solar.energyExported > 0 || viewModel.solarEnergyTodayWh != nil {
+                let exportedEnergy = (data.solar.energyExported > 0 ? data.solar.energyExported : viewModel.solarEnergyTodayWh ?? 0) / 1000
+                let specifier = exportedEnergy < 1000 ? precision : "%.0f"
+                Text("\(exportedEnergy, specifier: specifier) kWh")
+                    .fontWeight(.bold)
+                    .font(valueFont)
+                Text("ENERGY GENERATED \(data.solar.energyExported > 0 ? "" : "TODAY")")
+                    .opacity(0.6)
+                    .fontWeight(.bold)
+                    .font(labelFont)
+                    .padding(.bottom, 4)
+            }
+            if let message = viewModel.errorMessage ?? viewModel.infoMessage {
+                Text("\((viewModel.errorMessage != nil) ? "Error: " : "")\(message)")
+                    .fontWeight(.bold)
+                    .font(labelFont)
+                    .foregroundColor(viewModel.errorMessage != nil ? .red : .green)
+                    .opacity(viewModel.errorMessage != nil ? 1.0 : 0.6)
+                    .frame(width: 260, alignment: .leading)
+            }
+        }
+        .multilineTextAlignment(.leading)
+    }
+
+    private func solarMetricView(data: PowerwallData) -> some View {
+        VStack(spacing: 2) {
+            Text("\(data.solar.instantPower / 1000, specifier: precision) kW")
+                .fontWeight(.bold)
+                .font(valueFont)
+            Text("SOLAR")
+                .opacity(0.6)
+                .fontWeight(.bold)
+                .font(labelFont)
+        }
+        .multilineTextAlignment(.center)
+    }
+
+    private func homeMetricView(data: PowerwallData) -> some View {
+        VStack(spacing: 2) {
+            Text("\(homeEnergyToDisplay(data: data) / 1000, specifier: precision) kW")
+                .fontWeight(.bold)
+                .font(valueFont)
+            Text("HOME")
+                .opacity(0.6)
+                .fontWeight(.bold)
+                .font(labelFont)
+        }
+        .multilineTextAlignment(.center)
+    }
+
+    private func batteryMetricView(data: PowerwallData) -> some View {
+        VStack(spacing: 2) {
+            (
+                Text("\(data.battery.instantPower / 1000, specifier: precision) kW ")
+                + Text(batteryArrow(wiggleWatts: wiggleWatts))
+                    .foregroundColor(data.battery.instantPower > wiggleWatts || data.battery.instantPower < -wiggleWatts ? .green : .white)
+                + Text(" \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
+            )
+            .fontWeight(.bold)
+            .font(valueFont)
+
+            Text("POWERWALL\(viewModel.batteryCountString())")
+                .opacity(0.6)
+                .fontWeight(.bold)
+                .font(labelFont)
+        }
+        .multilineTextAlignment(.center)
+    }
+
+    private func wallConnectorMetricView(data: PowerwallData) -> some View {
+        VStack(spacing: 2) {
+            Text(wallConnectorDisplay(data: data, precision: precision))
+                .fontWeight(.bold)
+                .font(valueFont)
+            Text("VEHICLE\(data.wallConnectors.count > 1 ? "S (\(data.wallConnectors.count))" : "")")
+                .opacity(0.6)
+                .fontWeight(.bold)
+                .font(labelFont)
+        }
+        .multilineTextAlignment(.center)
+    }
+
+    private func gridMetricView(data: PowerwallData) -> some View {
+        VStack(spacing: 2) {
+            if let fossil = viewModel.gridFossilFuelPercentage {
+                let renewables = max(0, min(100, 100 - fossil))
+                (
+                    Text("\(data.site.instantPower / 1000, specifier: precision) kW")
+                    + Text(" · ")
+                    + Text(String(format: "%.1f%%", renewables))
+                        .foregroundColor(renewablesColor(renewables))
+                )
+                .fontWeight(.bold)
+                .font(valueFont)
+            } else {
+                Text("\(data.site.instantPower / 1000, specifier: precision) kW")
+                    .fontWeight(.bold)
+                    .font(valueFont)
+            }
+
+            Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID\(viewModel.gridCarbonIntensity.map { " · \($0) gCO2" } ?? "")")
+                .opacity(viewModel.isOffGrid() ? 1.0 : 0.6)
+                .fontWeight(.bold)
+                .font(labelFont)
+                .foregroundColor(viewModel.isOffGrid() ? .orange : .white)
+        }
+        .multilineTextAlignment(.center)
+    }
+
+    private func batteryPercentageIndicator(sceneSize: CGSize) -> some View {
+        let percentage = max(0.0, min(1.0, (viewModel.batteryPercentage?.percentage ?? 0) / 100))
+        let indicatorHeight = sceneHeight(0.078, in: sceneSize)
+        let indicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0026, in: sceneSize))
+        return ZStack(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.green)
+                .frame(width: indicatorWidth, height: indicatorHeight * percentage)
+                .cornerRadius(1)
+        }
+        .frame(width: indicatorWidth, height: indicatorHeight)
+    }
+
+    private func offGridImage(sceneSize: CGSize) -> some View {
+#if os(macOS)
+        Image(nsImage: NSImage(named: "off-grid.png")!)
+            .resizable()
+            .frame(width: sceneWidth(0.052, in: sceneSize), height: sceneHeight(0.056, in: sceneSize))
+#else
+        Image(uiImage: UIImage(named: "off-grid.png")!)
+            .resizable()
+            .frame(width: sceneWidth(0.052, in: sceneSize), height: sceneHeight(0.056, in: sceneSize))
+#endif
+    }
+
+    private var controlsOverlay: some View {
+        HStack {
+            Button(action: {
+                showingSettings = true
+            }) {
+                ZStack {
+                    Image(systemName: "gear")
+#if os(macOS)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.primary)
+                        .font(.system(size: 20, weight: .semibold))
+                        .frame(width: 40, height: 40)
+#elseif os(iOS)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.primary)
+                        .font(.system(size: 20, weight: .semibold))
+                        .frame(width: 40, height: 40)
+#else
+                        .font(.title2)
+                        .frame(width: 80, height: 80)
+#endif
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .accessibilityLabel("Settings")
+            .environment(\.colorScheme, .dark)
+
+            if viewModel.loginMode == .fleetAPI {
+                Button(action: {
+                    showingGraph = true
+                }) {
+                    ZStack {
+                        Image(systemName: "chart.bar.xaxis.ascending.badge.clock")
+#if os(macOS)
+                            .font(.system(size: 18, weight: .semibold))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.primary)
+                            .frame(width: 40, height: 40)
+#elseif os(iOS)
+                            .font(.system(size: 18, weight: .semibold))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.primary)
+                            .frame(width: 40, height: 40)
+#else
+                            .font(.title3)
+                            .frame(width: 80, height: 80)
+#endif
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .accessibilityLabel("Chart")
+                .environment(\.colorScheme, .dark)
+            }
+
+            Spacer()
+        }
+    }
+
+    private var valueFont: Font {
+#if os(tvOS)
+        return .headline
+#else
+        return .title2
+#endif
+    }
+
+    private var labelFont: Font {
+#if os(tvOS)
+        return .footnote
+#else
+        return .subheadline
+#endif
+    }
+
+    private func fittedSceneSize(in available: CGSize) -> CGSize {
+        guard available.width > 0, available.height > 0 else { return .zero }
+        let sceneAspectRatio: CGFloat = 16.0 / 9.0
+        if available.width / available.height > sceneAspectRatio {
+            let height = available.height
+            return CGSize(width: height * sceneAspectRatio, height: height)
+        }
+        let width = available.width
+        return CGSize(width: width, height: width / sceneAspectRatio)
+    }
+
+    // Coordinates are measured from the center of the scene container:
+    // x/y = -0.5...0.5 maps to leading/top ... trailing/bottom.
+    private func scenePoint(x: CGFloat, y: CGFloat, in sceneSize: CGSize) -> CGPoint {
+        CGPoint(
+            x: sceneSize.width * (0.5 + x),
+            y: sceneSize.height * (0.5 + y)
+        )
+    }
+
+    private func sceneWidth(_ fraction: CGFloat, in sceneSize: CGSize) -> CGFloat {
+        sceneSize.width * fraction
+    }
+
+    private func sceneHeight(_ fraction: CGFloat, in sceneSize: CGSize) -> CGFloat {
+        sceneSize.height * fraction
     }
 
     private func updateEnergySite(_ delta: Int) {
