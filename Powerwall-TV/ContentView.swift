@@ -19,6 +19,8 @@ struct ContentView: View {
     @State private var startAnimations = false
     @State private var precision = "%.3f"
     @FocusState private var hasKeyboardFocus: Bool
+    private let naturalSceneWidth: CGFloat = 1280
+    private let naturalSceneHeight: CGFloat = 720
 #if os(macOS)
     private let powerwallPercentageWidth: Double = 4
 #else
@@ -31,10 +33,8 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             let sceneSize = fittedSceneSize(in: geometry.size)
-            let detachSiteSummary = shouldDetachSiteSummary(
-                geometrySize: geometry.size,
-                sceneSize: sceneSize
-            )
+            let sceneFrame = sceneFrame(in: geometry.size, sceneSize: sceneSize)
+            let detachSiteSummary = shouldDetachSiteSummary(geometrySize: geometry.size)
             ZStack {
                 Color(red: 22/255, green: 23/255, blue: 24/255)
                     .ignoresSafeArea()
@@ -50,11 +50,12 @@ struct ContentView: View {
                         .frame(width: sceneSize.width, height: sceneSize.height)
                 }
                 .frame(width: sceneSize.width, height: sceneSize.height)
-                .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                .position(x: sceneFrame.midX, y: sceneFrame.midY)
 
                 detachedSiteSummaryOverlay(
                     geometrySize: geometry.size,
                     sceneSize: sceneSize,
+                    sceneMinX: sceneFrame.minX,
                     enabled: detachSiteSummary
                 )
 
@@ -418,15 +419,15 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func detachedSiteSummaryOverlay(geometrySize: CGSize, sceneSize: CGSize, enabled: Bool) -> some View {
+    private func detachedSiteSummaryOverlay(geometrySize: CGSize, sceneSize: CGSize, sceneMinX: CGFloat, enabled: Bool) -> some View {
         if enabled,
            !(viewModel.ipAddress.isEmpty && viewModel.loginMode == .local),
            let data = viewModel.data {
-            let sceneLeftInset = (geometrySize.width - sceneSize.width) / 2
+            let leadingPadding = max(16, sceneMinX + sceneWidth(0.02, in: sceneSize))
             siteSummaryView(data: data)
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, sceneLeftInset + sceneWidth(0.02, in: sceneSize))
+                .padding(.leading, leadingPadding)
                 .padding(.top, 24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -646,13 +647,13 @@ struct ContentView: View {
 
     private func fittedSceneSize(in available: CGSize) -> CGSize {
         guard available.width > 0, available.height > 0 else { return .zero }
-        let sceneAspectRatio: CGFloat = 16.0 / 9.0
-        if available.width / available.height > sceneAspectRatio {
-            let height = available.height
-            return CGSize(width: height * sceneAspectRatio, height: height)
-        }
-        let width = available.width
-        return CGSize(width: width, height: width / sceneAspectRatio)
+        let widthScale = available.width / naturalSceneWidth
+        let heightScale = available.height / naturalSceneHeight
+        let scale = max(1.0, min(widthScale, heightScale))
+        return CGSize(
+            width: naturalSceneWidth * scale,
+            height: naturalSceneHeight * scale
+        )
     }
 
     private func isPortraitIPad(_ size: CGSize) -> Bool {
@@ -663,17 +664,28 @@ struct ContentView: View {
 #endif
     }
 
-    private func shouldDetachSiteSummary(geometrySize: CGSize, sceneSize: CGSize) -> Bool {
-        isPortraitIPad(geometrySize) || isNarrowMacOSScene(sceneSize)
+    private func shouldDetachSiteSummary(geometrySize: CGSize) -> Bool {
+        isPortraitIPad(geometrySize) || isNarrowMacOSWindow(geometrySize)
     }
 
-    private func isNarrowMacOSScene(_ sceneSize: CGSize) -> Bool {
+    private func isNarrowMacOSWindow(_ geometrySize: CGSize) -> Bool {
 #if os(macOS)
-        let naturalSceneWidth: CGFloat = 1280
-        return sceneSize.width < naturalSceneWidth
+        geometrySize.width < naturalSceneWidth
 #else
         false
 #endif
+    }
+
+    private func sceneFrame(in available: CGSize, sceneSize: CGSize) -> CGRect {
+        let minX: CGFloat
+        if available.width < sceneSize.width {
+            // Keep right edge pinned and crop from the left when window is narrower.
+            minX = available.width - sceneSize.width
+        } else {
+            minX = (available.width - sceneSize.width) / 2
+        }
+        let minY = (available.height - sceneSize.height) / 2
+        return CGRect(x: minX, y: minY, width: sceneSize.width, height: sceneSize.height)
     }
 
     // Coordinates are measured from the center of the scene container:
