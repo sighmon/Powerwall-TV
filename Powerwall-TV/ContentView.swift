@@ -272,7 +272,11 @@ struct ContentView: View {
     }
 
     private func sceneDataOverlay(data: PowerwallData, sceneSize: CGSize) -> some View {
-        ZStack {
+        let batteryPercentage = max(0.0, min(1.0, (viewModel.batteryPercentage?.percentage ?? 0) / 100))
+        let batteryIndicatorHeight = sceneHeight(0.076, in: sceneSize) * batteryPercentage
+        let batteryIndicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0024, in: sceneSize))
+
+        return ZStack {
             siteSummaryView(data: data)
                 .position(scenePoint(x: -0.39, y: -0.40, in: sceneSize))
 
@@ -290,8 +294,16 @@ struct ContentView: View {
                     .position(scenePoint(x: -0.104, y: -0.38, in: sceneSize))
             }
 
-            batteryPercentageIndicator(sceneSize: sceneSize)
-                .position(scenePoint(x: 0.014, y: 0.206, in: sceneSize))
+            batteryPercentageIndicator(
+                indicatorWidth: batteryIndicatorWidth,
+                indicatorHeight: batteryIndicatorHeight
+            )
+            .position(sceneBottomPoint(
+                x: 0.014,
+                y: 0.244,
+                objectHeight: batteryIndicatorHeight,
+                in: sceneSize
+            ))
 
             gridMetricView(data: data)
                 .position(scenePoint(x: viewModel.gridFossilFuelPercentage != nil ? 0.30 : 0.26, y: 0.38, in: sceneSize))
@@ -499,17 +511,11 @@ struct ContentView: View {
         .multilineTextAlignment(.center)
     }
 
-    private func batteryPercentageIndicator(sceneSize: CGSize) -> some View {
-        let percentage = max(0.0, min(1.0, (viewModel.batteryPercentage?.percentage ?? 0) / 100))
-        let indicatorHeight = sceneHeight(0.078, in: sceneSize)
-        let indicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0026, in: sceneSize))
-        return ZStack(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.green)
-                .frame(width: indicatorWidth, height: indicatorHeight * percentage)
-                .cornerRadius(1)
-        }
-        .frame(width: indicatorWidth, height: indicatorHeight)
+    private func batteryPercentageIndicator(indicatorWidth: CGFloat, indicatorHeight: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.green)
+            .frame(width: indicatorWidth, height: indicatorHeight)
+            .cornerRadius(1)
     }
 
     private func offGridImage(sceneSize: CGSize) -> some View {
@@ -618,6 +624,11 @@ struct ContentView: View {
             x: sceneSize.width * (0.5 + x),
             y: sceneSize.height * (0.5 + y)
         )
+    }
+
+    private func sceneBottomPoint(x: CGFloat, y: CGFloat, objectHeight: CGFloat, in sceneSize: CGSize) -> CGPoint {
+        let bottomAnchor = scenePoint(x: x, y: y, in: sceneSize)
+        return CGPoint(x: bottomAnchor.x, y: bottomAnchor.y - (objectHeight / 2))
     }
 
     private func sceneWidth(_ fraction: CGFloat, in sceneSize: CGSize) -> CGFloat {
