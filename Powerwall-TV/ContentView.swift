@@ -33,8 +33,12 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             let sceneSize = fittedSceneSize(in: geometry.size)
-            let sceneFrame = sceneFrame(in: geometry.size, sceneSize: sceneSize)
             let detachSiteSummary = shouldDetachSiteSummary(geometrySize: geometry.size)
+            let sceneFrame = sceneFrame(
+                in: geometry.size,
+                sceneSize: sceneSize,
+                showSiteSummaryInScene: !detachSiteSummary
+            )
             ZStack {
                 Color(red: 22/255, green: 23/255, blue: 24/255)
                     .ignoresSafeArea()
@@ -293,9 +297,15 @@ struct ContentView: View {
         let batteryPercentage = max(0.0, min(1.0, (viewModel.batteryPercentage?.percentage ?? 0) / 100))
         let batteryIndicatorHeight = sceneHeight(0.076, in: sceneSize) * batteryPercentage
         let batteryIndicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0024, in: sceneSize))
-        let homeAndGridXPosition = 0.26
+        var homeAndGridXPosition = 0.26
+        var gridCarbonXPosition = 0.04
 #if os(tvOS)
         homeAndGridXPosition = 0.30
+#elseif os(macOS)
+        homeAndGridXPosition = 0.25
+        gridCarbonXPosition = 0.025
+#elseif os(ioS)
+        gridCarbonXPosition = 0.016
 #endif
 
         return ZStack {
@@ -330,7 +340,7 @@ struct ContentView: View {
             ))
 
             gridMetricView(data: data)
-                .position(scenePoint(x: viewModel.gridFossilFuelPercentage != nil ? homeAndGridXPosition + 0.04 : homeAndGridXPosition, y: 0.40, in: sceneSize))
+                .position(scenePoint(x: viewModel.gridFossilFuelPercentage != nil ? homeAndGridXPosition + gridCarbonXPosition : homeAndGridXPosition, y: 0.40, in: sceneSize))
 
             if animations && wallConnectorEnergyTotal(data: data) > 10 {
                 PowerSurgeView(
@@ -676,16 +686,27 @@ struct ContentView: View {
 #endif
     }
 
-    private func sceneFrame(in available: CGSize, sceneSize: CGSize) -> CGRect {
+    private func sceneFrame(in available: CGSize, sceneSize: CGSize, showSiteSummaryInScene: Bool) -> CGRect {
         let minX: CGFloat
         if available.width < sceneSize.width {
-            // Keep right edge pinned and crop from the left when window is narrower.
-            minX = available.width - sceneSize.width
+            let bounds = sceneLabelCropBounds(showSiteSummaryInScene: showSiteSummaryInScene)
+            let contentAnchor = 0.5 + ((bounds.left + bounds.right) / 2)
+            let preferredMinX = (available.width / 2) - (sceneSize.width * contentAnchor)
+            let minAllowedX = available.width - sceneSize.width
+            minX = min(0, max(minAllowedX, preferredMinX))
         } else {
             minX = (available.width - sceneSize.width) / 2
         }
         let minY = (available.height - sceneSize.height) / 2
         return CGRect(x: minX, y: minY, width: sceneSize.width, height: sceneSize.height)
+    }
+
+    private func sceneLabelCropBounds(showSiteSummaryInScene: Bool) -> (left: CGFloat, right: CGFloat) {
+        // Normalized coordinates in scene space (-0.5 ... 0.5), including padding.
+        if showSiteSummaryInScene {
+            return (left: -0.49, right: 0.46)
+        }
+        return (left: -0.20, right: 0.46)
     }
 
     // Coordinates are measured from the center of the scene container:
