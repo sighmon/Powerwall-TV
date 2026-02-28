@@ -31,6 +31,7 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             let sceneSize = fittedSceneSize(in: geometry.size)
+            let detachSiteSummary = isPortraitIPad(geometry.size)
             ZStack {
                 Color(red: 22/255, green: 23/255, blue: 24/255)
                     .ignoresSafeArea()
@@ -39,11 +40,20 @@ struct ContentView: View {
                     homeBackgroundImage
                         .frame(width: sceneSize.width, height: sceneSize.height)
 
-                    sceneOverlay(in: sceneSize)
+                    sceneOverlay(
+                        in: sceneSize,
+                        showSiteSummaryInScene: !detachSiteSummary
+                    )
                         .frame(width: sceneSize.width, height: sceneSize.height)
                 }
                 .frame(width: sceneSize.width, height: sceneSize.height)
                 .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+
+                detachedSiteSummaryOverlay(
+                    geometrySize: geometry.size,
+                    sceneSize: sceneSize,
+                    enabled: detachSiteSummary
+                )
 
                 controlsOverlay
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -254,12 +264,16 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func sceneOverlay(in sceneSize: CGSize) -> some View {
+    private func sceneOverlay(in sceneSize: CGSize, showSiteSummaryInScene: Bool) -> some View {
         if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
             Text("Please configure the gateway settings.")
                 .foregroundColor(.gray)
         } else if let data = viewModel.data {
-            sceneDataOverlay(data: data, sceneSize: sceneSize)
+            sceneDataOverlay(
+                data: data,
+                sceneSize: sceneSize,
+                showSiteSummaryInScene: showSiteSummaryInScene
+            )
                 .foregroundColor(.white)
         } else {
             Text("Loading...")
@@ -271,17 +285,19 @@ struct ContentView: View {
         }
     }
 
-    private func sceneDataOverlay(data: PowerwallData, sceneSize: CGSize) -> some View {
+    private func sceneDataOverlay(data: PowerwallData, sceneSize: CGSize, showSiteSummaryInScene: Bool) -> some View {
         let batteryPercentage = max(0.0, min(1.0, (viewModel.batteryPercentage?.percentage ?? 0) / 100))
         let batteryIndicatorHeight = sceneHeight(0.076, in: sceneSize) * batteryPercentage
         let batteryIndicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0024, in: sceneSize))
 
         return ZStack {
-            siteSummaryView(data: data)
-                .position(scenePoint(x: -0.39, y: -0.40, in: sceneSize))
+            if showSiteSummaryInScene {
+                siteSummaryView(data: data)
+                    .position(scenePoint(x: -0.39, y: -0.40, in: sceneSize))
+            }
 
             solarMetricView(data: data)
-                .position(scenePoint(x: 0.085, y: -0.38, in: sceneSize))
+                .position(scenePoint(x: 0.087, y: -0.38, in: sceneSize))
 
             homeMetricView(data: data)
                 .position(scenePoint(x: 0.26, y: -0.31, in: sceneSize))
@@ -332,7 +348,7 @@ struct ContentView: View {
                     shouldStart: startAnimations
                 )
                 .frame(width: sceneWidth(0.021, in: sceneSize), height: sceneHeight(0.242, in: sceneSize))
-                .position(scenePoint(x: 0.095, y: 0.13, in: sceneSize))
+                .position(scenePoint(x: 0.097, y: 0.13, in: sceneSize))
                 .id("solar_\(data.solar.instantPower < 0)_\(startAnimations)")
             }
 
@@ -348,8 +364,8 @@ struct ContentView: View {
                     shouldStart: startAnimations
                 )
                 .frame(width: sceneWidth(0.054, in: sceneSize), height: sceneHeight(0.056, in: sceneSize))
-                .rotationEffect(Angle(degrees: 5))
-                .position(scenePoint(x: 0.136, y: 0.14, in: sceneSize))
+                .rotationEffect(Angle(degrees: 6))
+                .position(scenePoint(x: 0.136, y: 0.142, in: sceneSize))
                 .id("home_\(data.load.instantPower < 0)_\(startAnimations)")
             }
 
@@ -364,9 +380,9 @@ struct ContentView: View {
                     curve: PowerwallToGateway(),
                     shouldStart: startAnimations
                 )
-                .frame(width: sceneWidth(0.060, in: sceneSize), height: sceneHeight(0.056, in: sceneSize))
-                .rotationEffect(Angle(degrees: 7))
-                .position(scenePoint(x: 0.061, y: 0.168, in: sceneSize))
+                .frame(width: sceneWidth(0.058, in: sceneSize), height: sceneHeight(0.065, in: sceneSize))
+                .rotationEffect(Angle(degrees: 8))
+                .position(scenePoint(x: 0.060, y: 0.176, in: sceneSize))
                 .id("battery_\(data.battery.instantPower < 0)_\(startAnimations)")
             }
 
@@ -392,6 +408,21 @@ struct ContentView: View {
             }
         }
         .frame(width: sceneSize.width, height: sceneSize.height)
+    }
+
+    @ViewBuilder
+    private func detachedSiteSummaryOverlay(geometrySize: CGSize, sceneSize: CGSize, enabled: Bool) -> some View {
+        if enabled,
+           !(viewModel.ipAddress.isEmpty && viewModel.loginMode == .local),
+           let data = viewModel.data {
+            let sceneLeftInset = (geometrySize.width - sceneSize.width) / 2
+            siteSummaryView(data: data)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, sceneLeftInset + sceneWidth(0.02, in: sceneSize))
+                .padding(.top, 24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
     }
 
     private func siteSummaryView(data: PowerwallData) -> some View {
@@ -615,6 +646,14 @@ struct ContentView: View {
         }
         let width = available.width
         return CGSize(width: width, height: width / sceneAspectRatio)
+    }
+
+    private func isPortraitIPad(_ size: CGSize) -> Bool {
+#if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .pad && size.height > size.width
+#else
+        false
+#endif
     }
 
     // Coordinates are measured from the center of the scene container:
