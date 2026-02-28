@@ -15,6 +15,7 @@ struct GraphView: View {
     @ObservedObject var viewModel: PowerwallViewModel
     @FocusState private var isGraphFocused: Bool
     @State private var selectedGraph: GraphType = .battery
+    @Environment(\.dismiss) private var dismiss
 
 #if os(macOS)
     private let maxChartHeight = (NSScreen.main?.visibleFrame.height ?? 600) / 2
@@ -356,6 +357,18 @@ struct GraphView: View {
             }
             isGraphFocused = true
         }
+#if os(iOS)
+        .safeAreaInset(edge: .top) {
+            HStack {
+                Spacer()
+                Button("Close") {
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.trailing)
+            }
+        }
+#endif
         .focusable() // Still needed to make it focusable
         .focused($isGraphFocused) // Bind focus state
 #if os(iOS)

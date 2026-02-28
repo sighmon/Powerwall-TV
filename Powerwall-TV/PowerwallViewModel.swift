@@ -9,6 +9,11 @@
 import Foundation
 import Combine
 import AuthenticationServices
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 enum LoginMode: String, CaseIterable {
     case local = "local"
@@ -71,6 +76,9 @@ class PowerwallViewModel: ObservableObject {
     }()
 
     private var cancellables = Set<AnyCancellable>()
+#if os(macOS) || os(iOS)
+    private let authPresentationContextProvider = AuthPresentationContextProvider()
+#endif
     private static var isRunningTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
@@ -188,8 +196,8 @@ class PowerwallViewModel: ObservableObject {
             }
             self.exchangeCodeForToken(code: code)
         }
-#if os(macOS)
-        authSession.presentationContextProvider = self
+#if os(macOS) || os(iOS)
+        authSession.presentationContextProvider = authPresentationContextProvider
 #endif
         authSession.start()
     }
@@ -1228,62 +1236,26 @@ extension WallConnectorVitals {
     var wallConnectorPower: Double { gridVolts * vehicleCurrentAmps }
 }
 
-#if os(macOS)
-extension PowerwallViewModel: ASWebAuthenticationPresentationContextProviding {
-    func isEqual(_ object: Any?) -> Bool {
-        return true
-    }
-
-    var hash: Int {
-        return 0
-    }
-
-    var superclass: AnyClass? {
-        return PowerwallViewModel.self
-    }
-
-    func `self`() -> Self {
-        return self
-    }
-
-    func perform(_ aSelector: Selector!) -> Unmanaged<AnyObject>! {
-        return nil
-    }
-
-    func perform(_ aSelector: Selector!, with object: Any!) -> Unmanaged<AnyObject>! {
-        return nil
-    }
-
-    func perform(_ aSelector: Selector!, with object1: Any!, with object2: Any!) -> Unmanaged<AnyObject>! {
-        return nil
-    }
-
-    func isProxy() -> Bool {
-        return true
-    }
-
-    func isKind(of aClass: AnyClass) -> Bool {
-        return true
-    }
-
-    func isMember(of aClass: AnyClass) -> Bool {
-        return true
-    }
-
-    func conforms(to aProtocol: Protocol) -> Bool {
-        return true
-    }
-
-    func responds(to aSelector: Selector!) -> Bool {
-        return true
-    }
-
-    var description: String {
-        return "Login with your Tesla account to see your Powerwall statistics"
-    }
-
+#if os(macOS) || os(iOS)
+private final class AuthPresentationContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+#if os(macOS)
         return NSApplication.shared.windows.first ?? ASPresentationAnchor()
+#else
+        let windowScenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }
+
+        for scene in windowScenes {
+            if let keyWindow = scene.windows.first(where: \.isKeyWindow) {
+                return keyWindow
+            }
+            if let firstWindow = scene.windows.first {
+                return firstWindow
+            }
+        }
+        return ASPresentationAnchor()
+#endif
     }
 }
 #endif
