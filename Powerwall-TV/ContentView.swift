@@ -52,10 +52,15 @@ struct ContentView: View {
                         VStack {
                             HStack {
                                 VStack {
+#if os(iOS)
+                                    Spacer().frame(height: 80)
+#endif
                                     if (viewModel.siteName != nil) {
                                         Text(viewModel.siteName ?? "")
                                             .fontWeight(.bold)
 #if os(macOS)
+                                            .font(.title2)
+#elseif os(iOS)
                                             .font(.title2)
 #else
                                             .font(.headline)
@@ -69,6 +74,8 @@ struct ContentView: View {
                                             .fontWeight(.bold)
 #if os(macOS)
                                             .font(.title2)
+#elseif os(iOS)
+                                            .font(.title2)
 #else
                                             .font(.headline)
 #endif
@@ -76,6 +83,8 @@ struct ContentView: View {
                                             .opacity(0.6)
                                             .fontWeight(.bold)
 #if os(macOS)
+                                            .font(.subheadline)
+#elseif os(iOS)
                                             .font(.subheadline)
 #else
                                             .font(.footnote)
@@ -86,6 +95,8 @@ struct ContentView: View {
                                         Text("\((viewModel.errorMessage != nil) ? "Error: " : "")\(message)")
                                             .fontWeight(.bold)
 #if os(macOS)
+                                            .font(.subheadline)
+#elseif os(iOS)
                                             .font(.subheadline)
 #else
                                             .font(.footnote)
@@ -102,10 +113,14 @@ struct ContentView: View {
                         VStack {
 #if os(macOS)
                             Spacer().frame(height: 60)
+#elseif os(iOS)
+                            Spacer().frame(height: 140)
 #endif
                             HStack {
 #if os(macOS)
                                 Spacer().frame(width: 220)
+#elseif os(iOS)
+                                Spacer().frame(width: 240)
 #else
                                 Spacer().frame(width: 340)
 #endif
@@ -114,6 +129,8 @@ struct ContentView: View {
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
+#elseif os(iOS)
+                                        .font(.title2)
 #else
                                         .font(.headline)
 #endif
@@ -121,6 +138,8 @@ struct ContentView: View {
                                         .opacity(0.6)
                                         .fontWeight(.bold)
 #if os(macOS)
+                                        .font(.subheadline)
+#elseif os(iOS)
                                         .font(.subheadline)
 #else
                                         .font(.footnote)
@@ -132,12 +151,16 @@ struct ContentView: View {
                         VStack {
 #if os(macOS)
                             Spacer().frame(height: 120)
+#elseif os(iOS)
+                            Spacer().frame(height: 240)
 #else
                             Spacer().frame(height: 100)
 #endif
                             HStack {
 #if os(macOS)
                                 Spacer().frame(width: 600)
+#elseif os(iOS)
+                                Spacer().frame(width: 700)
 #else
                                 Spacer().frame(width: 980)
 #endif
@@ -146,6 +169,8 @@ struct ContentView: View {
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
+#elseif os(iOS)
+                                        .font(.title2)
 #else
                                         .font(.headline)
 #endif
@@ -153,6 +178,8 @@ struct ContentView: View {
                                         .opacity(0.6)
                                         .fontWeight(.bold)
 #if os(macOS)
+                                        .font(.subheadline)
+#elseif os(iOS)
                                         .font(.subheadline)
 #else
                                         .font(.footnote)
@@ -165,6 +192,8 @@ struct ContentView: View {
                             Spacer()
                             HStack {
 #if os(macOS)
+                                Spacer().frame(width: 80)
+#elseif os(iOS)
                                 Spacer().frame(width: 80)
 #else
                                 Spacer().frame(width: 120)
@@ -179,6 +208,8 @@ struct ContentView: View {
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
+#elseif os(iOS)
+                                        .font(.title2)
 #else
                                         .font(.headline)
 #endif
@@ -188,6 +219,8 @@ struct ContentView: View {
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.subheadline)
+#elseif os(iOS)
+                                        .font(.subheadline)
 #else
                                         .font(.footnote)
 #endif
@@ -195,18 +228,24 @@ struct ContentView: View {
                             }
 #if os(macOS)
                             Spacer().frame(height: 60)
+#elseif os(iOS)
+                            Spacer().frame(height: 140)
 #endif
                         }
                         if !data.wallConnectors.isEmpty {
                             VStack {
     #if os(macOS)
                                 Spacer().frame(height: 60)
+    #elseif os(iOS)
+                                Spacer().frame(height: 140)
     #endif
                                 HStack {
                                     VStack {
                                         Text(self.wallConnectorDisplay(data: data, precision: precision))
                                             .fontWeight(.bold)
     #if os(macOS)
+                                            .font(.title2)
+    #elseif os(iOS)
                                             .font(.title2)
     #else
                                             .font(.headline)
@@ -216,12 +255,16 @@ struct ContentView: View {
                                             .fontWeight(.bold)
     #if os(macOS)
                                             .font(.subheadline)
+    #elseif os(iOS)
+                                            .font(.subheadline)
     #else
                                             .font(.footnote)
     #endif
                                     }
     #if os(macOS)
                                     Spacer().frame(width: 260)
+    #elseif os(iOS)
+                                    Spacer().frame(width: 280)
     #else
                                     Spacer().frame(width: 390)
     #endif
@@ -266,6 +309,8 @@ struct ContentView: View {
                             HStack {
 #if os(macOS)
                                 Spacer().frame(width: 510)
+#elseif os(iOS)
+                                Spacer().frame(width: 550)
 #else
                                 Spacer().frame(width: viewModel.gridFossilFuelPercentage != nil ? 1140 : 980)
 #endif
@@ -281,6 +326,8 @@ struct ContentView: View {
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.title2)
+#elseif os(iOS)
+                                        .font(.title2)
 #else
                                         .font(.headline)
 #endif
@@ -288,6 +335,8 @@ struct ContentView: View {
                                         Text("\(data.site.instantPower / 1000, specifier: precision) kW")
                                             .fontWeight(.bold)
 #if os(macOS)
+                                            .font(.title2)
+#elseif os(iOS)
                                             .font(.title2)
 #else
                                             .font(.headline)
@@ -298,6 +347,8 @@ struct ContentView: View {
                                         .fontWeight(.bold)
 #if os(macOS)
                                         .font(.subheadline)
+#elseif os(iOS)
+                                        .font(.subheadline)
 #else
                                         .font(.footnote)
 #endif
@@ -306,6 +357,8 @@ struct ContentView: View {
                             }
 #if os(macOS)
                             Spacer().frame(height: 20)
+#elseif os(iOS)
+                            Spacer().frame(height: 100)
 #endif
                         }
                         // Wall Connector to car animation
@@ -501,6 +554,8 @@ struct ContentView: View {
                             HStack {
 #if os(macOS)
                                 Spacer().frame(width: 380)
+#elseif os(iOS)
+                                Spacer().frame(width: 400)
 #else
                                 Spacer().frame(width: 580)
 #endif
@@ -508,6 +563,11 @@ struct ContentView: View {
 #if os(macOS)
                                     Spacer().frame(height: 335)
                                     Image(nsImage: NSImage(named: "off-grid.png")!)
+                                        .resizable()
+                                        .frame(width: 80, height: 48)
+#elseif os(iOS)
+                                    Spacer().frame(height: 355)
+                                    Image(uiImage: UIImage(named: "off-grid.png")!)
                                         .resizable()
                                         .frame(width: 80, height: 48)
 #else
@@ -532,6 +592,8 @@ struct ContentView: View {
                                     .fontWeight(.bold)
 #if os(macOS)
                                     .font(.subheadline)
+#elseif os(iOS)
+                                    .font(.subheadline)
 #else
                                     .font(.footnote)
 #endif
@@ -549,7 +611,12 @@ struct ContentView: View {
                         }) {
                             ZStack {
                                 Image(systemName: "gear")
-#if os(macOS) || os(iOS)
+#if os(macOS)
+                                    .symbolRenderingMode(.hierarchical)
+                                    .foregroundStyle(.primary)
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .frame(width: 40, height: 40)
+#elseif os(iOS)
                                     .symbolRenderingMode(.hierarchical)
                                     .foregroundStyle(.primary)
                                     .font(.system(size: 20, weight: .semibold))
@@ -571,7 +638,12 @@ struct ContentView: View {
                             }) {
                                 ZStack {
                                     Image(systemName: "chart.bar.xaxis.ascending.badge.clock")
-#if os(macOS) || os(iOS)
+#if os(macOS)
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .symbolRenderingMode(.hierarchical)
+                                        .foregroundStyle(.primary)
+                                        .frame(width: 40, height: 40)
+#elseif os(iOS)
                                         .font(.system(size: 18, weight: .semibold))
                                         .symbolRenderingMode(.hierarchical)
                                         .foregroundStyle(.primary)
