@@ -365,8 +365,8 @@ struct GraphView: View {
                 ZStack {
                     Image(systemName: "xmark")
                         .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.primary)
-                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.gray)
+                        .font(.system(size: 30, weight: .semibold))
                         .frame(width: 40, height: 40)
                 }
             }

@@ -303,9 +303,9 @@ struct ContentView: View {
         homeAndGridXPosition = 0.30
 #elseif os(macOS)
         homeAndGridXPosition = 0.25
-        gridCarbonXPosition = 0.025
+        gridCarbonXPosition = 0.026
 #elseif os(ioS)
-        gridCarbonXPosition = 0.016
+        gridCarbonXPosition = 0
 #endif
 
         return ZStack {
@@ -593,8 +593,8 @@ struct ContentView: View {
                         .frame(width: 40, height: 40)
 #elseif os(iOS)
                         .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.primary)
-                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.gray)
+                        .font(.system(size: 30, weight: .semibold))
                         .frame(width: 40, height: 40)
 #else
                         .font(.title2)
@@ -619,9 +619,9 @@ struct ContentView: View {
                             .foregroundStyle(.primary)
                             .frame(width: 40, height: 40)
 #elseif os(iOS)
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: 24, weight: .semibold))
                             .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.gray)
                             .frame(width: 40, height: 40)
 #else
                             .font(.title3)
@@ -704,9 +704,9 @@ struct ContentView: View {
     private func sceneLabelCropBounds(showSiteSummaryInScene: Bool) -> (left: CGFloat, right: CGFloat) {
         // Normalized coordinates in scene space (-0.5 ... 0.5), including padding.
         if showSiteSummaryInScene {
-            return (left: -0.49, right: 0.46)
+            return (left: -0.49, right: 0.4)
         }
-        return (left: -0.20, right: 0.46)
+        return (left: -0.20, right: 0.4)
     }
 
     // Coordinates are measured from the center of the scene container:
