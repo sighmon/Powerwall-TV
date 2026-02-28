@@ -152,6 +152,13 @@ struct GraphView: View {
         }
     }
 
+    private func projectedPoint(proxy: ChartProxy, plotOrigin: CGPoint, date: Date, value: Double) -> CGPoint? {
+        guard let point = proxy.position(for: (x: date, y: value)) else {
+            return nil
+        }
+        return CGPoint(x: point.x + plotOrigin.x, y: point.y + plotOrigin.y)
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             // Battery Power Flow Chart
@@ -174,10 +181,14 @@ struct GraphView: View {
             .frame(height: maxChartHeight)
             .chartOverlay { proxy in
                 GeometryReader { geometry in
+                    let plotFrame = geometry[proxy.plotAreaFrame]
+                    let plotOrigin = plotFrame.origin
+
                     ZStack {
                         if powerHistory.count >= 2,
                            let firstDate = powerHistory.first?.date,
-                           let baselineY = proxy.position(for: (x: firstDate, y: 0))?.y {
+                           let baselinePoint = proxy.position(for: (x: firstDate, y: 0)) {
+                            let baselineY = baselinePoint.y + plotOrigin.y
 
                             ForEach(0..<powerHistory.count - 1, id: \.self) { index in
                                 let start = powerHistory[index]
@@ -187,8 +198,8 @@ struct GraphView: View {
                                     let zeroCrossing = interpolateZeroCrossing(start: start, end: end)
 
                                     // First segment: start to zeroCrossing
-                                    if let startPoint = proxy.position(for: (x: start.date, y: start.value / valuetoKw)),
-                                       let zeroPoint = proxy.position(for: (x: zeroCrossing.date, y: zeroCrossing.value / 100)) {
+                                    if let startPoint = projectedPoint(proxy: proxy, plotOrigin: plotOrigin, date: start.date, value: start.value / valuetoKw),
+                                       let zeroPoint = projectedPoint(proxy: proxy, plotOrigin: plotOrigin, date: zeroCrossing.date, value: zeroCrossing.value / 100) {
                                         let color = colorForPoint(start, graph: selectedGraph)
                                         let isPositive = start.value >= 0
                                         let areaPath = Path { p in
@@ -218,8 +229,8 @@ struct GraphView: View {
                                     }
 
                                     // Second segment: zeroCrossing to end
-                                    if let zeroPoint = proxy.position(for: (x: zeroCrossing.date, y: zeroCrossing.value / 100)),
-                                       let endPoint = proxy.position(for: (x: end.date, y: end.value / valuetoKw)) {
+                                    if let zeroPoint = projectedPoint(proxy: proxy, plotOrigin: plotOrigin, date: zeroCrossing.date, value: zeroCrossing.value / 100),
+                                       let endPoint = projectedPoint(proxy: proxy, plotOrigin: plotOrigin, date: end.date, value: end.value / valuetoKw) {
                                         let color = colorForPoint(end, graph: selectedGraph)
                                         let isPositive = end.value >= 0
                                         let areaPath = Path { p in
@@ -249,8 +260,8 @@ struct GraphView: View {
                                     }
                                 } else {
                                     // No zero crossing, draw the full segment
-                                    if let startPoint = proxy.position(for: (x: start.date, y: start.value / valuetoKw)),
-                                       let endPoint = proxy.position(for: (x: end.date, y: end.value / valuetoKw)) {
+                                    if let startPoint = projectedPoint(proxy: proxy, plotOrigin: plotOrigin, date: start.date, value: start.value / valuetoKw),
+                                       let endPoint = projectedPoint(proxy: proxy, plotOrigin: plotOrigin, date: end.date, value: end.value / valuetoKw) {
                                         let color = colorForPoint(start, graph: selectedGraph)
                                         let isPositive = start.value >= 0
                                         let areaPath = Path { p in
@@ -282,11 +293,6 @@ struct GraphView: View {
                             }
                         }
                     }
-#if os(macOS)
-                    .padding(.leading, 22)
-#else
-                    .padding(.leading, 40)
-#endif
                 }
             }
             .chartXAxis {

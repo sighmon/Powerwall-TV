@@ -199,11 +199,20 @@ struct PowerSurgeView<Curve: Shape>: View {
 
     private func animate() {
         let targetFraction: CGFloat = direction ? 1.0 : -1.0
+        let nextCycleDelay = calculateDelay() + startOffset
         withAnimation(.linear(duration: duration)) {
             startFraction = targetFraction
             opacity = 1.0
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + calculateDelay() + startOffset) {
+
+        // Prevent a lingering round-cap point at the end of the path during pause time.
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            guard isAnimating else { return }
+            opacity = 0.0
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + nextCycleDelay) {
+            guard isAnimating else { return }
             startFraction = direction ? -1.0 : 1.0
             opacity = 1.0
             animate()
