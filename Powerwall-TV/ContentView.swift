@@ -31,7 +31,10 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             let sceneSize = fittedSceneSize(in: geometry.size)
-            let detachSiteSummary = isPortraitIPad(geometry.size)
+            let detachSiteSummary = shouldDetachSiteSummary(
+                geometrySize: geometry.size,
+                sceneSize: sceneSize
+            )
             ZStack {
                 Color(red: 22/255, green: 23/255, blue: 24/255)
                     .ignoresSafeArea()
@@ -289,25 +292,29 @@ struct ContentView: View {
         let batteryPercentage = max(0.0, min(1.0, (viewModel.batteryPercentage?.percentage ?? 0) / 100))
         let batteryIndicatorHeight = sceneHeight(0.076, in: sceneSize) * batteryPercentage
         let batteryIndicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0024, in: sceneSize))
+        let homeAndGridXPosition = 0.26
+#if os(tvOS)
+        homeAndGridXPosition = 0.30
+#endif
 
         return ZStack {
             if showSiteSummaryInScene {
                 siteSummaryView(data: data)
-                    .position(scenePoint(x: -0.39, y: -0.40, in: sceneSize))
+                    .position(scenePoint(x: -0.39, y: -0.38, in: sceneSize))
             }
 
             solarMetricView(data: data)
-                .position(scenePoint(x: 0.087, y: -0.38, in: sceneSize))
+                .position(scenePoint(x: 0.087, y: -0.40, in: sceneSize))
 
             homeMetricView(data: data)
-                .position(scenePoint(x: 0.26, y: -0.31, in: sceneSize))
+                .position(scenePoint(x: homeAndGridXPosition, y: -0.30, in: sceneSize))
 
             batteryMetricView(data: data)
-                .position(scenePoint(x: 0.03, y: 0.38, in: sceneSize))
+                .position(scenePoint(x: 0.03, y: 0.40, in: sceneSize))
 
             if !data.wallConnectors.isEmpty {
                 wallConnectorMetricView(data: data)
-                    .position(scenePoint(x: -0.104, y: -0.38, in: sceneSize))
+                    .position(scenePoint(x: -0.104, y: -0.40, in: sceneSize))
             }
 
             batteryPercentageIndicator(
@@ -322,7 +329,7 @@ struct ContentView: View {
             ))
 
             gridMetricView(data: data)
-                .position(scenePoint(x: viewModel.gridFossilFuelPercentage != nil ? 0.30 : 0.26, y: 0.38, in: sceneSize))
+                .position(scenePoint(x: viewModel.gridFossilFuelPercentage != nil ? homeAndGridXPosition + 0.04 : homeAndGridXPosition, y: 0.40, in: sceneSize))
 
             if animations && wallConnectorEnergyTotal(data: data) > 10 {
                 PowerSurgeView(
@@ -651,6 +658,19 @@ struct ContentView: View {
     private func isPortraitIPad(_ size: CGSize) -> Bool {
 #if os(iOS)
         UIDevice.current.userInterfaceIdiom == .pad && size.height > size.width
+#else
+        false
+#endif
+    }
+
+    private func shouldDetachSiteSummary(geometrySize: CGSize, sceneSize: CGSize) -> Bool {
+        isPortraitIPad(geometrySize) || isNarrowMacOSScene(sceneSize)
+    }
+
+    private func isNarrowMacOSScene(_ sceneSize: CGSize) -> Bool {
+#if os(macOS)
+        let naturalSceneWidth: CGFloat = 1280
+        return sceneSize.width < naturalSceneWidth
 #else
         false
 #endif
