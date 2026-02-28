@@ -358,15 +358,24 @@ struct GraphView: View {
             isGraphFocused = true
         }
 #if os(iOS)
-        .safeAreaInset(edge: .top) {
-            HStack {
-                Spacer()
-                Button("Close") {
-                    dismiss()
+        .overlay(alignment: .topTrailing) {
+            Button(action: {
+                dismiss()
+            }) {
+                ZStack {
+                    Image(systemName: "xmark")
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.primary)
+                        .font(.system(size: 20, weight: .semibold))
+                        .frame(width: 40, height: 40)
                 }
-                .buttonStyle(.borderedProminent)
-                .padding(.trailing)
             }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .accessibilityLabel("Close")
+            .environment(\.colorScheme, .dark)
+            .padding(.top, 12)
+            .padding(.trailing, 12)
         }
 #endif
         .focusable() // Still needed to make it focusable
