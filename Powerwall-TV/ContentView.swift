@@ -244,6 +244,9 @@ struct ContentView: View {
             updateEnergySite(+1)
             return .handled
         }
+        .onKeyPress(.escape, phases: .down) { _ in
+            exitFullScreenIfNeeded() ? .handled : .ignored
+        }
 #endif
     }
 
@@ -297,6 +300,8 @@ struct ContentView: View {
         let batteryPercentage = max(0.0, min(1.0, (viewModel.batteryPercentage?.percentage ?? 0) / 100))
         let batteryIndicatorHeight = sceneHeight(0.076, in: sceneSize) * batteryPercentage
         let batteryIndicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0024, in: sceneSize))
+        let overlayScale = overlayScaleFactor(for: sceneSize)
+        let surgeLineWidth = powerSurgeLineWidth(for: sceneSize)
         var homeAndGridXPosition = 0.26
         var gridCarbonXPosition = 0.04
 #if os(tvOS)
@@ -304,27 +309,32 @@ struct ContentView: View {
 #elseif os(macOS)
         homeAndGridXPosition = 0.25
         gridCarbonXPosition = 0.026
-#elseif os(ioS)
-        gridCarbonXPosition = 0
+#elseif os(iOS)
+        gridCarbonXPosition = 0.035
 #endif
 
         return ZStack {
             if showSiteSummaryInScene {
                 siteSummaryView(data: data)
+                    .scaleEffect(overlayScale, anchor: .center)
                     .position(scenePoint(x: -0.39, y: -0.38, in: sceneSize))
             }
 
             solarMetricView(data: data)
+                .scaleEffect(overlayScale, anchor: .center)
                 .position(scenePoint(x: 0.087, y: -0.40, in: sceneSize))
 
             homeMetricView(data: data)
+                .scaleEffect(overlayScale, anchor: .center)
                 .position(scenePoint(x: homeAndGridXPosition, y: -0.30, in: sceneSize))
 
             batteryMetricView(data: data)
+                .scaleEffect(overlayScale, anchor: .center)
                 .position(scenePoint(x: 0.03, y: 0.40, in: sceneSize))
 
             if !data.wallConnectors.isEmpty {
                 wallConnectorMetricView(data: data)
+                    .scaleEffect(overlayScale, anchor: .center)
                     .position(scenePoint(x: -0.104, y: -0.40, in: sceneSize))
             }
 
@@ -340,6 +350,7 @@ struct ContentView: View {
             ))
 
             gridMetricView(data: data)
+                .scaleEffect(overlayScale, anchor: .center)
                 .position(scenePoint(x: viewModel.gridFossilFuelPercentage != nil ? homeAndGridXPosition + gridCarbonXPosition : homeAndGridXPosition, y: 0.40, in: sceneSize))
 
             if animations && wallConnectorEnergyTotal(data: data) > 10 {
@@ -349,6 +360,7 @@ struct ContentView: View {
                         : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
                     isForward: wallConnectorEnergyTotal(data: data) < 0,
                     duration: 2,
+                    lineWidth: surgeLineWidth,
                     curve: ChargerToCar(),
                     shouldStart: startAnimations
                 )
@@ -362,6 +374,7 @@ struct ContentView: View {
                     color: .yellow,
                     isForward: true,
                     duration: 2,
+                    lineWidth: surgeLineWidth,
                     curve: SolarToGateway(),
                     shouldStart: startAnimations
                 )
@@ -378,6 +391,7 @@ struct ContentView: View {
                     isForward: true,
                     duration: 2,
                     startOffset: 1,
+                    lineWidth: surgeLineWidth,
                     curve: GatewayToHome(),
                     shouldStart: startAnimations
                 )
@@ -395,6 +409,7 @@ struct ContentView: View {
                     isForward: data.battery.instantPower > 0,
                     duration: 2,
                     startOffset: data.battery.instantPower > 0 ? 0 : 1,
+                    lineWidth: surgeLineWidth,
                     curve: PowerwallToGateway(),
                     shouldStart: startAnimations
                 )
@@ -412,6 +427,7 @@ struct ContentView: View {
                     isForward: data.site.instantPower < 0,
                     duration: 2,
                     startOffset: data.site.instantPower > 0 ? 0 : 1,
+                    lineWidth: surgeLineWidth,
                     curve: GatewayToGrid(),
                     shouldStart: startAnimations
                 )
@@ -709,6 +725,27 @@ struct ContentView: View {
         return (left: -0.20, right: 0.4)
     }
 
+    private func sceneScaleFactor(_ sceneSize: CGSize) -> CGFloat {
+        guard naturalSceneWidth > 0 else { return 1.0 }
+        return max(1.0, sceneSize.width / naturalSceneWidth)
+    }
+
+    private func overlayScaleFactor(for sceneSize: CGSize) -> CGFloat {
+#if os(macOS)
+        return sceneScaleFactor(sceneSize)
+#else
+        return 1.0
+#endif
+    }
+
+    private func powerSurgeLineWidth(for sceneSize: CGSize) -> CGFloat {
+#if os(macOS)
+        return max(5.0, 5.0 * sceneScaleFactor(sceneSize))
+#else
+        return 6.0
+#endif
+    }
+
     // Coordinates are measured from the center of the scene container:
     // x/y = -0.5...0.5 maps to leading/top ... trailing/bottom.
     private func scenePoint(x: CGFloat, y: CGFloat, in sceneSize: CGSize) -> CGPoint {
@@ -741,6 +778,15 @@ struct ContentView: View {
         viewModel.fetchSolarEnergyToday()
         viewModel.fetchSiteInfo()
     }
+
+#if os(macOS)
+    private func exitFullScreenIfNeeded() -> Bool {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return false }
+        guard window.styleMask.contains(.fullScreen) else { return false }
+        window.toggleFullScreen(nil)
+        return true
+    }
+#endif
 
     private func handleSiteSwipe(_ translation: CGSize) {
         guard !showingGraph else { return }

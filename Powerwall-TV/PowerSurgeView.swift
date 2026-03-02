@@ -114,13 +114,9 @@ struct PowerSurgeView<Curve: Shape>: View {
     var duration: Double
     var pauseDuration: Double
     var startOffset: Double
+    var lineWidth: CGFloat
     let curve: Curve
     var shouldStart: Bool
-#if os(macOS)
-    let lineWidth: Double = 5
-#else
-    let lineWidth: Double = 6
-#endif
 
     @State private var startFraction: CGFloat
     @State private var direction: Bool
@@ -144,6 +140,7 @@ struct PowerSurgeView<Curve: Shape>: View {
         duration: Double = 2.0,
         pauseDuration: Double = 1.0,
         startOffset: Double = 0.0,
+        lineWidth: CGFloat? = nil,
         curve: Curve = PreviewCurve(),
         shouldStart: Bool = false
     ) {
@@ -152,6 +149,7 @@ struct PowerSurgeView<Curve: Shape>: View {
         self.duration = duration
         self.pauseDuration = pauseDuration
         self.startOffset = startOffset
+        self.lineWidth = lineWidth ?? Self.defaultLineWidth
         self.curve = curve
         self.shouldStart = shouldStart
         _startFraction = State(initialValue: isForward ? 0 : 2.0 / 3.0)
@@ -229,6 +227,14 @@ struct PowerSurgeView<Curve: Shape>: View {
         // Delay until the next start time
         let delay = cycleTime - timeSinceLastStart
         return delay
+    }
+
+    private static var defaultLineWidth: CGFloat {
+#if os(macOS)
+        return 5.0
+#else
+        return 6.0
+#endif
     }
 }
 
