@@ -290,7 +290,7 @@ struct ContentView: View {
             Text("Loading...")
                 .opacity(0.6)
                 .fontWeight(.bold)
-                .font(labelFont)
+                .font(labelFont(for: sceneSize))
                 .foregroundColor(.white)
                 .position(scenePoint(x: 0.05, y: 0.43, in: sceneSize))
         }
@@ -300,41 +300,38 @@ struct ContentView: View {
         let batteryPercentage = max(0.0, min(1.0, (viewModel.batteryPercentage?.percentage ?? 0) / 100))
         let batteryIndicatorHeight = sceneHeight(0.076, in: sceneSize) * batteryPercentage
         let batteryIndicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0024, in: sceneSize))
-        let overlayScale = overlayScaleFactor(for: sceneSize)
+        let valueFont = valueFont(for: sceneSize)
+        let labelFont = labelFont(for: sceneSize)
+        let summaryMessageWidth = 260 * textScaleFactor(for: sceneSize)
         let surgeLineWidth = powerSurgeLineWidth(for: sceneSize)
         var homeAndGridXPosition = 0.26
         var gridCarbonXPosition = 0.04
 #if os(tvOS)
         homeAndGridXPosition = 0.30
 #elseif os(macOS)
-        homeAndGridXPosition = 0.25
-        gridCarbonXPosition = 0.026
+        homeAndGridXPosition = 0.26
+        gridCarbonXPosition = 0.035
 #elseif os(iOS)
         gridCarbonXPosition = 0.035
 #endif
 
         return ZStack {
             if showSiteSummaryInScene {
-                siteSummaryView(data: data)
-                    .scaleEffect(overlayScale, anchor: .center)
+                siteSummaryView(data: data, valueFont: valueFont, labelFont: labelFont, messageWidth: summaryMessageWidth)
                     .position(scenePoint(x: -0.39, y: -0.38, in: sceneSize))
             }
 
-            solarMetricView(data: data)
-                .scaleEffect(overlayScale, anchor: .center)
+            solarMetricView(data: data, valueFont: valueFont, labelFont: labelFont)
                 .position(scenePoint(x: 0.087, y: -0.40, in: sceneSize))
 
-            homeMetricView(data: data)
-                .scaleEffect(overlayScale, anchor: .center)
+            homeMetricView(data: data, valueFont: valueFont, labelFont: labelFont)
                 .position(scenePoint(x: homeAndGridXPosition, y: -0.30, in: sceneSize))
 
-            batteryMetricView(data: data)
-                .scaleEffect(overlayScale, anchor: .center)
+            batteryMetricView(data: data, valueFont: valueFont, labelFont: labelFont)
                 .position(scenePoint(x: 0.03, y: 0.40, in: sceneSize))
 
             if !data.wallConnectors.isEmpty {
-                wallConnectorMetricView(data: data)
-                    .scaleEffect(overlayScale, anchor: .center)
+                wallConnectorMetricView(data: data, valueFont: valueFont, labelFont: labelFont)
                     .position(scenePoint(x: -0.104, y: -0.40, in: sceneSize))
             }
 
@@ -349,8 +346,7 @@ struct ContentView: View {
                 in: sceneSize
             ))
 
-            gridMetricView(data: data)
-                .scaleEffect(overlayScale, anchor: .center)
+            gridMetricView(data: data, valueFont: valueFont, labelFont: labelFont)
                 .position(scenePoint(x: viewModel.gridFossilFuelPercentage != nil ? homeAndGridXPosition + gridCarbonXPosition : homeAndGridXPosition, y: 0.40, in: sceneSize))
 
             if animations && wallConnectorEnergyTotal(data: data) > 10 {
@@ -450,7 +446,12 @@ struct ContentView: View {
            !(viewModel.ipAddress.isEmpty && viewModel.loginMode == .local),
            let data = viewModel.data {
             let leadingPadding = max(16, sceneMinX + sceneWidth(0.02, in: sceneSize))
-            siteSummaryView(data: data)
+            siteSummaryView(
+                data: data,
+                valueFont: valueFont(for: sceneSize),
+                labelFont: labelFont(for: sceneSize),
+                messageWidth: 260 * textScaleFactor(for: sceneSize)
+            )
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, leadingPadding)
@@ -459,7 +460,7 @@ struct ContentView: View {
         }
     }
 
-    private func siteSummaryView(data: PowerwallData) -> some View {
+    private func siteSummaryView(data: PowerwallData, valueFont: Font, labelFont: Font, messageWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let siteName = viewModel.siteName {
                 Text(siteName)
@@ -485,13 +486,13 @@ struct ContentView: View {
                     .font(labelFont)
                     .foregroundColor(viewModel.errorMessage != nil ? .red : .green)
                     .opacity(viewModel.errorMessage != nil ? 1.0 : 0.6)
-                    .frame(width: 260, alignment: .leading)
+                    .frame(width: messageWidth, alignment: .leading)
             }
         }
         .multilineTextAlignment(.leading)
     }
 
-    private func solarMetricView(data: PowerwallData) -> some View {
+    private func solarMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
         VStack(spacing: 2) {
             Text("\(data.solar.instantPower / 1000, specifier: precision) kW")
                 .fontWeight(.bold)
@@ -504,7 +505,7 @@ struct ContentView: View {
         .multilineTextAlignment(.center)
     }
 
-    private func homeMetricView(data: PowerwallData) -> some View {
+    private func homeMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
         VStack(spacing: 2) {
             Text("\(homeEnergyToDisplay(data: data) / 1000, specifier: precision) kW")
                 .fontWeight(.bold)
@@ -517,7 +518,7 @@ struct ContentView: View {
         .multilineTextAlignment(.center)
     }
 
-    private func batteryMetricView(data: PowerwallData) -> some View {
+    private func batteryMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
         VStack(spacing: 2) {
             (
                 Text("\(data.battery.instantPower / 1000, specifier: precision) kW ")
@@ -536,7 +537,7 @@ struct ContentView: View {
         .multilineTextAlignment(.center)
     }
 
-    private func wallConnectorMetricView(data: PowerwallData) -> some View {
+    private func wallConnectorMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
         VStack(spacing: 2) {
             Text(wallConnectorDisplay(data: data, precision: precision))
                 .fontWeight(.bold)
@@ -549,7 +550,7 @@ struct ContentView: View {
         .multilineTextAlignment(.center)
     }
 
-    private func gridMetricView(data: PowerwallData) -> some View {
+    private func gridMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
         VStack(spacing: 2) {
             if let fossil = viewModel.gridFossilFuelPercentage {
                 let renewables = max(0, min(100, 100 - fossil))
@@ -655,16 +656,20 @@ struct ContentView: View {
         }
     }
 
-    private var valueFont: Font {
-#if os(tvOS)
+    private func valueFont(for sceneSize: CGSize) -> Font {
+#if os(macOS)
+        return .system(size: 18 * textScaleFactor(for: sceneSize))
+#elseif os(tvOS)
         return .headline
 #else
         return .title2
 #endif
     }
 
-    private var labelFont: Font {
-#if os(tvOS)
+    private func labelFont(for sceneSize: CGSize) -> Font {
+#if os(macOS)
+        return .system(size: 12 * textScaleFactor(for: sceneSize))
+#elseif os(tvOS)
         return .footnote
 #else
         return .subheadline
@@ -730,7 +735,7 @@ struct ContentView: View {
         return max(1.0, sceneSize.width / naturalSceneWidth)
     }
 
-    private func overlayScaleFactor(for sceneSize: CGSize) -> CGFloat {
+    private func textScaleFactor(for sceneSize: CGSize) -> CGFloat {
 #if os(macOS)
         return sceneScaleFactor(sceneSize)
 #else
