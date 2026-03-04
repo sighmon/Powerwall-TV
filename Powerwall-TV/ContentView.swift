@@ -33,7 +33,7 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             let sceneSize = fittedSceneSize(in: geometry.size)
-            let detachSiteSummary = shouldDetachSiteSummary(geometrySize: geometry.size)
+            let detachSiteSummary = shouldDetachSiteSummary(geometrySize: geometry.size, sceneSize: sceneSize)
             let sceneFrame = sceneFrame(
                 in: geometry.size,
                 sceneSize: sceneSize,
@@ -321,7 +321,7 @@ struct ContentView: View {
         let batteryIndicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0024, in: sceneSize))
         let valueFont = valueFont(for: sceneSize)
         let labelFont = labelFont(for: sceneSize)
-        let summaryMessageWidth = 260 * textScaleFactor(for: sceneSize)
+        let summaryMessageWidth = siteSummaryMessageWidth(for: sceneSize)
         let surgeLineWidth = powerSurgeLineWidth(for: sceneSize)
         var homeAndGridXPosition = 0.26
         var gridCarbonXPosition = 0.04
@@ -337,7 +337,7 @@ struct ContentView: View {
         return ZStack {
             if showSiteSummaryInScene {
                 siteSummaryView(data: data, valueFont: valueFont, labelFont: labelFont, messageWidth: summaryMessageWidth)
-                    .position(scenePoint(x: -0.39, y: -0.38, in: sceneSize))
+                    .position(scenePoint(x: inlineSiteSummaryX, y: -0.38, in: sceneSize))
             }
 
             solarMetricView(data: data, valueFont: valueFont, labelFont: labelFont)
@@ -464,12 +464,12 @@ struct ContentView: View {
         if enabled,
            !(viewModel.ipAddress.isEmpty && viewModel.loginMode == .local),
            let data = viewModel.data {
-            let leadingPadding = max(16, sceneMinX + sceneWidth(0.02, in: sceneSize))
+            let leadingPadding = max(24, sceneMinX + sceneWidth(0.04, in: sceneSize))
             siteSummaryView(
                 data: data,
                 valueFont: valueFont(for: sceneSize),
                 labelFont: labelFont(for: sceneSize),
-                messageWidth: 260 * textScaleFactor(for: sceneSize)
+                messageWidth: siteSummaryMessageWidth(for: sceneSize)
             )
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -509,6 +509,7 @@ struct ContentView: View {
             }
         }
         .multilineTextAlignment(.leading)
+        .frame(width: messageWidth, alignment: .leading)
     }
 
     private func solarMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
@@ -714,8 +715,15 @@ struct ContentView: View {
 #endif
     }
 
-    private func shouldDetachSiteSummary(geometrySize: CGSize) -> Bool {
-        isPortraitIPad(geometrySize) || isNarrowMacOSWindow(geometrySize)
+    private func shouldDetachSiteSummary(geometrySize: CGSize, sceneSize: CGSize) -> Bool {
+#if os(iOS)
+        if isPortraitIPad(geometrySize) {
+            return true
+        }
+        return !canFitInlineSiteSummary(availableSize: geometrySize, sceneSize: sceneSize)
+#else
+        return isNarrowMacOSWindow(geometrySize)
+#endif
     }
 
     private func isNarrowMacOSWindow(_ geometrySize: CGSize) -> Bool {
@@ -744,9 +752,17 @@ struct ContentView: View {
     private func sceneLabelCropBounds(showSiteSummaryInScene: Bool) -> (left: CGFloat, right: CGFloat) {
         // Normalized coordinates in scene space (-0.5 ... 0.5), including padding.
         if showSiteSummaryInScene {
-            return (left: -0.49, right: 0.4)
+            return (left: inlineSiteSummaryX - 0.10, right: 0.4)
         }
         return (left: -0.20, right: 0.4)
+    }
+
+    private var inlineSiteSummaryX: CGFloat {
+#if os(macOS)
+        return -0.3
+#else
+        return -0.39
+#endif
     }
 
     private func sceneScaleFactor(_ sceneSize: CGSize) -> CGFloat {
@@ -760,6 +776,24 @@ struct ContentView: View {
 #else
         return 1.0
 #endif
+    }
+
+    private func siteSummaryMessageWidth(for sceneSize: CGSize) -> CGFloat {
+        260 * textScaleFactor(for: sceneSize)
+    }
+
+    private func canFitInlineSiteSummary(availableSize: CGSize, sceneSize: CGSize) -> Bool {
+        let inlineFrame = sceneFrame(
+            in: availableSize,
+            sceneSize: sceneSize,
+            showSiteSummaryInScene: true
+        )
+        let summaryCenterX = scenePoint(x: inlineSiteSummaryX, y: -0.38, in: sceneSize).x
+        let summaryHalfWidth = siteSummaryMessageWidth(for: sceneSize) / 2
+        let leftEdge = inlineFrame.minX + summaryCenterX - summaryHalfWidth
+        let rightEdge = inlineFrame.minX + summaryCenterX + summaryHalfWidth
+        let horizontalInset: CGFloat = 12
+        return leftEdge >= horizontalInset && rightEdge <= (availableSize.width - horizontalInset)
     }
 
     private func powerSurgeLineWidth(for sceneSize: CGSize) -> CGFloat {

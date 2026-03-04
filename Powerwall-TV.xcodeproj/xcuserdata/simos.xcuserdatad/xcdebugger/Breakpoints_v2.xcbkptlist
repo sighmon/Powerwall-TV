@@ -16,8 +16,8 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "279"
             endingLineNumber = "279"
-            landmarkName = "body"
-            landmarkType = "24">
+            landmarkName = "graphBody(primaryChartHeight:secondaryChartHeight:iOSTopPadding:iOSCloseTopPadding:)"
+            landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -48,8 +48,8 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "242"
             endingLineNumber = "242"
-            landmarkName = "body"
-            landmarkType = "24">
+            landmarkName = "graphBody(primaryChartHeight:secondaryChartHeight:iOSTopPadding:iOSCloseTopPadding:)"
+            landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy

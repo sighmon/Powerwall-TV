@@ -159,7 +159,37 @@ struct GraphView: View {
         return CGPoint(x: point.x + plotOrigin.x, y: point.y + plotOrigin.y)
     }
 
-    var body: some View {
+    private func chartHeights(containerSize: CGSize, safeAreaInsets: EdgeInsets) -> (primary: CGFloat, secondary: CGFloat) {
+#if os(iOS)
+        let safeHeight = max(0, containerSize.height - safeAreaInsets.top - safeAreaInsets.bottom)
+        let reservedForHeaderAndControls: CGFloat = 230
+        let chartBudget = max(180, safeHeight - reservedForHeaderAndControls)
+
+        var primary = chartBudget * 0.72
+        var secondary = chartBudget * 0.28
+
+        primary = max(120, primary)
+        secondary = max(70, secondary)
+
+        let combined = primary + secondary
+        if combined > chartBudget {
+            let scale = chartBudget / combined
+            primary *= scale
+            secondary *= scale
+        }
+
+        return (primary, secondary)
+#else
+        return (maxChartHeight, maxChartHeight / 3)
+#endif
+    }
+
+    private func graphBody(
+        primaryChartHeight: CGFloat,
+        secondaryChartHeight: CGFloat,
+        iOSTopPadding: CGFloat = 0,
+        iOSCloseTopPadding: CGFloat = 12
+    ) -> some View {
         VStack(spacing: 20) {
             // Battery Power Flow Chart
             Text(selectedGraph.title)
@@ -178,7 +208,7 @@ struct GraphView: View {
                     .opacity(0) // Hide the points
                 }
             }
-            .frame(height: maxChartHeight)
+            .frame(height: primaryChartHeight)
             .chartOverlay { proxy in
                 GeometryReader { geometry in
                     let plotFrame = geometry[proxy.plotAreaFrame]
@@ -343,7 +373,7 @@ struct GraphView: View {
                     )
                 }
             }
-            .frame(height: maxChartHeight / 3)
+            .frame(height: secondaryChartHeight)
             .foregroundColor(.green)
             .chartXAxis {
                 AxisMarks(values: .stride(by: .hour, count: 3)) { _ in
@@ -356,7 +386,14 @@ struct GraphView: View {
                 AxisMarks(position: .leading, values: [0, 50, 100])
             }
         }
+#if os(iOS)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 0)
+        .padding(.top, iOSTopPadding)
+#else
         .padding()
+#endif
         .onAppear {
             if viewModel.loginMode == .fleetAPI {
                 viewModel.fetchFleetAPIHistory()
@@ -380,7 +417,7 @@ struct GraphView: View {
             .controlSize(.large)
             .accessibilityLabel("Close")
             .environment(\.colorScheme, .dark)
-            .padding(.top, 12)
+            .padding(.top, iOSCloseTopPadding)
             .padding(.trailing, 12)
         }
 #endif
@@ -420,6 +457,25 @@ struct GraphView: View {
             cycleGraph(1)
             return .handled
         }
+#endif
+    }
+
+    var body: some View {
+#if os(iOS)
+        GeometryReader { geometry in
+            let dynamicHeights = chartHeights(containerSize: geometry.size, safeAreaInsets: geometry.safeAreaInsets)
+            graphBody(
+                primaryChartHeight: dynamicHeights.primary,
+                secondaryChartHeight: dynamicHeights.secondary,
+                iOSTopPadding: max(48, geometry.safeAreaInsets.top + 12),
+                iOSCloseTopPadding: max(8, geometry.safeAreaInsets.top + 4)
+            )
+        }
+#else
+        graphBody(
+            primaryChartHeight: maxChartHeight,
+            secondaryChartHeight: maxChartHeight / 3
+        )
 #endif
     }
 }
