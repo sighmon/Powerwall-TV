@@ -63,6 +63,9 @@ struct SettingsView: View {
                 Section(header: Text("Fleet API Settings")) {
                     SecureField("Access token", text: $accessToken)
                         .textContentType(.password)
+                    Button("Login with your Tesla account") {
+                        _ = viewModel.startFleetLoginManually()
+                    }
                 }
             }
 

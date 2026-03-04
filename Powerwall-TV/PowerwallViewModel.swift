@@ -24,7 +24,7 @@ class PowerwallViewModel: ObservableObject {
     // Published properties for UI binding
 
     // Local login
-    @Published var loginMode: LoginMode = LoginMode(rawValue: UserDefaults.standard.string(forKey: "loginMode") ?? "local") ?? .local
+    @Published var loginMode: LoginMode = LoginMode(rawValue: UserDefaults.standard.string(forKey: "loginMode") ?? LoginMode.fleetAPI.rawValue) ?? .fleetAPI
     @Published var ipAddress: String = UserDefaults.standard.string(forKey: "gatewayIP") ?? ""
     @Published var wallConnectorIPAddress: String = UserDefaults.standard.string(forKey: "wallConnectorIP") ?? ""
     @Published var username: String = UserDefaults.standard.string(forKey: "username") ?? "customer"
@@ -76,6 +76,9 @@ class PowerwallViewModel: ObservableObject {
     }()
 
     private var cancellables = Set<AnyCancellable>()
+    private var hasAttemptedAutomaticFleetLogin = false
+    private var isPresentingFleetLogin = false
+    private var activeAuthSession: ASWebAuthenticationSession?
 #if os(macOS) || os(iOS)
     private let authPresentationContextProvider = AuthPresentationContextProvider()
 #endif
@@ -110,9 +113,13 @@ class PowerwallViewModel: ObservableObject {
             }
             localLogin(ipAddress: ipAddress, password: password, completion: completion)
         case .fleetAPI:
-            loginWithTeslaFleetAPI()
-            completion(true) // Asynchronous; handle completion in callback
+            completion(loginWithTeslaFleetAPI(isAutomaticPrompt: true))
         }
+    }
+
+    @discardableResult
+    func startFleetLoginManually() -> Bool {
+        loginWithTeslaFleetAPI(isAutomaticPrompt: false)
     }
 
     // MARK: - Local Login
@@ -168,17 +175,30 @@ class PowerwallViewModel: ObservableObject {
 
     // MARK: - Tesla Fleet API Login
 
-    private func loginWithTeslaFleetAPI() {
+    @discardableResult
+    private func loginWithTeslaFleetAPI(isAutomaticPrompt: Bool = false) -> Bool {
+        if isAutomaticPrompt {
+            guard !hasAttemptedAutomaticFleetLogin else { return false }
+            hasAttemptedAutomaticFleetLogin = true
+        }
+
+        guard !isPresentingFleetLogin else { return false }
+
         let state = UUID().uuidString
         let authURLString = "https://auth.tesla.com/oauth2/v3/authorize?client_id=\(clientID)&redirect_uri=\(redirectURI)&response_type=code&scope=\(scopes)&state=\(state)"
 
         guard let authURL = URL(string: authURLString) else {
             errorMessage = "Invalid authorization URL"
-            return
+            return false
         }
 
+        isPresentingFleetLogin = true
         let authSession = ASWebAuthenticationSession(url: authURL, callbackURLScheme: "powerwalltv") { [weak self] callbackURL, error in
             guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.isPresentingFleetLogin = false
+                self.activeAuthSession = nil
+            }
 
             if let error = error {
                 DispatchQueue.main.async {
@@ -199,7 +219,13 @@ class PowerwallViewModel: ObservableObject {
 #if os(macOS) || os(iOS)
         authSession.presentationContextProvider = authPresentationContextProvider
 #endif
-        authSession.start()
+        activeAuthSession = authSession
+        guard authSession.start() else {
+            isPresentingFleetLogin = false
+            activeAuthSession = nil
+            return false
+        }
+        return true
     }
 
     private func exchangeCodeForToken(code: String) {
@@ -236,6 +262,7 @@ class PowerwallViewModel: ObservableObject {
 
             DispatchQueue.main.async {
                 self.accessToken = tokenResponse.access_token
+                self.hasAttemptedAutomaticFleetLogin = false
                 // Save the accessToken to Keychain
                 KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
                 if let refreshToken = tokenResponse.refresh_token {
@@ -438,13 +465,8 @@ class PowerwallViewModel: ObservableObject {
             }
         case .fleetAPI:
             if accessToken.isEmpty {
-                // No token, initiate login
-                login { success in
-                    if success {
-                        self.fetchEnergyProducts()
-                    }
-                    // If login fails, errorMessage is already set by the login function
-                }
+                _ = loginWithTeslaFleetAPI(isAutomaticPrompt: true)
+                return
             }
             if let expirationDate = UserDefaults.standard.object(forKey: "fleetAPI_tokenExpiration") as? Date,
                Date() >= expirationDate {

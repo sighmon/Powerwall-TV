@@ -135,6 +135,9 @@ struct ContentView: View {
 #endif
         .onReceive(timer) { _ in
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
+            if showingSettings {
+                return
+            }
             if viewModel.ipAddress == "demo" {
                 let homeLoad = Double(arc4random_uniform(4096)) + 256
                 viewModel.data = PowerwallData(
@@ -149,8 +152,15 @@ struct ContentView: View {
                 )
                 viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
                 viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
-            } else if !viewModel.ipAddress.isEmpty || !viewModel.accessToken.isEmpty {
-                viewModel.fetchData()
+            } else {
+                switch viewModel.loginMode {
+                case .local:
+                    if hasGatewayAddressConfigured {
+                        viewModel.fetchData()
+                    }
+                case .fleetAPI:
+                    viewModel.fetchData()
+                }
             }
         }
         .onReceive(timerTodaysTotal) { _ in
@@ -167,7 +177,7 @@ struct ContentView: View {
                 viewModel.ipAddress = "demo"
             }
             viewModel.fetchElectricityMapsData()
-            if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
+            if shouldAutoOpenSettingsOnLaunch {
                 showingSettings = true
             } else if viewModel.ipAddress == "demo" {
                 viewModel.data = PowerwallData(
@@ -287,12 +297,21 @@ struct ContentView: View {
             )
                 .foregroundColor(.white)
         } else {
-            Text("Loading...")
-                .opacity(0.6)
-                .fontWeight(.bold)
-                .font(labelFont(for: sceneSize))
-                .foregroundColor(.white)
-                .position(scenePoint(x: 0.05, y: 0.43, in: sceneSize))
+            Group {
+                if viewModel.loginMode == .fleetAPI && !hasFleetAccessTokenConfigured {
+                    Button("Login with your Tesla account") {
+                        _ = viewModel.startFleetLoginManually()
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text("Loading...")
+                }
+            }
+            .opacity(0.6)
+            .fontWeight(.bold)
+            .font(labelFont(for: sceneSize))
+            .foregroundColor(.white)
+            .position(scenePoint(x: 0.03, y: 0.4, in: sceneSize))
         }
     }
 
@@ -771,6 +790,18 @@ struct ContentView: View {
 
     private func sceneHeight(_ fraction: CGFloat, in sceneSize: CGSize) -> CGFloat {
         sceneSize.height * fraction
+    }
+
+    private var hasGatewayAddressConfigured: Bool {
+        !viewModel.ipAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var hasFleetAccessTokenConfigured: Bool {
+        !viewModel.accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var shouldAutoOpenSettingsOnLaunch: Bool {
+        viewModel.loginMode == .local && !hasGatewayAddressConfigured
     }
 
     private func updateEnergySite(_ delta: Int) {
