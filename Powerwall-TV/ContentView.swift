@@ -734,27 +734,23 @@ struct ContentView: View {
 #endif
     }
 
-    private func sceneFrame(in available: CGSize, sceneSize: CGSize, showSiteSummaryInScene: Bool) -> CGRect {
-        let minX: CGFloat
-        if available.width < sceneSize.width {
-            let bounds = sceneLabelCropBounds(showSiteSummaryInScene: showSiteSummaryInScene)
-            let contentAnchor = 0.5 + ((bounds.left + bounds.right) / 2)
-            let preferredMinX = (available.width / 2) - (sceneSize.width * contentAnchor)
-            let minAllowedX = available.width - sceneSize.width
-            minX = min(0, max(minAllowedX, preferredMinX))
-        } else {
-            minX = (available.width - sceneSize.width) / 2
-        }
+    private func sceneFrame(in available: CGSize, sceneSize: CGSize, showSiteSummaryInScene _: Bool) -> CGRect {
+        let centeredMinX = (available.width - sceneSize.width) / 2
+#if os(macOS)
+        // Keep the scene centered by default, but once the right-side labels hit
+        // the viewport edge, shift left just enough so they stay visible.
+        let rightContentBound: CGFloat = 0.40
+        let rightContentX = sceneSize.width * (0.5 + rightContentBound)
+        let minXToKeepRightContentVisible = available.width - rightContentX
+        let desiredMinX = min(centeredMinX, minXToKeepRightContentVisible)
+#else
+        let desiredMinX = centeredMinX - (available.width * 0.10)
+#endif
+        let lowerBound = min(0, available.width - sceneSize.width)
+        let upperBound = max(0, available.width - sceneSize.width)
+        let minX = min(upperBound, max(lowerBound, desiredMinX))
         let minY = (available.height - sceneSize.height) / 2
         return CGRect(x: minX, y: minY, width: sceneSize.width, height: sceneSize.height)
-    }
-
-    private func sceneLabelCropBounds(showSiteSummaryInScene: Bool) -> (left: CGFloat, right: CGFloat) {
-        // Normalized coordinates in scene space (-0.5 ... 0.5), including padding.
-        if showSiteSummaryInScene {
-            return (left: inlineSiteSummaryX - 0.10, right: 0.4)
-        }
-        return (left: -0.20, right: 0.4)
     }
 
     private var inlineSiteSummaryX: CGFloat {
