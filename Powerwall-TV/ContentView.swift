@@ -757,6 +757,8 @@ struct ContentView: View {
     private var inlineSiteSummaryX: CGFloat {
 #if os(macOS)
         return -0.3
+#elseif os(tvOS)
+        return -0.38
 #else
         return -0.39
 #endif
@@ -776,7 +778,12 @@ struct ContentView: View {
     }
 
     private func siteSummaryMessageWidth(for sceneSize: CGSize) -> CGFloat {
+#if os(tvOS)
+        _ = sceneSize
+        return 400
+#else
         260 * textScaleFactor(for: sceneSize)
+#endif
     }
 
     private func canFitInlineSiteSummary(availableSize: CGSize, sceneSize: CGSize) -> Bool {
