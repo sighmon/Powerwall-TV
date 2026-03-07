@@ -9,17 +9,35 @@
 import Foundation
 import Combine
 import AuthenticationServices
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 enum LoginMode: String, CaseIterable {
     case local = "local"
     case fleetAPI = "fleetAPI"
 }
 
+let sceneScaleRange: ClosedRange<Double> = 0.80...1.20
+let sceneScaleStep: Double = 0.05
+let sceneHorizontalOffsetRange: ClosedRange<Double> = -0.20...0.20
+let sceneHorizontalOffsetStep: Double = 0.02
+
+func clampSceneScale(_ value: Double) -> Double {
+    min(max(value, sceneScaleRange.lowerBound), sceneScaleRange.upperBound)
+}
+
+func clampSceneHorizontalOffset(_ value: Double) -> Double {
+    min(max(value, sceneHorizontalOffsetRange.lowerBound), sceneHorizontalOffsetRange.upperBound)
+}
+
 class PowerwallViewModel: ObservableObject {
     // Published properties for UI binding
 
     // Local login
-    @Published var loginMode: LoginMode = LoginMode(rawValue: UserDefaults.standard.string(forKey: "loginMode") ?? "local") ?? .local
+    @Published var loginMode: LoginMode = LoginMode(rawValue: UserDefaults.standard.string(forKey: "loginMode") ?? LoginMode.fleetAPI.rawValue) ?? .fleetAPI
     @Published var ipAddress: String = UserDefaults.standard.string(forKey: "gatewayIP") ?? ""
     @Published var wallConnectorIPAddress: String = UserDefaults.standard.string(forKey: "wallConnectorIP") ?? ""
     @Published var username: String = UserDefaults.standard.string(forKey: "username") ?? "customer"
@@ -27,6 +45,8 @@ class PowerwallViewModel: ObservableObject {
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
     @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
     @Published var showInMenuBar: Bool = UserDefaults.standard.bool(forKey: "showInMenuBar")
+    @Published var sceneScale: Double = clampSceneScale(UserDefaults.standard.object(forKey: "sceneScale") as? Double ?? 1.0)
+    @Published var sceneHorizontalOffset: Double = clampSceneHorizontalOffset(UserDefaults.standard.object(forKey: "sceneHorizontalOffset") as? Double ?? 0.0)
     @Published var currentEnergySiteIndex: Int = UserDefaults.standard.integer(forKey: "currentEnergySiteIndex")
     @Published var energySites: [Product] = []
     @Published var electricityMapsZone: String = UserDefaults.standard.string(forKey: "electricityMaps_zone") ?? ""
@@ -71,6 +91,12 @@ class PowerwallViewModel: ObservableObject {
     }()
 
     private var cancellables = Set<AnyCancellable>()
+    private var hasAttemptedAutomaticFleetLogin = false
+    private var isPresentingFleetLogin = false
+    private var activeAuthSession: ASWebAuthenticationSession?
+#if os(macOS) || os(iOS)
+    private let authPresentationContextProvider = AuthPresentationContextProvider()
+#endif
     private static var isRunningTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
@@ -102,9 +128,13 @@ class PowerwallViewModel: ObservableObject {
             }
             localLogin(ipAddress: ipAddress, password: password, completion: completion)
         case .fleetAPI:
-            loginWithTeslaFleetAPI()
-            completion(true) // Asynchronous; handle completion in callback
+            completion(loginWithTeslaFleetAPI(isAutomaticPrompt: true))
         }
+    }
+
+    @discardableResult
+    func startFleetLoginManually() -> Bool {
+        loginWithTeslaFleetAPI(isAutomaticPrompt: false)
     }
 
     // MARK: - Local Login
@@ -160,17 +190,30 @@ class PowerwallViewModel: ObservableObject {
 
     // MARK: - Tesla Fleet API Login
 
-    private func loginWithTeslaFleetAPI() {
+    @discardableResult
+    private func loginWithTeslaFleetAPI(isAutomaticPrompt: Bool = false) -> Bool {
+        if isAutomaticPrompt {
+            guard !hasAttemptedAutomaticFleetLogin else { return false }
+            hasAttemptedAutomaticFleetLogin = true
+        }
+
+        guard !isPresentingFleetLogin else { return false }
+
         let state = UUID().uuidString
         let authURLString = "https://auth.tesla.com/oauth2/v3/authorize?client_id=\(clientID)&redirect_uri=\(redirectURI)&response_type=code&scope=\(scopes)&state=\(state)"
 
         guard let authURL = URL(string: authURLString) else {
             errorMessage = "Invalid authorization URL"
-            return
+            return false
         }
 
+        isPresentingFleetLogin = true
         let authSession = ASWebAuthenticationSession(url: authURL, callbackURLScheme: "powerwalltv") { [weak self] callbackURL, error in
             guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.isPresentingFleetLogin = false
+                self.activeAuthSession = nil
+            }
 
             if let error = error {
                 DispatchQueue.main.async {
@@ -188,10 +231,16 @@ class PowerwallViewModel: ObservableObject {
             }
             self.exchangeCodeForToken(code: code)
         }
-#if os(macOS)
-        authSession.presentationContextProvider = self
+#if os(macOS) || os(iOS)
+        authSession.presentationContextProvider = authPresentationContextProvider
 #endif
-        authSession.start()
+        activeAuthSession = authSession
+        guard authSession.start() else {
+            isPresentingFleetLogin = false
+            activeAuthSession = nil
+            return false
+        }
+        return true
     }
 
     private func exchangeCodeForToken(code: String) {
@@ -228,6 +277,7 @@ class PowerwallViewModel: ObservableObject {
 
             DispatchQueue.main.async {
                 self.accessToken = tokenResponse.access_token
+                self.hasAttemptedAutomaticFleetLogin = false
                 // Save the accessToken to Keychain
                 KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
                 if let refreshToken = tokenResponse.refresh_token {
@@ -430,13 +480,8 @@ class PowerwallViewModel: ObservableObject {
             }
         case .fleetAPI:
             if accessToken.isEmpty {
-                // No token, initiate login
-                login { success in
-                    if success {
-                        self.fetchEnergyProducts()
-                    }
-                    // If login fails, errorMessage is already set by the login function
-                }
+                _ = loginWithTeslaFleetAPI(isAutomaticPrompt: true)
+                return
             }
             if let expirationDate = UserDefaults.standard.object(forKey: "fleetAPI_tokenExpiration") as? Date,
                Date() >= expirationDate {
@@ -1228,62 +1273,26 @@ extension WallConnectorVitals {
     var wallConnectorPower: Double { gridVolts * vehicleCurrentAmps }
 }
 
-#if os(macOS)
-extension PowerwallViewModel: ASWebAuthenticationPresentationContextProviding {
-    func isEqual(_ object: Any?) -> Bool {
-        return true
-    }
-
-    var hash: Int {
-        return 0
-    }
-
-    var superclass: AnyClass? {
-        return PowerwallViewModel.self
-    }
-
-    func `self`() -> Self {
-        return self
-    }
-
-    func perform(_ aSelector: Selector!) -> Unmanaged<AnyObject>! {
-        return nil
-    }
-
-    func perform(_ aSelector: Selector!, with object: Any!) -> Unmanaged<AnyObject>! {
-        return nil
-    }
-
-    func perform(_ aSelector: Selector!, with object1: Any!, with object2: Any!) -> Unmanaged<AnyObject>! {
-        return nil
-    }
-
-    func isProxy() -> Bool {
-        return true
-    }
-
-    func isKind(of aClass: AnyClass) -> Bool {
-        return true
-    }
-
-    func isMember(of aClass: AnyClass) -> Bool {
-        return true
-    }
-
-    func conforms(to aProtocol: Protocol) -> Bool {
-        return true
-    }
-
-    func responds(to aSelector: Selector!) -> Bool {
-        return true
-    }
-
-    var description: String {
-        return "Login with your Tesla account to see your Powerwall statistics"
-    }
-
+#if os(macOS) || os(iOS)
+private final class AuthPresentationContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+#if os(macOS)
         return NSApplication.shared.windows.first ?? ASPresentationAnchor()
+#else
+        let windowScenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }
+
+        for scene in windowScenes {
+            if let keyWindow = scene.windows.first(where: \.isKeyWindow) {
+                return keyWindow
+            }
+            if let firstWindow = scene.windows.first {
+                return firstWindow
+            }
+        }
+        return ASPresentationAnchor()
+#endif
     }
 }
 #endif
