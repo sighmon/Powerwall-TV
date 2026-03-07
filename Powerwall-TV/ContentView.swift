@@ -738,13 +738,22 @@ struct ContentView: View {
 #endif
     }
 
+    private func macOSRightContentBound() -> CGFloat {
+#if os(macOS)
+        if viewModel.gridFossilFuelPercentage == nil && viewModel.gridCarbonIntensity == nil {
+            return 0.34
+        }
+#endif
+        return 0.40
+    }
+
     private func sceneFrame(in available: CGSize, sceneSize: CGSize, showSiteSummaryInScene _: Bool) -> CGRect {
         let centeredMinX = (available.width - sceneSize.width) / 2
 #if os(macOS)
         // Keep the scene centered by default, but once the right-side labels hit
         // the viewport edge, shift left just enough so they stay visible.
         let biasedMinX = centeredMinX - (available.width * 0.10)
-        let rightContentBound: CGFloat = 0.40
+        let rightContentBound = macOSRightContentBound()
         let rightContentX = sceneSize.width * (0.5 + rightContentBound)
         let minXToKeepRightContentVisible = available.width - rightContentX
         let desiredMinX = min(biasedMinX, minXToKeepRightContentVisible)
