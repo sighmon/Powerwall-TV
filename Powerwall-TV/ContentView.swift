@@ -87,6 +87,8 @@ struct ContentView: View {
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
                 showInMenuBar: $viewModel.showInMenuBar,
+                sceneScale: $viewModel.sceneScale,
+                sceneHorizontalOffset: $viewModel.sceneHorizontalOffset,
                 showingConfirmation: false,
                 viewModel: viewModel
             )
@@ -119,6 +121,8 @@ struct ContentView: View {
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
                 showInMenuBar: $viewModel.showInMenuBar,
+                sceneScale: $viewModel.sceneScale,
+                sceneHorizontalOffset: $viewModel.sceneHorizontalOffset,
                 showingConfirmation: false,
                 viewModel: viewModel
             )
@@ -332,8 +336,8 @@ struct ContentView: View {
 #if os(tvOS)
         homeAndGridXPosition = 0.30
 #elseif os(macOS)
-        homeAndGridXPosition = 0.26
-        gridCarbonXPosition = 0.035
+        homeAndGridXPosition = 0.25
+        gridCarbonXPosition = 0.03
 #elseif os(iOS)
         gridCarbonXPosition = 0.035
 #endif
@@ -704,7 +708,7 @@ struct ContentView: View {
         guard available.width > 0, available.height > 0 else { return .zero }
         let widthScale = available.width / naturalSceneWidth
         let heightScale = available.height / naturalSceneHeight
-        let scale = max(1.0, min(widthScale, heightScale))
+        let scale = max(1.0, min(widthScale, heightScale)) * clampSceneScale(viewModel.sceneScale)
         return CGSize(
             width: naturalSceneWidth * scale,
             height: naturalSceneHeight * scale
@@ -749,16 +753,17 @@ struct ContentView: View {
 
     private func sceneFrame(in available: CGSize, sceneSize: CGSize, showSiteSummaryInScene _: Bool) -> CGRect {
         let centeredMinX = (available.width - sceneSize.width) / 2
+        let userOffset = available.width * clampSceneHorizontalOffset(viewModel.sceneHorizontalOffset)
 #if os(macOS)
         // Keep the scene centered by default, but once the right-side labels hit
         // the viewport edge, shift left just enough so they stay visible.
-        let biasedMinX = centeredMinX - (available.width * 0.10)
+        let biasedMinX = centeredMinX - (available.width * 0.10) + userOffset
         let rightContentBound = macOSRightContentBound()
         let rightContentX = sceneSize.width * (0.5 + rightContentBound)
         let minXToKeepRightContentVisible = available.width - rightContentX
         let desiredMinX = min(biasedMinX, minXToKeepRightContentVisible)
 #else
-        let desiredMinX = centeredMinX - (available.width * 0.10)
+        let desiredMinX = centeredMinX - (available.width * 0.10) + userOffset
 #endif
         let lowerBound = min(0, available.width - sceneSize.width)
         let upperBound = max(0, available.width - sceneSize.width)

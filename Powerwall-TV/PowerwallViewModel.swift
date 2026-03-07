@@ -20,6 +20,19 @@ enum LoginMode: String, CaseIterable {
     case fleetAPI = "fleetAPI"
 }
 
+let sceneScaleRange: ClosedRange<Double> = 0.80...1.20
+let sceneScaleStep: Double = 0.05
+let sceneHorizontalOffsetRange: ClosedRange<Double> = -0.20...0.20
+let sceneHorizontalOffsetStep: Double = 0.02
+
+func clampSceneScale(_ value: Double) -> Double {
+    min(max(value, sceneScaleRange.lowerBound), sceneScaleRange.upperBound)
+}
+
+func clampSceneHorizontalOffset(_ value: Double) -> Double {
+    min(max(value, sceneHorizontalOffsetRange.lowerBound), sceneHorizontalOffsetRange.upperBound)
+}
+
 class PowerwallViewModel: ObservableObject {
     // Published properties for UI binding
 
@@ -32,6 +45,8 @@ class PowerwallViewModel: ObservableObject {
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
     @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
     @Published var showInMenuBar: Bool = UserDefaults.standard.bool(forKey: "showInMenuBar")
+    @Published var sceneScale: Double = clampSceneScale(UserDefaults.standard.object(forKey: "sceneScale") as? Double ?? 1.0)
+    @Published var sceneHorizontalOffset: Double = clampSceneHorizontalOffset(UserDefaults.standard.object(forKey: "sceneHorizontalOffset") as? Double ?? 0.0)
     @Published var currentEnergySiteIndex: Int = UserDefaults.standard.integer(forKey: "currentEnergySiteIndex")
     @Published var energySites: [Product] = []
     @Published var electricityMapsZone: String = UserDefaults.standard.string(forKey: "electricityMaps_zone") ?? ""

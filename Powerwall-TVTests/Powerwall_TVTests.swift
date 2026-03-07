@@ -120,4 +120,16 @@ struct Powerwall_TVTests {
     @Test func formatPowerValueRemovesNegativeSignWithLessPrecision() {
         #expect(formatPowerValue(-1.234, precision: "%.1f", showLessPrecision: true) == "1.2")
     }
+
+    @Test func clampSceneScaleHonorsBounds() {
+        #expect(clampSceneScale(0.5) == 0.8)
+        #expect(clampSceneScale(1.0) == 1.0)
+        #expect(clampSceneScale(1.5) == 1.2)
+    }
+
+    @Test func clampSceneHorizontalOffsetHonorsBounds() {
+        #expect(clampSceneHorizontalOffset(-0.5) == -0.2)
+        #expect(clampSceneHorizontalOffset(0.0) == 0.0)
+        #expect(clampSceneHorizontalOffset(0.5) == 0.2)
+    }
 }
