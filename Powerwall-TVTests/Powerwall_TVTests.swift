@@ -112,4 +112,12 @@ struct Powerwall_TVTests {
         )
         #expect(vitals.wallConnectorPower == 3680)
     }
+
+    @Test func formatPowerValueKeepsNegativeSignWithFullPrecision() {
+        #expect(formatPowerValue(-1.234, precision: "%.3f", showLessPrecision: false) == "-1.234")
+    }
+
+    @Test func formatPowerValueRemovesNegativeSignWithLessPrecision() {
+        #expect(formatPowerValue(-1.234, precision: "%.1f", showLessPrecision: true) == "1.2")
+    }
 }

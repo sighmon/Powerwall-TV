@@ -8,6 +8,10 @@
 import SwiftUI
 import SwiftData
 
+func formatPowerValue(_ value: Double, precision: String, showLessPrecision: Bool) -> String {
+    let displayedValue = showLessPrecision ? abs(value) : value
+    return String(format: precision, displayedValue)
+}
 
 struct ContentView: View {
     @ObservedObject var viewModel: PowerwallViewModel
@@ -514,7 +518,7 @@ struct ContentView: View {
 
     private func solarMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
         VStack(spacing: 2) {
-            Text("\(data.solar.instantPower / 1000, specifier: precision) kW")
+            Text("\(fmt(data.solar.instantPower / 1000)) kW")
                 .fontWeight(.bold)
                 .font(valueFont)
             Text("SOLAR")
@@ -527,7 +531,7 @@ struct ContentView: View {
 
     private func homeMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
         VStack(spacing: 2) {
-            Text("\(homeEnergyToDisplay(data: data) / 1000, specifier: precision) kW")
+            Text("\(fmt(homeEnergyToDisplay(data: data) / 1000)) kW")
                 .fontWeight(.bold)
                 .font(valueFont)
             Text("HOME")
@@ -541,7 +545,7 @@ struct ContentView: View {
     private func batteryMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
         VStack(spacing: 2) {
             (
-                Text("\(data.battery.instantPower / 1000, specifier: precision) kW ")
+                Text("\(fmt(data.battery.instantPower / 1000)) kW ")
                 + Text(batteryArrow(wiggleWatts: wiggleWatts))
                     .foregroundColor(data.battery.instantPower > wiggleWatts || data.battery.instantPower < -wiggleWatts ? .green : .white)
                 + Text(" \(viewModel.batteryPercentage?.percentage ?? 0, specifier: "%.1f")%")
@@ -575,7 +579,7 @@ struct ContentView: View {
             if let fossil = viewModel.gridFossilFuelPercentage {
                 let renewables = max(0, min(100, 100 - fossil))
                 (
-                    Text("\(data.site.instantPower / 1000, specifier: precision) kW")
+                    Text("\(fmt(data.site.instantPower / 1000)) kW")
                     + Text(" · ")
                     + Text(String(format: "%.1f%%", renewables))
                         .foregroundColor(renewablesColor(renewables))
@@ -583,7 +587,7 @@ struct ContentView: View {
                 .fontWeight(.bold)
                 .font(valueFont)
             } else {
-                Text("\(data.site.instantPower / 1000, specifier: precision) kW")
+                Text("\(fmt(data.site.instantPower / 1000)) kW")
                     .fontWeight(.bold)
                     .font(valueFont)
             }
@@ -897,7 +901,7 @@ struct ContentView: View {
     }
 
     func fmt(_ value: Double) -> String {
-        String(format: precision, value)
+        formatPowerValue(value, precision: precision, showLessPrecision: viewModel.showLessPrecision)
     }
 
     func batteryArrow(wiggleWatts: Double) -> String {
@@ -978,7 +982,7 @@ private struct PowerwallMenuBarLabel: View {
 
         let left: String = {
             func fmt(_ value: Double) -> String {
-                String(format: precision, value)
+                formatPowerValue(value, precision: precision, showLessPrecision: viewModel.showLessPrecision)
             }
             switch metric {
             case .solar:
@@ -1036,7 +1040,7 @@ private struct PowerwallMenuBarPopover: View {
 
                 HStack(alignment: .center, spacing: 20) {
                     VStack {
-                        Text("\((viewModel.data?.solar.instantPower ?? 0) / 1000, specifier: precision) kW")
+                        Text("\(formatPowerValue((viewModel.data?.solar.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
                         Text("SOLAR")
@@ -1047,7 +1051,7 @@ private struct PowerwallMenuBarPopover: View {
                     .frame(width: 100)
 
                     VStack {
-                        Text("\((viewModel.data?.load.instantPower ?? 0) / 1000, specifier: precision) kW")
+                        Text("\(formatPowerValue((viewModel.data?.load.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
                         Text("HOME")
@@ -1061,7 +1065,7 @@ private struct PowerwallMenuBarPopover: View {
 
                 HStack(alignment: .center, spacing: 20) {
                     VStack {
-                        Text("\((viewModel.data?.battery.instantPower ?? 0) / 1000, specifier: precision) kW")
+                        Text("\(formatPowerValue((viewModel.data?.battery.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
                         Text("POWERWALL")
@@ -1072,7 +1076,7 @@ private struct PowerwallMenuBarPopover: View {
                     .frame(width: 100)
 
                     VStack {
-                        Text("\((viewModel.data?.site.instantPower ?? 0) / 1000, specifier: precision) kW")
+                        Text("\(formatPowerValue((viewModel.data?.site.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
                         Text("GRID")
