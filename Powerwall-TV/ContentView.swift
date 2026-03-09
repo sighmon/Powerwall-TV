@@ -757,11 +757,11 @@ struct ContentView: View {
 #if os(macOS)
         // Keep the scene centered by default, but once the right-side labels hit
         // the viewport edge, shift left just enough so they stay visible.
-        let biasedMinX = centeredMinX - (available.width * 0.10) + userOffset
+        let biasedMinX = centeredMinX - (available.width * 0.10)
         let rightContentBound = macOSRightContentBound()
         let rightContentX = sceneSize.width * (0.5 + rightContentBound)
         let minXToKeepRightContentVisible = available.width - rightContentX
-        let desiredMinX = min(biasedMinX, minXToKeepRightContentVisible)
+        let desiredMinX = min(biasedMinX, minXToKeepRightContentVisible) + userOffset
 #else
         let desiredMinX = centeredMinX - (available.width * 0.10) + userOffset
 #endif
