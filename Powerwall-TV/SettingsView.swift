@@ -91,7 +91,7 @@ struct SettingsView: View {
                 }
             }
 
-#if os(macOS)
+#if !os(tvOS)
             Section(header: Text("Scene Layout")) {
                 Stepper("Scene scale: \(Int((clampSceneScale(sceneScale) * 100).rounded()))%", value: $sceneScale, in: sceneScaleRange, step: sceneScaleStep)
                 Stepper("Horizontal offset: \(String(format: "%+.0f%%", clampSceneHorizontalOffset(sceneHorizontalOffset) * 100))", value: $sceneHorizontalOffset, in: sceneHorizontalOffsetRange, step: sceneHorizontalOffsetStep)
