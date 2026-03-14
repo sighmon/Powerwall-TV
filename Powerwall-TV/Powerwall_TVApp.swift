@@ -27,6 +27,9 @@ struct Powerwall_TVApp: App {
         WindowGroup {
             ContentView(viewModel: viewModel)
         }
+#if os(macOS)
+        .windowStyle(.hiddenTitleBar)
+#endif
         .modelContainer(sharedModelContainer)
 #if os(macOS)
         MenuBar(viewModel: viewModel)

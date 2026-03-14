@@ -21,8 +21,12 @@ struct SettingsView: View {
     @Binding var preventScreenSaver: Bool
     @Binding var showLessPrecision: Bool
     @Binding var showInMenuBar: Bool
+    @Binding var keepWindowInFront: Bool
+    @Binding var autoHideSummaryOnOverlap: Bool
+    @Binding var autoHideButtonsOnOverlap: Bool
     @Binding var sceneScale: Double
     @Binding var sceneHorizontalOffset: Double
+    @Binding var sceneVerticalOffset: Double
     @State var showingConfirmation: Bool
     @Environment(\.presentationMode) var presentationMode
     @ObservedObject var viewModel: PowerwallViewModel
@@ -81,6 +85,9 @@ struct SettingsView: View {
             Section(header: Text("Display Settings")) {
 #if os(macOS)
                 Toggle("Show in menu bar", isOn: $showInMenuBar)
+                Toggle("Keep window in front", isOn: $keepWindowInFront)
+                Toggle("Auto-hide home summary", isOn: $autoHideSummaryOnOverlap)
+                Toggle("Auto-hide buttons", isOn: $autoHideButtonsOnOverlap)
 #endif
                 Toggle("Limit data to one decimal place", isOn: $showLessPrecision)
                 Toggle("Prevent screen saver from showing", isOn: $preventScreenSaver)
@@ -95,9 +102,11 @@ struct SettingsView: View {
             Section(header: Text("Scene Layout")) {
                 Stepper("Scene scale: \(Int((clampSceneScale(sceneScale) * 100).rounded()))%", value: $sceneScale, in: sceneScaleRange, step: sceneScaleStep)
                 Stepper("Horizontal offset: \(String(format: "%+.0f%%", clampSceneHorizontalOffset(sceneHorizontalOffset) * 100))", value: $sceneHorizontalOffset, in: sceneHorizontalOffsetRange, step: sceneHorizontalOffsetStep)
+                Stepper("Vertical offset: \(String(format: "%+.0f%%", clampSceneVerticalOffset(sceneVerticalOffset) * 100))", value: $sceneVerticalOffset, in: sceneVerticalOffsetRange, step: sceneVerticalOffsetStep)
                 Button("Reset scene layout") {
                     sceneScale = 1.0
                     sceneHorizontalOffset = 0.0
+                    sceneVerticalOffset = 0.0
                 }
             }
 #endif
@@ -168,6 +177,7 @@ struct SettingsView: View {
     private func saveAndDismiss() {
         sceneScale = clampSceneScale(sceneScale)
         sceneHorizontalOffset = clampSceneHorizontalOffset(sceneHorizontalOffset)
+        sceneVerticalOffset = clampSceneVerticalOffset(sceneVerticalOffset)
         UserDefaults.standard.set(loginMode.rawValue, forKey: "loginMode")
         if loginMode == .local {
             UserDefaults.standard.set(ipAddress, forKey: "gatewayIP")
@@ -182,8 +192,12 @@ struct SettingsView: View {
         UserDefaults.standard.set(preventScreenSaver, forKey: "preventScreenSaver")
         UserDefaults.standard.set(showLessPrecision, forKey: "showLessPrecision")
         UserDefaults.standard.set(showInMenuBar, forKey: "showInMenuBar")
+        UserDefaults.standard.set(keepWindowInFront, forKey: "keepWindowInFront")
+        UserDefaults.standard.set(autoHideSummaryOnOverlap, forKey: "autoHideSummaryOnOverlap")
+        UserDefaults.standard.set(autoHideButtonsOnOverlap, forKey: "autoHideButtonsOnOverlap")
         UserDefaults.standard.set(clampSceneScale(sceneScale), forKey: "sceneScale")
         UserDefaults.standard.set(clampSceneHorizontalOffset(sceneHorizontalOffset), forKey: "sceneHorizontalOffset")
+        UserDefaults.standard.set(clampSceneVerticalOffset(sceneVerticalOffset), forKey: "sceneVerticalOffset")
         viewModel.fetchElectricityMapsData()
         presentationMode.wrappedValue.dismiss()
     }
@@ -197,10 +211,18 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "fleetAPI_tokenExpiration")
         UserDefaults.standard.removeObject(forKey: "fleetBaseURL")
         UserDefaults.standard.removeObject(forKey: "electricityMaps_zone")
+        UserDefaults.standard.removeObject(forKey: "keepWindowInFront")
+        UserDefaults.standard.removeObject(forKey: "autoHideSummaryOnOverlap")
+        UserDefaults.standard.removeObject(forKey: "autoHideButtonsOnOverlap")
         UserDefaults.standard.removeObject(forKey: "sceneScale")
         UserDefaults.standard.removeObject(forKey: "sceneHorizontalOffset")
+        UserDefaults.standard.removeObject(forKey: "sceneVerticalOffset")
+        keepWindowInFront = false
+        autoHideSummaryOnOverlap = true
+        autoHideButtonsOnOverlap = true
         sceneScale = 1.0
         sceneHorizontalOffset = 0.0
+        sceneVerticalOffset = 0.0
     }
 }
 
@@ -226,8 +248,12 @@ struct SettingsView_Previews: PreviewProvider {
             preventScreenSaver: .constant(false),
             showLessPrecision: .constant(false),
             showInMenuBar: .constant(false),
+            keepWindowInFront: .constant(false),
+            autoHideSummaryOnOverlap: .constant(true),
+            autoHideButtonsOnOverlap: .constant(true),
             sceneScale: .constant(1.0),
             sceneHorizontalOffset: .constant(0.0),
+            sceneVerticalOffset: .constant(0.0),
             showingConfirmation: false,
             viewModel: PowerwallViewModel()
         )

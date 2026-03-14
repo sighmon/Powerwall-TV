@@ -7,6 +7,9 @@
 
 import SwiftUI
 import SwiftData
+#if os(macOS)
+import AppKit
+#endif
 
 func formatPowerValue(_ value: Double, precision: String, showLessPrecision: Bool) -> String {
     let displayedValue = showLessPrecision ? abs(value) : value
@@ -22,6 +25,14 @@ struct ContentView: View {
     @State private var wiggleWatts = 40.0
     @State private var startAnimations = false
     @State private var precision = "%.3f"
+    @State private var detachedSiteSummaryFrame: CGRect = .zero
+    @State private var controlsOverlayFrame: CGRect = .zero
+    @State private var detachedSiteSummaryOverlapsScene = false
+    @State private var controlsOverlayOverlapsScene = false
+    @State private var hideDetachedSiteSummary = false
+    @State private var hideControlsOverlay = false
+    @State private var detachedSiteSummaryHideTask: DispatchWorkItem?
+    @State private var controlsOverlayHideTask: DispatchWorkItem?
     @FocusState private var hasKeyboardFocus: Bool
     private let naturalSceneWidth: CGFloat = 1280
     private let naturalSceneHeight: CGFloat = 720
@@ -43,6 +54,9 @@ struct ContentView: View {
                 sceneSize: sceneSize,
                 showSiteSummaryInScene: !detachSiteSummary
             )
+            let siteSummarySceneOverlap = detachSiteSummary
+                && frameIntersectsScene(detachedSiteSummaryFrame, sceneFrame: sceneFrame)
+            let controlsSceneOverlap = frameIntersectsScene(controlsOverlayFrame, sceneFrame: sceneFrame)
             ZStack {
                 Color(red: 22/255, green: 23/255, blue: 24/255)
                     .ignoresSafeArea()
@@ -64,13 +78,42 @@ struct ContentView: View {
                     geometrySize: geometry.size,
                     sceneSize: sceneSize,
                     sceneMinX: sceneFrame.minX,
-                    enabled: detachSiteSummary
+                    enabled: detachSiteSummary,
+                    useBlurredBackground: siteSummarySceneOverlap && viewModel.autoHideSummaryOnOverlap,
+                    hidden: hideDetachedSiteSummary
                 )
 
                 controlsOverlay
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding()
             }
+            .coordinateSpace(name: "contentView")
+            .onPreferenceChange(OverlayFramePreferenceKey.self) { frames in
+                detachedSiteSummaryFrame = frames[.detachedSiteSummary] ?? .zero
+                controlsOverlayFrame = frames[.controlsOverlay] ?? .zero
+            }
+            .onAppear {
+                updateDetachedSiteSummaryOverlap(siteSummarySceneOverlap)
+                updateControlsOverlayOverlap(controlsSceneOverlap)
+            }
+            .onChange(of: siteSummarySceneOverlap) { overlap in
+                updateDetachedSiteSummaryOverlap(overlap)
+            }
+            .onChange(of: controlsSceneOverlap) { overlap in
+                updateControlsOverlayOverlap(overlap)
+            }
+            .onChange(of: viewModel.autoHideSummaryOnOverlap) { _ in
+                updateDetachedSiteSummaryOverlap(detachedSiteSummaryOverlapsScene)
+            }
+            .onChange(of: viewModel.autoHideButtonsOnOverlap) { _ in
+                updateControlsOverlayOverlap(controlsOverlayOverlapsScene)
+            }
+            .simultaneousGesture(
+                TapGesture()
+                    .onEnded {
+                        revealAutoHiddenOverlays()
+                    }
+            )
         }
 #if os(macOS)
         .sheet(isPresented: $showingSettings) {
@@ -87,8 +130,12 @@ struct ContentView: View {
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
                 showInMenuBar: $viewModel.showInMenuBar,
+                keepWindowInFront: $viewModel.keepWindowInFront,
+                autoHideSummaryOnOverlap: $viewModel.autoHideSummaryOnOverlap,
+                autoHideButtonsOnOverlap: $viewModel.autoHideButtonsOnOverlap,
                 sceneScale: $viewModel.sceneScale,
                 sceneHorizontalOffset: $viewModel.sceneHorizontalOffset,
+                sceneVerticalOffset: $viewModel.sceneVerticalOffset,
                 showingConfirmation: false,
                 viewModel: viewModel
             )
@@ -121,8 +168,12 @@ struct ContentView: View {
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
                 showInMenuBar: $viewModel.showInMenuBar,
+                keepWindowInFront: $viewModel.keepWindowInFront,
+                autoHideSummaryOnOverlap: $viewModel.autoHideSummaryOnOverlap,
+                autoHideButtonsOnOverlap: $viewModel.autoHideButtonsOnOverlap,
                 sceneScale: $viewModel.sceneScale,
                 sceneHorizontalOffset: $viewModel.sceneHorizontalOffset,
+                sceneVerticalOffset: $viewModel.sceneVerticalOffset,
                 showingConfirmation: false,
                 viewModel: viewModel
             )
@@ -218,11 +269,23 @@ struct ContentView: View {
         }
         .onDisappear {
             startAnimations = false
+            cancelOverlayHideTask(.detachedSiteSummary)
+            cancelOverlayHideTask(.controlsOverlay)
         }
+#if os(macOS)
+        .background(
+            WindowChromeVisibilityConfigurator(
+                isHidden: shouldHideWindowChrome,
+                keepWindowInFront: viewModel.keepWindowInFront,
+                onActivity: revealAutoHiddenOverlays
+            )
+        )
+#endif
 #if os(iOS)
         .simultaneousGesture(
             DragGesture(minimumDistance: 20)
                 .onEnded { value in
+                    revealAutoHiddenOverlays()
                     handleSiteSwipe(value.translation)
                 }
         )
@@ -468,7 +531,14 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func detachedSiteSummaryOverlay(geometrySize: CGSize, sceneSize: CGSize, sceneMinX: CGFloat, enabled: Bool) -> some View {
+    private func detachedSiteSummaryOverlay(
+        geometrySize: CGSize,
+        sceneSize: CGSize,
+        sceneMinX: CGFloat,
+        enabled: Bool,
+        useBlurredBackground: Bool,
+        hidden: Bool
+    ) -> some View {
         if enabled,
            !(viewModel.ipAddress.isEmpty && viewModel.loginMode == .local),
            let data = viewModel.data {
@@ -480,6 +550,10 @@ struct ContentView: View {
                 messageWidth: siteSummaryMessageWidth(for: sceneSize)
             )
                 .foregroundColor(.white)
+                .overlayChromeBackground(isVisible: !hidden, isOverlapping: useBlurredBackground)
+                .opacity(hidden ? 0 : 1)
+                .allowsHitTesting(!hidden)
+                .reportFrame(.detachedSiteSummary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, leadingPadding)
                 .padding(.top, 24)
@@ -626,59 +700,70 @@ struct ContentView: View {
 
     private var controlsOverlay: some View {
         HStack {
-            Button(action: {
-                showingSettings = true
-            }) {
-                ZStack {
-                    Image(systemName: "gear")
-#if os(macOS)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.primary)
-                        .font(.system(size: 20, weight: .semibold))
-                        .frame(width: 40, height: 40)
-#elseif os(iOS)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.gray)
-                        .font(.system(size: 30, weight: .semibold))
-                        .frame(width: 40, height: 40)
-#else
-                        .font(.title2)
-                        .frame(width: 80, height: 80)
-#endif
-                }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .accessibilityLabel("Settings")
-            .environment(\.colorScheme, .dark)
-
-            if viewModel.loginMode == .fleetAPI {
+            HStack {
                 Button(action: {
-                    showingGraph = true
+                    revealAutoHiddenOverlays()
+                    showingSettings = true
                 }) {
                     ZStack {
-                        Image(systemName: "chart.bar.xaxis.ascending.badge.clock")
+                        Image(systemName: "gear")
 #if os(macOS)
-                            .font(.system(size: 18, weight: .semibold))
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(.primary)
+                            .font(.system(size: 20, weight: .semibold))
                             .frame(width: 40, height: 40)
 #elseif os(iOS)
-                            .font(.system(size: 24, weight: .semibold))
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(.gray)
+                            .font(.system(size: 30, weight: .semibold))
                             .frame(width: 40, height: 40)
 #else
-                            .font(.title3)
+                            .font(.title2)
                             .frame(width: 80, height: 80)
 #endif
                     }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
-                .accessibilityLabel("Chart")
+                .accessibilityLabel("Settings")
                 .environment(\.colorScheme, .dark)
+
+                if viewModel.loginMode == .fleetAPI {
+                    Button(action: {
+                        revealAutoHiddenOverlays()
+                        showingGraph = true
+                    }) {
+                        ZStack {
+                            Image(systemName: "chart.bar.xaxis.ascending.badge.clock")
+#if os(macOS)
+                                .font(.system(size: 18, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.primary)
+                                .frame(width: 40, height: 40)
+#elseif os(iOS)
+                                .font(.system(size: 24, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.gray)
+                                .frame(width: 40, height: 40)
+#else
+                                .font(.title3)
+                                .frame(width: 80, height: 80)
+#endif
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .accessibilityLabel("Chart")
+                    .environment(\.colorScheme, .dark)
+                }
             }
+            .overlayChromeBackground(
+                isVisible: !hideControlsOverlay,
+                isOverlapping: controlsOverlayOverlapsScene && viewModel.autoHideButtonsOnOverlap
+            )
+            .opacity(hideControlsOverlay ? 0 : 1)
+            .allowsHitTesting(!hideControlsOverlay)
+            .reportFrame(.controlsOverlay)
 
             Spacer()
         }
@@ -754,6 +839,7 @@ struct ContentView: View {
     private func sceneFrame(in available: CGSize, sceneSize: CGSize, showSiteSummaryInScene _: Bool) -> CGRect {
         let centeredMinX = (available.width - sceneSize.width) / 2
         let userOffset = available.width * clampSceneHorizontalOffset(viewModel.sceneHorizontalOffset)
+        let verticalOffset = available.height * clampSceneVerticalOffset(viewModel.sceneVerticalOffset)
 #if os(macOS) || os(iOS)
         // Keep the scene centered by default, but once the right-side labels hit
         // the viewport edge, shift left just enough so they stay visible.
@@ -768,7 +854,10 @@ struct ContentView: View {
         let lowerBound = min(0, available.width - sceneSize.width)
         let upperBound = max(0, available.width - sceneSize.width)
         let minX = min(upperBound, max(lowerBound, desiredMinX))
-        let minY = (available.height - sceneSize.height) / 2
+        let centeredMinY = (available.height - sceneSize.height) / 2
+        let lowerYBound = min(0, available.height - sceneSize.height)
+        let upperYBound = max(0, available.height - sceneSize.height)
+        let minY = min(upperYBound, max(lowerYBound, centeredMinY + verticalOffset))
         return CGRect(x: minX, y: minY, width: sceneSize.width, height: sceneSize.height)
     }
 
@@ -818,6 +907,120 @@ struct ContentView: View {
         return leftEdge >= horizontalInset && rightEdge <= (availableSize.width - horizontalInset)
     }
 
+    private func frameIntersectsScene(_ frame: CGRect, sceneFrame: CGRect) -> Bool {
+        !frame.isEmpty && frame.intersects(sceneFrame)
+    }
+
+    private func updateDetachedSiteSummaryOverlap(_ overlaps: Bool) {
+        detachedSiteSummaryOverlapsScene = overlaps
+        updateOverlayAutoHide(for: .detachedSiteSummary, overlaps: overlaps)
+    }
+
+    private func updateControlsOverlayOverlap(_ overlaps: Bool) {
+        controlsOverlayOverlapsScene = overlaps
+        updateOverlayAutoHide(for: .controlsOverlay, overlaps: overlaps)
+    }
+
+    private func updateOverlayAutoHide(for kind: OverlayAutoHideTarget, overlaps: Bool) {
+#if os(macOS) || os(iOS)
+        if overlaps && isAutoHideEnabled(kind) {
+            if !isOverlayHidden(kind) {
+                scheduleOverlayHide(for: kind)
+            }
+        } else {
+            cancelOverlayHideTask(kind)
+            setOverlayHidden(kind, hidden: false)
+        }
+#else
+        _ = kind
+        _ = overlaps
+#endif
+    }
+
+    private func revealAutoHiddenOverlays() {
+#if os(macOS) || os(iOS)
+        cancelOverlayHideTask(.detachedSiteSummary)
+        cancelOverlayHideTask(.controlsOverlay)
+        setOverlayHidden(.detachedSiteSummary, hidden: false)
+        setOverlayHidden(.controlsOverlay, hidden: false)
+
+        if detachedSiteSummaryOverlapsScene && isAutoHideEnabled(.detachedSiteSummary) {
+            scheduleOverlayHide(for: .detachedSiteSummary)
+        }
+        if controlsOverlayOverlapsScene && isAutoHideEnabled(.controlsOverlay) {
+            scheduleOverlayHide(for: .controlsOverlay)
+        }
+#endif
+    }
+
+    private func scheduleOverlayHide(for kind: OverlayAutoHideTarget) {
+        cancelOverlayHideTask(kind)
+        let workItem = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                setOverlayHidden(kind, hidden: true)
+            }
+        }
+        storeOverlayHideTask(workItem, for: kind)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: workItem)
+    }
+
+    private func cancelOverlayHideTask(_ kind: OverlayAutoHideTarget) {
+        switch kind {
+        case .detachedSiteSummary:
+            detachedSiteSummaryHideTask?.cancel()
+            detachedSiteSummaryHideTask = nil
+        case .controlsOverlay:
+            controlsOverlayHideTask?.cancel()
+            controlsOverlayHideTask = nil
+        }
+    }
+
+    private func storeOverlayHideTask(_ task: DispatchWorkItem, for kind: OverlayAutoHideTarget) {
+        switch kind {
+        case .detachedSiteSummary:
+            detachedSiteSummaryHideTask = task
+        case .controlsOverlay:
+            controlsOverlayHideTask = task
+        }
+    }
+
+    private func isOverlayHidden(_ kind: OverlayAutoHideTarget) -> Bool {
+        switch kind {
+        case .detachedSiteSummary:
+            return hideDetachedSiteSummary
+        case .controlsOverlay:
+            return hideControlsOverlay
+        }
+    }
+
+    private func isAutoHideEnabled(_ kind: OverlayAutoHideTarget) -> Bool {
+        switch kind {
+        case .detachedSiteSummary:
+            return viewModel.autoHideSummaryOnOverlap
+        case .controlsOverlay:
+            return viewModel.autoHideButtonsOnOverlap
+        }
+    }
+
+    private func setOverlayHidden(_ kind: OverlayAutoHideTarget, hidden: Bool) {
+        switch kind {
+        case .detachedSiteSummary:
+            hideDetachedSiteSummary = hidden
+        case .controlsOverlay:
+            hideControlsOverlay = hidden
+        }
+    }
+
+    private var shouldHideWindowChrome: Bool {
+#if os(macOS) || os(iOS)
+        let statusVisible = !detachedSiteSummaryOverlapsScene || !hideDetachedSiteSummary
+        let controlsVisible = !controlsOverlayOverlapsScene || !hideControlsOverlay
+        return !(statusVisible || controlsVisible)
+#else
+        false
+#endif
+    }
+
     private func powerSurgeLineWidth(for sceneSize: CGSize) -> CGFloat {
 #if os(macOS)
         return max(5.0, 5.0 * sceneScaleFactor(sceneSize))
@@ -861,6 +1064,7 @@ struct ContentView: View {
     }
 
     private func updateEnergySite(_ delta: Int) {
+        revealAutoHiddenOverlays()
         let next = max(0, min(viewModel.currentEnergySiteIndex + delta,
                               max(0, viewModel.energySites.count - 1)))
         guard next != viewModel.currentEnergySiteIndex else { return }
@@ -931,6 +1135,214 @@ struct ContentView: View {
         if clamped < 50 { return .orange }
         if clamped < 75 { return .yellow }
         return .green
+    }
+}
+
+private enum OverlayAutoHideTarget {
+    case detachedSiteSummary
+    case controlsOverlay
+}
+
+private enum OverlayFrameKind: Hashable {
+    case detachedSiteSummary
+    case controlsOverlay
+}
+
+private struct OverlayFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [OverlayFrameKind: CGRect] = [:]
+
+    static func reduce(value: inout [OverlayFrameKind: CGRect], nextValue: () -> [OverlayFrameKind: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+#if os(macOS)
+private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
+    let isHidden: Bool
+    let keepWindowInFront: Bool
+    let onActivity: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onActivity: onActivity)
+    }
+
+    func makeNSView(context: Context) -> TrackingView {
+        let view = TrackingView()
+        view.onMouseMove = context.coordinator.handleActivity
+        DispatchQueue.main.async {
+            configureWindow(for: view, coordinator: context.coordinator)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: TrackingView, context: Context) {
+        nsView.onMouseMove = context.coordinator.handleActivity
+        DispatchQueue.main.async {
+            configureWindow(for: nsView, coordinator: context.coordinator)
+        }
+    }
+
+    static func dismantleNSView(_ nsView: TrackingView, coordinator: Coordinator) {
+        if let window = nsView.window {
+            coordinator.stopObserving(window: window)
+        }
+    }
+
+    private func configureWindow(for view: TrackingView, coordinator: Coordinator) {
+        guard let window = view.window else { return }
+
+        view.windowDidChange()
+        window.acceptsMouseMovedEvents = true
+        coordinator.applyWindowLevel(keepWindowInFront, to: window)
+        coordinator.applyTrafficLightsHidden(isHidden, to: window)
+        coordinator.startObserving(window: window)
+    }
+
+    final class Coordinator {
+        private var observedWindow: NSWindow?
+        private var keyObserver: NSObjectProtocol?
+        private let onActivity: () -> Void
+        private var lastTrafficLightsHidden: Bool?
+        private var lastKeepWindowInFront: Bool?
+
+        init(onActivity: @escaping () -> Void) {
+            self.onActivity = onActivity
+        }
+
+        func handleActivity() {
+            onActivity()
+        }
+
+        func startObserving(window: NSWindow) {
+            guard observedWindow !== window else { return }
+            stopObserving(window: observedWindow)
+            observedWindow = window
+            lastTrafficLightsHidden = nil
+            lastKeepWindowInFront = nil
+            keyObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.handleActivity()
+            }
+        }
+
+        func applyWindowLevel(_ keepWindowInFront: Bool, to window: NSWindow) {
+            let desiredLevel: NSWindow.Level = keepWindowInFront ? .floating : .normal
+            guard lastKeepWindowInFront != keepWindowInFront || window.level != desiredLevel else { return }
+            window.level = desiredLevel
+            lastKeepWindowInFront = keepWindowInFront
+        }
+
+        func applyTrafficLightsHidden(_ isHidden: Bool, to window: NSWindow) {
+            let closeHidden = window.standardWindowButton(.closeButton)?.isHidden ?? false
+            let miniHidden = window.standardWindowButton(.miniaturizeButton)?.isHidden ?? false
+            let zoomHidden = window.standardWindowButton(.zoomButton)?.isHidden ?? false
+            let needsUpdate =
+                lastTrafficLightsHidden != isHidden
+                || closeHidden != isHidden
+                || miniHidden != isHidden
+                || zoomHidden != isHidden
+
+            guard needsUpdate else { return }
+            window.standardWindowButton(.closeButton)?.isHidden = isHidden
+            window.standardWindowButton(.miniaturizeButton)?.isHidden = isHidden
+            window.standardWindowButton(.zoomButton)?.isHidden = isHidden
+            lastTrafficLightsHidden = isHidden
+        }
+
+        func stopObserving(window: NSWindow?) {
+            if let keyObserver {
+                NotificationCenter.default.removeObserver(keyObserver)
+                self.keyObserver = nil
+            }
+            if observedWindow === window {
+                observedWindow = nil
+                lastTrafficLightsHidden = nil
+                lastKeepWindowInFront = nil
+            }
+        }
+
+        deinit {
+            stopObserving(window: observedWindow)
+        }
+    }
+
+    final class TrackingView: NSView {
+        var onMouseMove: (() -> Void)?
+        private var trackingAreaRef: NSTrackingArea?
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let trackingAreaRef {
+                removeTrackingArea(trackingAreaRef)
+            }
+            let newTrackingArea = NSTrackingArea(
+                rect: .zero,
+                options: [.activeAlways, .inVisibleRect, .mouseMoved],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(newTrackingArea)
+            trackingAreaRef = newTrackingArea
+        }
+
+        override func mouseMoved(with event: NSEvent) {
+            super.mouseMoved(with: event)
+            onMouseMove?()
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            windowDidChange()
+        }
+
+        func windowDidChange() {
+            window?.acceptsMouseMovedEvents = true
+            needsDisplay = true
+        }
+    }
+}
+#endif
+
+private extension View {
+    private var overlayChromeDarkenOpacity: Double { 0.1 }
+
+    @ViewBuilder
+    func overlayChromeBackground(isVisible: Bool, isOverlapping: Bool) -> some View {
+#if os(macOS) || os(iOS)
+        if isVisible && isOverlapping {
+            self
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .fill(Color.black.opacity(overlayChromeDarkenOpacity))
+                                .blendMode(.multiply)
+                        }
+                }
+        } else {
+            self
+        }
+#else
+        self
+#endif
+    }
+
+    func reportFrame(_ kind: OverlayFrameKind) -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(
+                        key: OverlayFramePreferenceKey.self,
+                        value: [kind: proxy.frame(in: .named("contentView"))]
+                    )
+            }
+        )
     }
 }
 
