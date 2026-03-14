@@ -25,13 +25,11 @@ struct Powerwall_TVApp: App {
 
     var body: some Scene {
         WindowGroup {
-#if os(macOS)
-            ScaledContentView(viewModel: viewModel)
-                .frame(minWidth: 1280, minHeight: 720)
-#else
             ContentView(viewModel: viewModel)
-#endif
         }
+#if os(macOS)
+        .windowStyle(.hiddenTitleBar)
+#endif
         .modelContainer(sharedModelContainer)
 #if os(macOS)
         MenuBar(viewModel: viewModel)
