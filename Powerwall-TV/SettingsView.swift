@@ -86,6 +86,8 @@ struct SettingsView: View {
 #if os(macOS)
                 Toggle("Show in menu bar", isOn: $showInMenuBar)
                 Toggle("Keep window in front", isOn: $keepWindowInFront)
+#endif
+#if !os(tvOS)
                 Toggle("Auto-hide home summary", isOn: $autoHideSummaryOnOverlap)
                 Toggle("Auto-hide buttons", isOn: $autoHideButtonsOnOverlap)
 #endif

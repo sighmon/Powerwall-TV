@@ -52,8 +52,8 @@ class PowerwallViewModel: ObservableObject {
     @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
     @Published var showInMenuBar: Bool = UserDefaults.standard.bool(forKey: "showInMenuBar")
     @Published var keepWindowInFront: Bool = UserDefaults.standard.bool(forKey: "keepWindowInFront")
-    @Published var autoHideSummaryOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideSummaryOnOverlap") as? Bool ?? true
-    @Published var autoHideButtonsOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideButtonsOnOverlap") as? Bool ?? true
+    @Published var autoHideSummaryOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideSummaryOnOverlap") as? Bool ?? false
+    @Published var autoHideButtonsOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideButtonsOnOverlap") as? Bool ?? false
     @Published var sceneScale: Double = clampSceneScale(UserDefaults.standard.object(forKey: "sceneScale") as? Double ?? 1.0)
     @Published var sceneHorizontalOffset: Double = clampSceneHorizontalOffset(UserDefaults.standard.object(forKey: "sceneHorizontalOffset") as? Double ?? 0.0)
     @Published var sceneVerticalOffset: Double = clampSceneVerticalOffset(UserDefaults.standard.object(forKey: "sceneVerticalOffset") as? Double ?? 0.0)
