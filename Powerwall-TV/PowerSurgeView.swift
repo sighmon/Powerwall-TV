@@ -204,7 +204,7 @@ struct PowerSurgeView<Curve: Shape>: View {
         }
 
         // Prevent a lingering round-cap point at the end of the path during pause time.
-        DispatchQueue.main.asyncAfter(deadline: .now() + (duration * 0.99)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (duration * 0.97)) {
             guard isAnimating else { return }
             opacity = 0.0
         }
