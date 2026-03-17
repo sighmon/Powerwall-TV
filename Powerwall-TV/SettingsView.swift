@@ -137,6 +137,8 @@ struct SettingsView: View {
                     Text("Firmware: \(viewModel.version ?? "-")")
                     Text("Installed: \(viewModel.installationDate?.formatted(date: .long, time: .omitted) ?? "-")")
                     Text("Base: \(fleetBaseURL)")
+                        .padding(.bottom, 8)
+                    Text("This is an unofficial app – not affiliated with Tesla, Inc. Tesla, Powerwall, and related marks are trademarks of Tesla, Inc.")
 #if os(tvOS)
                     Button("Save") { saveAndDismiss() }
 #endif
