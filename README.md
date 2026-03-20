@@ -1,10 +1,10 @@
-# Powerwall for AppleTV
+# Powerwall for AppleTV, macOS, and iPad
 
 [![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://apps.apple.com/us/app/powerwall-tv/id6743396507)
 [![TestFlight](https://img.shields.io/badge/TestFlight-Join_beta-0A84FF?logo=apple&logoColor=white)](https://testflight.apple.com/join/4EFw1RBR)
 [![CI](https://github.com/sighmon/Powerwall-TV/actions/workflows/ci.yml/badge.svg)](https://github.com/sighmon/Powerwall-TV/actions/workflows/ci.yml)
 
-An AppleTV/macOS application to view the current state of your Tesla Powerwall via your local network or Tesla Fleet API.
+An AppleTV/macOS/iPad application to view the current state of your Tesla Powerwall via your local network or Tesla Fleet API.
 
 <img src="powerwall-tv.png" width="48%" /> <img src="powerwall-tv.gif" width="48%" />
 
@@ -38,6 +38,14 @@ In this application:
 * Once approved, an access token will be saved to your AppleTV Keychain so it can access your Powerwall via the Tesla Fleet API cloud
 
 None of your Tesla credentials will be saved in the application or anywhere else. Only the access token, refresh token, and expiry date will be saved so that you don't need to authenticate each time you open the application.
+
+## Grid data
+
+If you'd like to see the carbon intensity of your grid via [electricitymaps.com](https://www.electricitymaps.com), follow these steps:
+
+* Sign up for a [Home Assistant account/API Key](https://portal.electricitymaps.com/auth/signup/home-assistant)
+* Enter your API Key and Zone (country code/state) into the Settings view of this app.
+* The percentage of renewable energy in the grid, and the gCO2eq/kWh for your zone will show in the Grid label.
 
 ## CI note
 
