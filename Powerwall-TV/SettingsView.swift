@@ -72,6 +72,9 @@ struct SettingsView: View {
                     Button("Login with your Tesla account") {
                         _ = viewModel.startFleetLoginManually()
                     }
+                    Text("Re-login after upgrading to grant vehicle charge data access.")
+                        .font(.footnote)
+                        .foregroundColor(.gray)
                 }
             }
 

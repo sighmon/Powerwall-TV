@@ -1106,13 +1106,18 @@ struct ContentView: View {
     }
 
     private func wallConnectorDisplay(data: PowerwallData?, precision: String) -> String {
-        let hasCharging = data?.wallConnectors.contains { $0.wallConnectorState == 1.0 } ?? false
-        if hasCharging {
-            let powerKW = self.wallConnectorEnergyTotal(data: data!) / 1000
+        guard let data = data else { return "Idle" }
+
+        if let chargingConnector = data.wallConnectors.first(where: \.isVehicleCharging) {
+            let powerKW = self.wallConnectorEnergyTotal(data: data) / 1000
+            if let vin = chargingConnector.vin,
+               let batteryLevel = viewModel.vehicleChargeStates[vin]?.batteryLevel {
+                return "\(Int(batteryLevel.rounded()))% · \(fmt(powerKW)) kW"
+            }
             return "\(fmt(powerKW)) kW"
         }
-        let hasPluggedIn = data?.wallConnectors.contains { $0.wallConnectorState == 4.0 } ?? false
-        if hasPluggedIn {
+
+        if data.wallConnectors.contains(where: \.isVehicleConnected) {
             return "Plugged in"
         }
         return "Idle"
