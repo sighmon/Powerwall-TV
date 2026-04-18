@@ -352,7 +352,27 @@ struct ContentView: View {
         }
         let chargerActive = wallConnectorEnergyTotal(data: viewModel.data) > 10
             || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in"
-        return chargerActive ? "home-charger.png" : "home-charger-empty.png"
+        if !chargerActive {
+            return "home-charger-empty.png"
+        }
+        return hasChargingCybertruck(data: viewModel.data)
+            ? "home-charger-cybertruck.png"
+            : "home-charger.png"
+    }
+
+    private func hasChargingCybertruck(data: PowerwallData?) -> Bool {
+        data?.wallConnectors.contains { wallConnector in
+            let activelyCharging = (wallConnector.wallConnectorPower ?? 0) > 10
+                || wallConnector.wallConnectorState == 1.0
+            return activelyCharging && isCybertruckVIN(wallConnector.vin)
+        } ?? false
+    }
+
+    private func isCybertruckVIN(_ vin: String?) -> Bool {
+        guard let vin else { return false }
+        let normalizedVIN = vin.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard normalizedVIN.count == 17 else { return false }
+        return normalizedVIN.dropFirst(3).first == "C"
     }
 
     @ViewBuilder
