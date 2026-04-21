@@ -27,6 +27,7 @@ struct SettingsView: View {
     @Binding var sceneScale: Double
     @Binding var sceneHorizontalOffset: Double
     @Binding var sceneVerticalOffset: Double
+    @Binding var lastChargingWallConnectorVIN: String
     @State var showingConfirmation: Bool
     @Environment(\.presentationMode) var presentationMode
     @ObservedObject var viewModel: PowerwallViewModel
@@ -73,6 +74,13 @@ struct SettingsView: View {
                         _ = viewModel.startFleetLoginManually()
                     }
                 }
+            }
+
+            LabeledContent("Last charging VIN") {
+                Text(lastChargingWallConnectorVIN.isEmpty ? "-" : lastChargingWallConnectorVIN)
+#if os(macOS)
+                    .textSelection(.enabled)
+#endif
             }
 
             // New section for screen saver prevention
@@ -221,12 +229,14 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "sceneScale")
         UserDefaults.standard.removeObject(forKey: "sceneHorizontalOffset")
         UserDefaults.standard.removeObject(forKey: "sceneVerticalOffset")
+        UserDefaults.standard.removeObject(forKey: "lastChargingWallConnectorVIN")
         keepWindowInFront = false
         autoHideSummaryOnOverlap = true
         autoHideButtonsOnOverlap = true
         sceneScale = 1.0
         sceneHorizontalOffset = 0.0
         sceneVerticalOffset = 0.0
+        lastChargingWallConnectorVIN = ""
     }
 }
 
@@ -258,6 +268,7 @@ struct SettingsView_Previews: PreviewProvider {
             sceneScale: .constant(1.0),
             sceneHorizontalOffset: .constant(0.0),
             sceneVerticalOffset: .constant(0.0),
+            lastChargingWallConnectorVIN: .constant(""),
             showingConfirmation: false,
             viewModel: PowerwallViewModel()
         )

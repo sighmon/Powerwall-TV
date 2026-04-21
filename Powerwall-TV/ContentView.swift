@@ -136,6 +136,7 @@ struct ContentView: View {
                 sceneScale: $viewModel.sceneScale,
                 sceneHorizontalOffset: $viewModel.sceneHorizontalOffset,
                 sceneVerticalOffset: $viewModel.sceneVerticalOffset,
+                lastChargingWallConnectorVIN: $viewModel.lastChargingWallConnectorVIN,
                 showingConfirmation: false,
                 viewModel: viewModel
             )
@@ -174,6 +175,7 @@ struct ContentView: View {
                 sceneScale: $viewModel.sceneScale,
                 sceneHorizontalOffset: $viewModel.sceneHorizontalOffset,
                 sceneVerticalOffset: $viewModel.sceneVerticalOffset,
+                lastChargingWallConnectorVIN: $viewModel.lastChargingWallConnectorVIN,
                 showingConfirmation: false,
                 viewModel: viewModel
             )
@@ -355,17 +357,28 @@ struct ContentView: View {
         if !chargerActive {
             return "home-charger-empty.png"
         }
-        return hasChargingCybertruck(data: viewModel.data)
+        return hasChargingCybertruck(data: viewModel.data, fallbackVIN: viewModel.lastChargingWallConnectorVIN)
             ? "home-charger-cybertruck.png"
             : "home-charger.png"
     }
 
-    private func hasChargingCybertruck(data: PowerwallData?) -> Bool {
-        data?.wallConnectors.contains { wallConnector in
-            let activelyCharging = (wallConnector.wallConnectorPower ?? 0) > 10
+    private func hasChargingCybertruck(data: PowerwallData?, fallbackVIN: String) -> Bool {
+        isCybertruckVIN(resolvedWallConnectorVIN(data: data, fallbackVIN: fallbackVIN))
+    }
+
+    private func resolvedWallConnectorVIN(data: PowerwallData?, fallbackVIN: String) -> String? {
+        if let liveVIN = data?.wallConnectors.first(where: { wallConnector in
+            let chargingOrConnected = (wallConnector.wallConnectorPower ?? 0) > 10
                 || wallConnector.wallConnectorState == 1.0
-            return activelyCharging && isCybertruckVIN(wallConnector.vin)
-        } ?? false
+                || wallConnector.wallConnectorState == 4.0
+            let normalizedVIN = wallConnector.vin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return chargingOrConnected && !normalizedVIN.isEmpty
+        })?.vin?.trimmingCharacters(in: .whitespacesAndNewlines), !liveVIN.isEmpty {
+            return liveVIN
+        }
+
+        let normalizedFallbackVIN = fallbackVIN.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalizedFallbackVIN.isEmpty ? nil : normalizedFallbackVIN
     }
 
     private func isCybertruckVIN(_ vin: String?) -> Bool {
