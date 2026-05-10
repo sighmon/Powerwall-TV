@@ -652,7 +652,7 @@ class PowerwallViewModel: ObservableObject {
                 let wallConnector = WallConnector(
                     vin: nil,
                     din: wallConnectorIP,
-                    wallConnectorState: 1.0, // Double(vitals.evseState), // Note: this doesn't match the Fleet API!
+                    wallConnectorState: vitals.fleetWallConnectorState,
                     wallConnectorPower: vitals.wallConnectorPower
                 )
 
@@ -1297,6 +1297,16 @@ extension WallConnectorVitals {
     // Approximate instantaneous charging power (W).
     // Uses `grid_v * vehicle_current_a` which is a decent single-phase estimate.
     var wallConnectorPower: Double { gridVolts * vehicleCurrentAmps }
+
+    var fleetWallConnectorState: Double? {
+        if contactorClosed && vehicleCurrentAmps > 0 {
+            return 1.0
+        }
+        if vehicleConnected {
+            return 4.0
+        }
+        return nil
+    }
 }
 
 #if os(macOS) || os(iOS)

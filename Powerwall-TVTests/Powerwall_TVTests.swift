@@ -113,6 +113,49 @@ struct Powerwall_TVTests {
         #expect(vitals.wallConnectorPower == 3680)
     }
 
+    @Test func wallConnectorVitalsTreatsClosedContactorWithCurrentAsCharging() {
+        let vitals = WallConnectorVitals(
+            contactorClosed: true,
+            vehicleConnected: true,
+            session: 1,
+            gridVolts: 0,
+            gridHertz: 0,
+            vehicleCurrentAmps: 16,
+            uptime: 10,
+            evseState: 2
+        )
+        #expect(vitals.wallConnectorPower == 0)
+        #expect(vitals.fleetWallConnectorState == 1.0)
+    }
+
+    @Test func wallConnectorVitalsTreatsConnectedVehicleWithoutCurrentAsPluggedIn() {
+        let vitals = WallConnectorVitals(
+            contactorClosed: false,
+            vehicleConnected: true,
+            session: 1,
+            gridVolts: 0,
+            gridHertz: 0,
+            vehicleCurrentAmps: 0,
+            uptime: 10,
+            evseState: 2
+        )
+        #expect(vitals.fleetWallConnectorState == 4.0)
+    }
+
+    @Test func wallConnectorVitalsTreatsDisconnectedVehicleAsIdle() {
+        let vitals = WallConnectorVitals(
+            contactorClosed: false,
+            vehicleConnected: false,
+            session: 1,
+            gridVolts: 0,
+            gridHertz: 0,
+            vehicleCurrentAmps: 0,
+            uptime: 10,
+            evseState: 0
+        )
+        #expect(vitals.fleetWallConnectorState == nil)
+    }
+
     @Test func formatPowerValueKeepsNegativeSignWithFullPrecision() {
         #expect(formatPowerValue(-1.234, precision: "%.3f", showLessPrecision: false) == "-1.234")
     }

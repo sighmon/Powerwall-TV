@@ -353,6 +353,7 @@ struct ContentView: View {
             return "home.png"
         }
         let chargerActive = wallConnectorEnergyTotal(data: viewModel.data) > 10
+            || wallConnectorIsCharging(data: viewModel.data)
             || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in"
         if !chargerActive {
             return "home-charger-empty.png"
@@ -1138,8 +1139,12 @@ struct ContentView: View {
         return data?.wallConnectors.reduce(0.0) { $0 + ($1.wallConnectorPower ?? 0.0) } ?? 0.0
     }
 
+    private func wallConnectorIsCharging(data: PowerwallData?) -> Bool {
+        data?.wallConnectors.contains { $0.wallConnectorState == 1.0 } ?? false
+    }
+
     private func wallConnectorDisplay(data: PowerwallData?, precision: String) -> String {
-        let hasCharging = data?.wallConnectors.contains { $0.wallConnectorState == 1.0 } ?? false
+        let hasCharging = wallConnectorIsCharging(data: data)
         if hasCharging {
             let powerKW = self.wallConnectorEnergyTotal(data: data!) / 1000
             return "\(fmt(powerKW)) kW"
