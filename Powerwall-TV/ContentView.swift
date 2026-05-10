@@ -252,7 +252,7 @@ struct ContentView: View {
                     wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: 512)]
                 )
                 viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
-                //viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
+                viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
                 viewModel.siteName = "Home sweet home"
                 // viewModel.errorMessage = "An error has occured"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -557,7 +557,7 @@ struct ContentView: View {
 
             if viewModel.isOffGrid() {
                 offGridImage(sceneSize: sceneSize)
-                    .position(scenePoint(x: 0.151, y: -0.003, in: sceneSize))
+                    .position(scenePoint(x: 0.151, y: 0.234, in: sceneSize))
             }
         }
         .frame(width: sceneSize.width, height: sceneSize.height)
