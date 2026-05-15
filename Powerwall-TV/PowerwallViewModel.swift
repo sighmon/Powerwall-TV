@@ -58,6 +58,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var sceneHorizontalOffset: Double = clampSceneHorizontalOffset(UserDefaults.standard.object(forKey: "sceneHorizontalOffset") as? Double ?? 0.0)
     @Published var sceneVerticalOffset: Double = clampSceneVerticalOffset(UserDefaults.standard.object(forKey: "sceneVerticalOffset") as? Double ?? 0.0)
     @Published var currentEnergySiteIndex: Int = UserDefaults.standard.integer(forKey: "currentEnergySiteIndex")
+    @Published var lastChargingWallConnectorVIN: String = UserDefaults.standard.string(forKey: "lastChargingWallConnectorVIN") ?? ""
     @Published var energySites: [Product] = []
     @Published var electricityMapsZone: String = UserDefaults.standard.string(forKey: "electricityMaps_zone") ?? ""
     @Published var gridCarbonIntensity: Int?
@@ -133,6 +134,20 @@ class PowerwallViewModel: ObservableObject {
     init() {
         let delegate = InsecureURLSessionDelegate() // Custom delegate for local SSL bypass
         self.localURLSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+    }
+
+    private func persistLastChargingWallConnectorVIN(from wallConnectors: [WallConnector]) {
+        guard let vin = wallConnectors.first(where: { wallConnector in
+            let normalizedVIN = wallConnector.vin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let activelyCharging = (wallConnector.wallConnectorPower ?? 0) > 10
+                || wallConnector.wallConnectorState == 1.0
+            return activelyCharging && !normalizedVIN.isEmpty
+        })?.vin?.trimmingCharacters(in: .whitespacesAndNewlines), !vin.isEmpty else {
+            return
+        }
+
+        lastChargingWallConnectorVIN = vin
+        UserDefaults.standard.set(vin, forKey: "lastChargingWallConnectorVIN")
     }
 
     // MARK: - Login Methods
@@ -649,7 +664,7 @@ class PowerwallViewModel: ObservableObject {
                 let wallConnector = WallConnector(
                     vin: nil,
                     din: wallConnectorIP,
-                    wallConnectorState: 1.0, // Double(vitals.evseState), // Note: this doesn't match the Fleet API!
+                    wallConnectorState: vitals.fleetWallConnectorState,
                     wallConnectorPower: vitals.wallConnectorPower
                 )
 
@@ -751,6 +766,7 @@ class PowerwallViewModel: ObservableObject {
                     site: PowerwallData.Site(instantPower: data.response.gridPower),
                     wallConnectors: data.response.wallConnectors
                 )
+                self.persistLastChargingWallConnectorVIN(from: data.response.wallConnectors)
                 self.data = powerwall
                 self.batteryPercentage = BatteryPercentage(percentage: data.response.batteryPercentage)
                 self.gridStatus = GridStatus(status: data.response.gridStatus)
@@ -1507,6 +1523,16 @@ extension WallConnectorVitals {
     // Approximate instantaneous charging power (W).
     // Uses `grid_v * vehicle_current_a` which is a decent single-phase estimate.
     var wallConnectorPower: Double { gridVolts * vehicleCurrentAmps }
+
+    var fleetWallConnectorState: Double? {
+        if contactorClosed && vehicleCurrentAmps > 0 {
+            return 1.0
+        }
+        if vehicleConnected {
+            return 4.0
+        }
+        return nil
+    }
 }
 
 #if os(macOS) || os(iOS)

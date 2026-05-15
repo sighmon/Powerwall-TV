@@ -136,6 +136,7 @@ struct ContentView: View {
                 sceneScale: $viewModel.sceneScale,
                 sceneHorizontalOffset: $viewModel.sceneHorizontalOffset,
                 sceneVerticalOffset: $viewModel.sceneVerticalOffset,
+                lastChargingWallConnectorVIN: $viewModel.lastChargingWallConnectorVIN,
                 showingConfirmation: false,
                 viewModel: viewModel
             )
@@ -174,6 +175,7 @@ struct ContentView: View {
                 sceneScale: $viewModel.sceneScale,
                 sceneHorizontalOffset: $viewModel.sceneHorizontalOffset,
                 sceneVerticalOffset: $viewModel.sceneVerticalOffset,
+                lastChargingWallConnectorVIN: $viewModel.lastChargingWallConnectorVIN,
                 showingConfirmation: false,
                 viewModel: viewModel
             )
@@ -250,7 +252,7 @@ struct ContentView: View {
                     wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: 512)]
                 )
                 viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
-                //viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
+                viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
                 viewModel.siteName = "Home sweet home"
                 // viewModel.errorMessage = "An error has occured"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -351,8 +353,40 @@ struct ContentView: View {
             return "home.png"
         }
         let chargerActive = wallConnectorEnergyTotal(data: viewModel.data) > 10
+            || wallConnectorIsCharging(data: viewModel.data)
             || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in"
-        return chargerActive ? "home-charger.png" : "home-charger-empty.png"
+        if !chargerActive {
+            return "home-charger-empty.png"
+        }
+        return hasChargingCybertruck(data: viewModel.data, fallbackVIN: viewModel.lastChargingWallConnectorVIN)
+            ? "home-charger-cybertruck.png"
+            : "home-charger.png"
+    }
+
+    private func hasChargingCybertruck(data: PowerwallData?, fallbackVIN: String) -> Bool {
+        isCybertruckVIN(resolvedWallConnectorVIN(data: data, fallbackVIN: fallbackVIN))
+    }
+
+    private func resolvedWallConnectorVIN(data: PowerwallData?, fallbackVIN: String) -> String? {
+        if let liveVIN = data?.wallConnectors.first(where: { wallConnector in
+            let chargingOrConnected = (wallConnector.wallConnectorPower ?? 0) > 10
+                || wallConnector.wallConnectorState == 1.0
+                || wallConnector.wallConnectorState == 4.0
+            let normalizedVIN = wallConnector.vin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return chargingOrConnected && !normalizedVIN.isEmpty
+        })?.vin?.trimmingCharacters(in: .whitespacesAndNewlines), !liveVIN.isEmpty {
+            return liveVIN
+        }
+
+        let normalizedFallbackVIN = fallbackVIN.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalizedFallbackVIN.isEmpty ? nil : normalizedFallbackVIN
+    }
+
+    private func isCybertruckVIN(_ vin: String?) -> Bool {
+        guard let vin else { return false }
+        let normalizedVIN = vin.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard normalizedVIN.count == 17 else { return false }
+        return normalizedVIN.dropFirst(3).first == "C"
     }
 
     @ViewBuilder
@@ -524,7 +558,7 @@ struct ContentView: View {
 
             if viewModel.isOffGrid() {
                 offGridImage(sceneSize: sceneSize)
-                    .position(scenePoint(x: 0.151, y: -0.003, in: sceneSize))
+                    .position(scenePoint(x: 0.151, y: 0.234, in: sceneSize))
             }
         }
         .frame(width: sceneSize.width, height: sceneSize.height)
@@ -1103,6 +1137,10 @@ struct ContentView: View {
 
     private func wallConnectorEnergyTotal(data: PowerwallData?) -> Double {
         return data?.wallConnectors.reduce(0.0) { $0 + ($1.wallConnectorPower ?? 0.0) } ?? 0.0
+    }
+
+    private func wallConnectorIsCharging(data: PowerwallData?) -> Bool {
+        data?.wallConnectors.contains { $0.wallConnectorState == 1.0 } ?? false
     }
 
     private func wallConnectorDisplay(data: PowerwallData?, precision: String) -> String {
