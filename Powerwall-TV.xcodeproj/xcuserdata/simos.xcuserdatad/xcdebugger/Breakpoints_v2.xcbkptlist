@@ -96,7 +96,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "471"
             endingLineNumber = "471"
-            landmarkName = "fetchEnergyProducts()"
+            landmarkName = "resolveRegionBaseURL()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
@@ -112,7 +112,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "466"
             endingLineNumber = "466"
-            landmarkName = "fetchEnergyProducts()"
+            landmarkName = "resolveRegionBaseURL()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

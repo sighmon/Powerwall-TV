@@ -171,7 +171,7 @@ class PowerwallViewModel: ObservableObject {
 
     @discardableResult
     func startFleetLoginManually() -> Bool {
-        loginWithTeslaFleetAPI(isAutomaticPrompt: false)
+        loginWithTeslaFleetAPI(isAutomaticPrompt: false, promptMissingScopes: true)
     }
 
     // MARK: - Local Login
@@ -228,7 +228,7 @@ class PowerwallViewModel: ObservableObject {
     // MARK: - Tesla Fleet API Login
 
     @discardableResult
-    private func loginWithTeslaFleetAPI(isAutomaticPrompt: Bool = false) -> Bool {
+    private func loginWithTeslaFleetAPI(isAutomaticPrompt: Bool = false, promptMissingScopes: Bool = false) -> Bool {
         if isAutomaticPrompt {
             guard !hasAttemptedAutomaticFleetLogin else { return false }
             hasAttemptedAutomaticFleetLogin = true
@@ -237,9 +237,19 @@ class PowerwallViewModel: ObservableObject {
         guard !isPresentingFleetLogin else { return false }
 
         let state = UUID().uuidString
-        let authURLString = "https://auth.tesla.com/oauth2/v3/authorize?client_id=\(clientID)&redirect_uri=\(redirectURI)&response_type=code&scope=\(scopes)&state=\(state)"
+        var authURLComponents = URLComponents(string: "https://auth.tesla.com/oauth2/v3/authorize")
+        authURLComponents?.queryItems = [
+            URLQueryItem(name: "client_id", value: clientID),
+            URLQueryItem(name: "redirect_uri", value: redirectURI),
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "scope", value: scopes),
+            URLQueryItem(name: "state", value: state)
+        ]
+        if promptMissingScopes {
+            authURLComponents?.queryItems?.append(URLQueryItem(name: "prompt_missing_scopes", value: "true"))
+        }
 
-        guard let authURL = URL(string: authURLString) else {
+        guard let authURL = authURLComponents?.url else {
             errorMessage = "Invalid authorization URL"
             return false
         }

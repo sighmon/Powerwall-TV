@@ -847,7 +847,7 @@ struct ContentView: View {
             Text(vehicleFirstName(vehicle))
                 .fontWeight(.bold)
                 .font(labelFont)
-                .foregroundColor(.white)
+                .foregroundColor(.gray)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
         }
