@@ -129,6 +129,7 @@ struct ContentView: View {
                 electricityMapsZone: $viewModel.electricityMapsZone,
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
+                showVehicles: $viewModel.showVehicles,
                 showInMenuBar: $viewModel.showInMenuBar,
                 keepWindowInFront: $viewModel.keepWindowInFront,
                 autoHideSummaryOnOverlap: $viewModel.autoHideSummaryOnOverlap,
@@ -168,6 +169,7 @@ struct ContentView: View {
                 electricityMapsZone: $viewModel.electricityMapsZone,
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
+                showVehicles: $viewModel.showVehicles,
                 showInMenuBar: $viewModel.showInMenuBar,
                 keepWindowInFront: $viewModel.keepWindowInFront,
                 autoHideSummaryOnOverlap: $viewModel.autoHideSummaryOnOverlap,
@@ -801,7 +803,7 @@ struct ContentView: View {
 
             Spacer()
 
-            if viewModel.loginMode == .fleetAPI && !viewModel.vehicles.isEmpty {
+            if viewModel.loginMode == .fleetAPI && viewModel.showVehicles && !viewModel.vehicles.isEmpty {
                 HStack {
                     ForEach(viewModel.vehicles, id: \.vin) { vehicle in
                         vehicleStatusView(vehicle: vehicle, labelFont: labelFont(for: sceneSize))

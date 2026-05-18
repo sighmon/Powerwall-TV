@@ -20,6 +20,7 @@ struct SettingsView: View {
     @Binding var electricityMapsZone: String
     @Binding var preventScreenSaver: Bool
     @Binding var showLessPrecision: Bool
+    @Binding var showVehicles: Bool
     @Binding var showInMenuBar: Bool
     @Binding var keepWindowInFront: Bool
     @Binding var autoHideSummaryOnOverlap: Bool
@@ -103,6 +104,7 @@ struct SettingsView: View {
                 Toggle("Auto-hide buttons", isOn: $autoHideButtonsOnOverlap)
 #endif
                 Toggle("Limit data to one decimal place", isOn: $showLessPrecision)
+                Toggle("Show vehicles", isOn: $showVehicles)
                 Toggle("Prevent screen saver from showing", isOn: $preventScreenSaver)
                 if preventScreenSaver {
                     Text("Warning: keeping the screen on may increase power usage and risk burn-in.")
@@ -206,6 +208,7 @@ struct SettingsView: View {
         UserDefaults.standard.set(electricityMapsZone, forKey: "electricityMaps_zone")
         UserDefaults.standard.set(preventScreenSaver, forKey: "preventScreenSaver")
         UserDefaults.standard.set(showLessPrecision, forKey: "showLessPrecision")
+        UserDefaults.standard.set(showVehicles, forKey: "showVehicles")
         UserDefaults.standard.set(showInMenuBar, forKey: "showInMenuBar")
         UserDefaults.standard.set(keepWindowInFront, forKey: "keepWindowInFront")
         UserDefaults.standard.set(autoHideSummaryOnOverlap, forKey: "autoHideSummaryOnOverlap")
@@ -229,6 +232,7 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "keepWindowInFront")
         UserDefaults.standard.removeObject(forKey: "autoHideSummaryOnOverlap")
         UserDefaults.standard.removeObject(forKey: "autoHideButtonsOnOverlap")
+        UserDefaults.standard.removeObject(forKey: "showVehicles")
         UserDefaults.standard.removeObject(forKey: "sceneScale")
         UserDefaults.standard.removeObject(forKey: "sceneHorizontalOffset")
         UserDefaults.standard.removeObject(forKey: "sceneVerticalOffset")
@@ -236,6 +240,7 @@ struct SettingsView: View {
         keepWindowInFront = false
         autoHideSummaryOnOverlap = true
         autoHideButtonsOnOverlap = true
+        showVehicles = true
         sceneScale = 1.0
         sceneHorizontalOffset = 0.0
         sceneVerticalOffset = 0.0
@@ -264,6 +269,7 @@ struct SettingsView_Previews: PreviewProvider {
             electricityMapsZone: .constant(""),
             preventScreenSaver: .constant(false),
             showLessPrecision: .constant(false),
+            showVehicles: .constant(true),
             showInMenuBar: .constant(false),
             keepWindowInFront: .constant(false),
             autoHideSummaryOnOverlap: .constant(true),

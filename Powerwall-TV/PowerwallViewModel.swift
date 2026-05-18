@@ -50,6 +50,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var password: String = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
     @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
+    @Published var showVehicles: Bool = UserDefaults.standard.object(forKey: "showVehicles") as? Bool ?? true
     @Published var showInMenuBar: Bool = UserDefaults.standard.bool(forKey: "showInMenuBar")
     @Published var keepWindowInFront: Bool = UserDefaults.standard.bool(forKey: "keepWindowInFront")
     @Published var autoHideSummaryOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideSummaryOnOverlap") as? Bool ?? false
@@ -485,8 +486,10 @@ class PowerwallViewModel: ObservableObject {
             } receiveValue: { [weak self] productsResponse in
                 guard let self = self else { return }
                 let energySites = productsResponse.response.filter { $0.energySiteId != nil }
-                self.mergeVehicles(productsResponse.response.compactMap(\.fleetVehicle))
-                self.fetchListedVehicleDataIfNeeded(force: true)
+                if self.showVehicles {
+                    self.mergeVehicles(productsResponse.response.compactMap(\.fleetVehicle))
+                    self.fetchListedVehicleDataIfNeeded(force: true)
+                }
                 self.energySites = energySites
                 if energySites.isEmpty {
                     self.errorMessage = "No energy products found"
@@ -535,7 +538,9 @@ class PowerwallViewModel: ObservableObject {
                     self.siteName = currentSite.siteName ?? "Energy Site \(id)"
                     self.fetchFleetAPIData()
                     self.fetchSolarEnergyToday()
-                    self.fetchListedVehicleDataIfNeeded()
+                    if self.showVehicles {
+                        self.fetchListedVehicleDataIfNeeded()
+                    }
                     if self.batteryCount == nil {
                         self.fetchSiteInfo()
                     }
@@ -863,7 +868,7 @@ class PowerwallViewModel: ObservableObject {
     }
 
     private func fetchListedVehicleDataIfNeeded(force: Bool = false) {
-        guard !vehicles.isEmpty, !accessToken.isEmpty else { return }
+        guard showVehicles, !vehicles.isEmpty, !accessToken.isEmpty else { return }
 
         let now = Date()
         for vehicle in vehicles {
