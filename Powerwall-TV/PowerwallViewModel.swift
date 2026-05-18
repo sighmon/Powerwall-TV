@@ -99,6 +99,7 @@ class PowerwallViewModel: ObservableObject {
     private let vehicleListRefreshInterval: TimeInterval = 15 * 60
     private let vehicleChargingRefreshInterval: TimeInterval = 60
     private let vehicleConnectedRefreshInterval: TimeInterval = 60 * 60
+    private let listedVehicleRefreshInterval: TimeInterval = 60 * 60
     private var lastVehicleListFetchAt: Date?
     private var lastVehicleDataFetchAt: [String: Date] = [:]
     private var isFetchingVehicleList = false
@@ -484,6 +485,8 @@ class PowerwallViewModel: ObservableObject {
             } receiveValue: { [weak self] productsResponse in
                 guard let self = self else { return }
                 let energySites = productsResponse.response.filter { $0.energySiteId != nil }
+                self.mergeVehicles(productsResponse.response.compactMap(\.fleetVehicle))
+                self.fetchListedVehicleDataIfNeeded(force: true)
                 self.energySites = energySites
                 if energySites.isEmpty {
                     self.errorMessage = "No energy products found"
@@ -532,6 +535,7 @@ class PowerwallViewModel: ObservableObject {
                     self.siteName = currentSite.siteName ?? "Energy Site \(id)"
                     self.fetchFleetAPIData()
                     self.fetchSolarEnergyToday()
+                    self.fetchListedVehicleDataIfNeeded()
                     if self.batteryCount == nil {
                         self.fetchSiteInfo()
                     }
@@ -832,12 +836,45 @@ class PowerwallViewModel: ObservableObject {
             }
 
             DispatchQueue.main.async {
-                self.vehicles = vehiclesResponse.response
+                self.mergeVehicles(vehiclesResponse.response)
                 self.lastVehicleListFetchAt = now
                 let connectors = self.data?.wallConnectors ?? []
                 self.fetchVehicleDataIfNeeded(for: connectors)
             }
         }.resume()
+    }
+
+    private func mergeVehicles(_ incomingVehicles: [FleetVehicle]) {
+        guard !incomingVehicles.isEmpty else { return }
+
+        var vehiclesByVIN = Dictionary(uniqueKeysWithValues: vehicles.map { ($0.vin, $0) })
+        var orderedVINs = vehicles.map(\.vin)
+
+        for incomingVehicle in incomingVehicles {
+            if let existingVehicle = vehiclesByVIN[incomingVehicle.vin] {
+                vehiclesByVIN[incomingVehicle.vin] = existingVehicle.merging(incomingVehicle)
+            } else {
+                vehiclesByVIN[incomingVehicle.vin] = incomingVehicle
+                orderedVINs.append(incomingVehicle.vin)
+            }
+        }
+
+        vehicles = orderedVINs.compactMap { vehiclesByVIN[$0] }
+    }
+
+    private func fetchListedVehicleDataIfNeeded(force: Bool = false) {
+        guard !vehicles.isEmpty, !accessToken.isEmpty else { return }
+
+        let now = Date()
+        for vehicle in vehicles {
+            let lastFetch = lastVehicleDataFetchAt[vehicle.vin]
+            let isStale = lastFetch.map { now.timeIntervalSince($0) >= listedVehicleRefreshInterval } ?? true
+            guard force || isStale else { continue }
+            guard !vehicleDataFetchesInFlight.contains(vehicle.vin) else { continue }
+
+            lastVehicleDataFetchAt[vehicle.vin] = now
+            fetchVehicleData(vin: vehicle.vin)
+        }
     }
 
     private func fetchVehicleDataIfNeeded(for wallConnectors: [WallConnector]) {
@@ -1207,17 +1244,45 @@ struct FleetVehicle: Codable {
         case displayName = "display_name"
         case state
     }
+
+    func merging(_ other: FleetVehicle) -> FleetVehicle {
+        FleetVehicle(
+            vin: vin,
+            displayName: other.displayName ?? displayName,
+            state: other.state ?? state
+        )
+    }
 }
 
 struct Product: Codable {
     let deviceType: String?
     let energySiteId: Int?
     let siteName: String?
+    let vin: String?
+    let displayName: String?
+    let state: String?
 
     enum CodingKeys: String, CodingKey {
         case deviceType = "device_type"
         case energySiteId = "energy_site_id"
         case siteName = "site_name"
+        case vin
+        case displayName = "display_name"
+        case state
+    }
+
+    var fleetVehicle: FleetVehicle? {
+        guard deviceType == "vehicle",
+              let normalizedVIN = vin?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalizedVIN.isEmpty else {
+            return nil
+        }
+
+        return FleetVehicle(
+            vin: normalizedVIN,
+            displayName: displayName,
+            state: state
+        )
     }
 }
 

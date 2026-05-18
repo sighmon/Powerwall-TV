@@ -83,7 +83,7 @@ struct ContentView: View {
                     hidden: hideDetachedSiteSummary
                 )
 
-                controlsOverlay
+                controlsOverlay(sceneSize: sceneSize)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding()
             }
@@ -732,8 +732,8 @@ struct ContentView: View {
 #endif
     }
 
-    private var controlsOverlay: some View {
-        HStack {
+    private func controlsOverlay(sceneSize: CGSize) -> some View {
+        HStack(alignment: .bottom) {
             HStack {
                 Button(action: {
                     revealAutoHiddenOverlays()
@@ -800,7 +800,77 @@ struct ContentView: View {
             .reportFrame(.controlsOverlay)
 
             Spacer()
+
+            if viewModel.loginMode == .fleetAPI && !viewModel.vehicles.isEmpty {
+                HStack {
+                    ForEach(viewModel.vehicles, id: \.vin) { vehicle in
+                        vehicleStatusView(vehicle: vehicle, labelFont: labelFont(for: sceneSize))
+                    }
+                }
+                .overlayChromeBackground(
+                    isVisible: !hideControlsOverlay,
+                    isOverlapping: controlsOverlayOverlapsScene && viewModel.autoHideButtonsOnOverlap
+                )
+                .opacity(hideControlsOverlay ? 0 : 1)
+                .allowsHitTesting(!hideControlsOverlay)
+            }
         }
+    }
+
+    private func vehicleStatusView(vehicle: FleetVehicle, labelFont: Font) -> some View {
+        VStack(spacing: 1) {
+            Text(vehicleBatteryDisplay(vehicle: vehicle))
+                .fontWeight(.bold)
+                .font(labelFont)
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Image(systemName: "car.fill")
+#if os(macOS)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.gray)
+                .font(.system(size: 20, weight: .semibold))
+                .frame(width: 40, height: 24)
+#elseif os(iOS)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.gray)
+                .font(.system(size: 30, weight: .semibold))
+                .frame(width: 40, height: 30)
+#else
+                .font(.title2)
+                .frame(width: 80, height: 36)
+#endif
+
+            Text(vehicleFirstName(vehicle))
+                .fontWeight(.bold)
+                .font(labelFont)
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+#if os(tvOS)
+        .frame(width: 80)
+#elseif os(macOS)
+        .frame(width: 80)
+#else
+        .frame(width: 40)
+#endif
+        .opacity(0.85)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(vehicle.displayName ?? "Vehicle") \(vehicleBatteryDisplay(vehicle: vehicle))")
+    }
+
+    private func vehicleBatteryDisplay(vehicle: FleetVehicle) -> String {
+        guard let batteryLevel = viewModel.vehicleChargeStates[vehicle.vin]?.batteryLevel else {
+            return "--%"
+        }
+        return "\(Int(batteryLevel.rounded()))%"
+    }
+
+    private func vehicleFirstName(_ vehicle: FleetVehicle) -> String {
+        let displayName = vehicle.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return displayName.split(separator: " ").first.map(String.init) ?? "Car"
     }
 
     private func valueFont(for sceneSize: CGSize) -> Font {
