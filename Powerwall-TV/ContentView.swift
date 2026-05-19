@@ -213,8 +213,10 @@ struct ContentView: View {
                     site: PowerwallData.Site(instantPower: homeLoad * 0.1),
                     wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: homeLoad * 0.05)]
                 )
-                viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
+                viewModel.batteryPercentage = BatteryPercentage(percentage: 80)
                 viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
+                configureDemoVehicleData(batteryLevel: 64)
+                configureDemoElectricityGridData()
             } else {
                 switch viewModel.loginMode {
                 case .local:
@@ -232,14 +234,17 @@ struct ContentView: View {
             }
         }
         .onReceive(timerElectricityMaps) { _ in
-            viewModel.fetchElectricityMapsData()
+            if viewModel.ipAddress == "demo" {
+                configureDemoElectricityGridData()
+            } else {
+                viewModel.fetchElectricityMapsData()
+            }
         }
         .onAppear {
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
             if demo {
                 viewModel.ipAddress = "demo"
             }
-            viewModel.fetchElectricityMapsData()
             if shouldAutoOpenSettingsOnLaunch {
                 showingSettings = true
             } else if viewModel.ipAddress == "demo" {
@@ -256,11 +261,14 @@ struct ContentView: View {
                 viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
                 viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
                 viewModel.siteName = "Home sweet home"
+                configureDemoVehicleData(batteryLevel: 80)
+                configureDemoElectricityGridData()
                 // viewModel.errorMessage = "An error has occured"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     startAnimations = true
                 }
             } else {
+                viewModel.fetchElectricityMapsData()
                 viewModel.fetchData()
                 // Trigger animations after a slight delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -847,9 +855,12 @@ struct ContentView: View {
                 .opacity(0.6)
                 .font(.system(size: 30, weight: .semibold))
                 .frame(width: 40, height: 30)
+                .padding(4)
 #else
                 .font(.title2)
+                .opacity(0.6)
                 .frame(width: 80, height: 36)
+                .padding()
 #endif
 
             Text(vehicleFirstName(vehicle))
@@ -867,7 +878,6 @@ struct ContentView: View {
 #else
         .frame(width: 40)
 #endif
-        .opacity(0.85)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(vehicleAccessibilityLabel(vehicle: vehicle))
     }
@@ -885,6 +895,24 @@ struct ContentView: View {
             return name
         }
         return "\(name) \(batteryDisplay)"
+    }
+
+    private func configureDemoVehicleData(batteryLevel: Double) {
+        let demoVIN = "abc123"
+        viewModel.vehicles = [
+            FleetVehicle(vin: demoVIN, displayName: "Demo Tesla", state: "online")
+        ]
+        viewModel.vehicleChargeStates[demoVIN] = VehicleChargeSnapshot(
+            batteryLevel: batteryLevel,
+            chargingState: "Charging",
+            minutesToFullCharge: 45
+        )
+        viewModel.showVehicles = true
+    }
+
+    private func configureDemoElectricityGridData() {
+        viewModel.gridCarbonIntensity = 256
+        viewModel.gridFossilFuelPercentage = 58
     }
 
     private func vehicleFirstName(_ vehicle: FleetVehicle) -> String {
@@ -1239,7 +1267,7 @@ struct ContentView: View {
             let powerKW = self.wallConnectorEnergyTotal(data: data) / 1000
             if let vin = chargingConnector.vin,
                let batteryLevel = viewModel.vehicleChargeStates[vin]?.batteryLevel {
-                return "\(Int(batteryLevel.rounded()))% · \(fmt(powerKW)) kW"
+                return "\(fmt(powerKW)) kW · \(Int(batteryLevel.rounded()))%"
             }
             return "\(fmt(powerKW)) kW"
         }
