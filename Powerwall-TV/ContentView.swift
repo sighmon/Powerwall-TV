@@ -821,22 +821,30 @@ struct ContentView: View {
 
     private func vehicleStatusView(vehicle: FleetVehicle, labelFont: Font) -> some View {
         VStack(spacing: 1) {
-            Text(vehicleBatteryDisplay(vehicle: vehicle))
-                .fontWeight(.bold)
-                .font(labelFont)
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+            if let batteryDisplay = vehicleBatteryDisplay(vehicle: vehicle) {
+                Text(batteryDisplay)
+                    .fontWeight(.bold)
+                    .font(labelFont)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            } else {
+                Image(systemName: "zzz")
+                    .font(labelFont)
+                    .foregroundColor(.white)
+            }
 
             Image(systemName: "car.fill")
 #if os(macOS)
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.gray)
+                .foregroundColor(.white)
+                .opacity(0.6)
                 .font(.system(size: 20, weight: .semibold))
                 .frame(width: 40, height: 24)
 #elseif os(iOS)
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.gray)
+                .foregroundColor(.white)
+                .opacity(0.6)
                 .font(.system(size: 30, weight: .semibold))
                 .frame(width: 40, height: 30)
 #else
@@ -847,7 +855,8 @@ struct ContentView: View {
             Text(vehicleFirstName(vehicle))
                 .fontWeight(.bold)
                 .font(labelFont)
-                .foregroundColor(.gray)
+                .foregroundColor(.white)
+                .opacity(0.6)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
         }
@@ -860,14 +869,22 @@ struct ContentView: View {
 #endif
         .opacity(0.85)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(vehicle.displayName ?? "Vehicle") \(vehicleBatteryDisplay(vehicle: vehicle))")
+        .accessibilityLabel(vehicleAccessibilityLabel(vehicle: vehicle))
     }
 
-    private func vehicleBatteryDisplay(vehicle: FleetVehicle) -> String {
+    private func vehicleBatteryDisplay(vehicle: FleetVehicle) -> String? {
         guard let batteryLevel = viewModel.vehicleChargeStates[vehicle.vin]?.batteryLevel else {
-            return "--%"
+            return nil
         }
         return "\(Int(batteryLevel.rounded()))%"
+    }
+
+    private func vehicleAccessibilityLabel(vehicle: FleetVehicle) -> String {
+        let name = vehicle.displayName ?? "Vehicle"
+        guard let batteryDisplay = vehicleBatteryDisplay(vehicle: vehicle) else {
+            return name
+        }
+        return "\(name) \(batteryDisplay)"
     }
 
     private func vehicleFirstName(_ vehicle: FleetVehicle) -> String {

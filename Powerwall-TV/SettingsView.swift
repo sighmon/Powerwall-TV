@@ -240,7 +240,7 @@ struct SettingsView: View {
         keepWindowInFront = false
         autoHideSummaryOnOverlap = true
         autoHideButtonsOnOverlap = true
-        showVehicles = true
+        showVehicles = false
         sceneScale = 1.0
         sceneHorizontalOffset = 0.0
         sceneVerticalOffset = 0.0

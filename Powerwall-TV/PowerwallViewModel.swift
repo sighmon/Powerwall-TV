@@ -50,7 +50,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var password: String = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
     @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
-    @Published var showVehicles: Bool = UserDefaults.standard.object(forKey: "showVehicles") as? Bool ?? true
+    @Published var showVehicles: Bool = UserDefaults.standard.object(forKey: "showVehicles") as? Bool ?? false
     @Published var showInMenuBar: Bool = UserDefaults.standard.bool(forKey: "showInMenuBar")
     @Published var keepWindowInFront: Bool = UserDefaults.standard.bool(forKey: "keepWindowInFront")
     @Published var autoHideSummaryOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideSummaryOnOverlap") as? Bool ?? false
@@ -101,11 +101,48 @@ class PowerwallViewModel: ObservableObject {
     private let vehicleChargingRefreshInterval: TimeInterval = 60
     private let vehicleConnectedRefreshInterval: TimeInterval = 60 * 60
     private let listedVehicleRefreshInterval: TimeInterval = 60 * 60
+    private let vehicleDataRetryInterval: TimeInterval = 5 * 60
+    private let listedVehicleRequestSpacing: TimeInterval = 2
     private var lastVehicleListFetchAt: Date?
     private var lastVehicleDataFetchAt: [String: Date] = [:]
+    private var lastVehicleDataAttemptAt: [String: Date] = [:]
     private var isFetchingVehicleList = false
     private var vehicleDataFetchesInFlight = Set<String>()
     private var hasShownVehicleScopeWarning = false
+
+    private func redactedVIN(_ vin: String) -> String {
+        let suffix = vin.suffix(6)
+        return "...\(suffix)"
+    }
+
+    private func vehicleResponsePreview(from data: Data?) -> String {
+        guard let data = data, !data.isEmpty else { return "<empty>" }
+
+        let text = String(data: data, encoding: .utf8) ?? data.map { String(format: "%02x", $0) }.joined()
+        let maxLength = 1200
+        if text.count > maxLength {
+            return "\(text.prefix(maxLength))...<truncated>"
+        }
+
+        return text
+    }
+
+    private func logVehicleDebug(_ message: String) {
+        #if DEBUG
+        print("Vehicle API: \(message)")
+        #endif
+    }
+
+    private func vehicleDataResponseIsAsleepOrOffline(statusCode: Int, data: Data) -> Bool {
+        guard statusCode == 408,
+              let response = try? JSONDecoder().decode(TeslaAPIErrorResponse.self, from: data) else {
+            return false
+        }
+
+        return response.error.localizedCaseInsensitiveContains("offline")
+            || response.error.localizedCaseInsensitiveContains("asleep")
+            || response.error.localizedCaseInsensitiveContains("unavailable")
+    }
 
     private let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -826,6 +863,7 @@ class PowerwallViewModel: ObservableObject {
         guard let url = URL(string: "\(fleetBaseURL)/api/1/vehicles") else { return }
 
         isFetchingVehicleList = true
+        logVehicleDebug("GET /vehicles start candidateVINs=\(candidateVINs.map(redactedVIN)) knownVehicles=\(vehicles.count)")
 
         var request = URLRequest(url: url)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -842,19 +880,27 @@ class PowerwallViewModel: ObservableObject {
             guard error == nil,
                   let http = response as? HTTPURLResponse,
                   let data = data else {
+                self.logVehicleDebug("GET /vehicles failed status=\((response as? HTTPURLResponse)?.statusCode.description ?? "nil") error=\(String(describing: error)) body=\(self.vehicleResponsePreview(from: data))")
                 return
             }
 
+            self.logVehicleDebug("GET /vehicles status=\(http.statusCode) bytes=\(data.count)")
+            if http.statusCode != 200 {
+                self.logVehicleDebug("GET /vehicles non-200 body=\(self.vehicleResponsePreview(from: data))")
+            }
             guard self.handleVehicleEndpointStatus(http.statusCode) else { return }
-            guard let vehiclesResponse = try? JSONDecoder().decode(FleetVehiclesResponse.self, from: data) else {
+            do {
+                let vehiclesResponse = try JSONDecoder().decode(FleetVehiclesResponse.self, from: data)
+                DispatchQueue.main.async {
+                    self.logVehicleDebug("GET /vehicles decoded count=\(vehiclesResponse.response.count) vins=\(vehiclesResponse.response.map { self.redactedVIN($0.vin) }) states=\(vehiclesResponse.response.map { $0.state ?? "nil" })")
+                    self.mergeVehicles(vehiclesResponse.response)
+                    self.lastVehicleListFetchAt = now
+                    let connectors = self.data?.wallConnectors ?? []
+                    self.fetchVehicleDataIfNeeded(for: connectors)
+                }
+            } catch {
+                self.logVehicleDebug("GET /vehicles decode failed error=\(error) body=\(self.vehicleResponsePreview(from: data))")
                 return
-            }
-
-            DispatchQueue.main.async {
-                self.mergeVehicles(vehiclesResponse.response)
-                self.lastVehicleListFetchAt = now
-                let connectors = self.data?.wallConnectors ?? []
-                self.fetchVehicleDataIfNeeded(for: connectors)
             }
         }.resume()
     }
@@ -880,15 +926,24 @@ class PowerwallViewModel: ObservableObject {
     private func fetchListedVehicleDataIfNeeded(force: Bool = false) {
         guard showVehicles, !vehicles.isEmpty, !accessToken.isEmpty else { return }
 
-        let now = Date()
-        for vehicle in vehicles {
-            let lastFetch = lastVehicleDataFetchAt[vehicle.vin]
-            let isStale = lastFetch.map { now.timeIntervalSince($0) >= listedVehicleRefreshInterval } ?? true
-            guard force || isStale else { continue }
-            guard !vehicleDataFetchesInFlight.contains(vehicle.vin) else { continue }
+        let vehicleVINs = vehicles
+            .map(\.vin)
+            .filter { shouldFetchVehicleData(vin: $0, refreshInterval: listedVehicleRefreshInterval, force: force) }
 
-            lastVehicleDataFetchAt[vehicle.vin] = now
-            fetchVehicleData(vin: vehicle.vin)
+        if !vehicleVINs.isEmpty {
+            logVehicleDebug("listed vehicle_data eligible force=\(force) vins=\(vehicleVINs.map(redactedVIN))")
+        }
+
+        for (index, vin) in vehicleVINs.enumerated() {
+            let delay = listedVehicleRequestSpacing * TimeInterval(index)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self,
+                      self.showVehicles,
+                      self.shouldFetchVehicleData(vin: vin, refreshInterval: self.listedVehicleRefreshInterval, force: force) else {
+                    return
+                }
+                self.fetchVehicleData(vin: vin)
+            }
         }
     }
 
@@ -915,17 +970,33 @@ class PowerwallViewModel: ObservableObject {
                 ? vehicleChargingRefreshInterval
                 : vehicleConnectedRefreshInterval
             let isStale = lastFetch.map { now.timeIntervalSince($0) >= refreshInterval } ?? true
-            guard isStale else { continue }
+            let lastAttempt = lastVehicleDataAttemptAt[vin]
+            let canRetry = lastAttempt.map { now.timeIntervalSince($0) >= vehicleDataRetryInterval } ?? true
+            guard isStale && canRetry else { continue }
 
-            lastVehicleDataFetchAt[vin] = now
             fetchVehicleData(vin: vin)
         }
     }
 
+    private func shouldFetchVehicleData(vin: String, refreshInterval: TimeInterval, force: Bool = false) -> Bool {
+        guard !vehicleDataFetchesInFlight.contains(vin) else { return false }
+
+        let now = Date()
+        let lastFetch = lastVehicleDataFetchAt[vin]
+        let isStale = lastFetch.map { now.timeIntervalSince($0) >= refreshInterval } ?? true
+        let lastAttempt = lastVehicleDataAttemptAt[vin]
+        let canRetry = lastAttempt.map { now.timeIntervalSince($0) >= vehicleDataRetryInterval } ?? true
+
+        return (force || isStale) && canRetry
+    }
+
     private func fetchVehicleData(vin: String) {
+        guard !vehicleDataFetchesInFlight.contains(vin) else { return }
         guard let url = URL(string: "\(fleetBaseURL)/api/1/vehicles/\(vin)/vehicle_data") else { return }
 
         vehicleDataFetchesInFlight.insert(vin)
+        lastVehicleDataAttemptAt[vin] = Date()
+        logVehicleDebug("GET /vehicles/\(redactedVIN(vin))/vehicle_data start")
 
         var request = URLRequest(url: url)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -942,14 +1013,37 @@ class PowerwallViewModel: ObservableObject {
             guard error == nil,
                   let http = response as? HTTPURLResponse,
                   let data = data else {
+                self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data failed status=\((response as? HTTPURLResponse)?.statusCode.description ?? "nil") error=\(String(describing: error)) body=\(self.vehicleResponsePreview(from: data))")
                 return
             }
 
-            guard self.handleVehicleEndpointStatus(http.statusCode) else { return }
-            guard let vehicleData = try? JSONDecoder().decode(VehicleDataResponse.self, from: data),
-                  let chargeState = vehicleData.response.chargeState else {
+            self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data status=\(http.statusCode) bytes=\(data.count)")
+            if http.statusCode != 200 {
+                self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data non-200 body=\(self.vehicleResponsePreview(from: data))")
+            }
+            if self.vehicleDataResponseIsAsleepOrOffline(statusCode: http.statusCode, data: data) {
+                self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data unavailable because vehicle is asleep/offline")
+                DispatchQueue.main.async {
+                    self.vehicleChargeStates.removeValue(forKey: vin)
+                    self.lastVehicleDataFetchAt[vin] = Date()
+                }
                 return
             }
+            guard self.handleVehicleEndpointStatus(http.statusCode) else { return }
+            let vehicleData: VehicleDataResponse
+            do {
+                vehicleData = try JSONDecoder().decode(VehicleDataResponse.self, from: data)
+            } catch {
+                self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data decode failed error=\(error) body=\(self.vehicleResponsePreview(from: data))")
+                return
+            }
+
+            guard let chargeState = vehicleData.response.chargeState else {
+                self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data missing charge_state body=\(self.vehicleResponsePreview(from: data))")
+                return
+            }
+
+            self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data charge_state battery_level=\(String(describing: chargeState.batteryLevel)) charging_state=\(String(describing: chargeState.chargingState)) minutes_to_full_charge=\(String(describing: chargeState.minutesToFullCharge))")
 
             let snapshot = VehicleChargeSnapshot(
                 batteryLevel: chargeState.batteryLevel,
@@ -959,6 +1053,7 @@ class PowerwallViewModel: ObservableObject {
 
             DispatchQueue.main.async {
                 self.vehicleChargeStates[vin] = snapshot
+                self.lastVehicleDataFetchAt[vin] = Date()
             }
         }.resume()
     }
@@ -1247,6 +1342,18 @@ struct ProductsResponse: Codable {
 
 struct FleetVehiclesResponse: Codable {
     let response: [FleetVehicle]
+}
+
+struct TeslaAPIErrorResponse: Codable {
+    let error: String
+    let errorDescription: String?
+    let txid: String?
+
+    enum CodingKeys: String, CodingKey {
+        case error
+        case errorDescription = "error_description"
+        case txid
+    }
 }
 
 struct FleetVehicle: Codable {
