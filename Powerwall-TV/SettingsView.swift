@@ -104,7 +104,8 @@ struct SettingsView: View {
                 Toggle("Auto-hide buttons", isOn: $autoHideButtonsOnOverlap)
 #endif
                 Toggle("Limit data to one decimal place", isOn: $showLessPrecision)
-                Toggle("Show vehicles", isOn: $showVehicles)
+                // For debugging vehicles on accounts without a v3 wall connector
+                // Toggle("Show vehicles", isOn: $showVehicles)
                 Toggle("Prevent screen saver from showing", isOn: $preventScreenSaver)
                 if preventScreenSaver {
                     Text("Warning: keeping the screen on may increase power usage and risk burn-in.")
