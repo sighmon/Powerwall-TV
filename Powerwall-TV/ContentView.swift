@@ -364,7 +364,7 @@ struct ContentView: View {
         }
         let chargerActive = wallConnectorEnergyTotal(data: viewModel.data) > 10
             || wallConnectorIsCharging(data: viewModel.data)
-            || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in"
+            || wallConnectorHasConnectedVehicle(data: viewModel.data)
         if !chargerActive {
             return "home-charger-empty.png"
         }
@@ -1260,6 +1260,10 @@ struct ContentView: View {
         data?.wallConnectors.contains { $0.wallConnectorState == 1.0 } ?? false
     }
 
+    private func wallConnectorHasConnectedVehicle(data: PowerwallData?) -> Bool {
+        data?.wallConnectors.contains(where: \.isVehicleConnected) ?? false
+    }
+
     private func wallConnectorDisplay(data: PowerwallData?, precision: String) -> String {
         guard let data = data else { return "Idle" }
 
@@ -1272,7 +1276,11 @@ struct ContentView: View {
             return "\(fmt(powerKW)) kW"
         }
 
-        if data.wallConnectors.contains(where: \.isVehicleConnected) {
+        if let connectedConnector = data.wallConnectors.first(where: \.isVehicleConnected) {
+            if let vin = connectedConnector.vin,
+               let batteryLevel = viewModel.vehicleChargeStates[vin]?.batteryLevel {
+                return "Plugged in · \(Int(batteryLevel.rounded()))%"
+            }
             return "Plugged in"
         }
         return "Idle"
