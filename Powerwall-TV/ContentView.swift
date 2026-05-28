@@ -83,7 +83,7 @@ struct ContentView: View {
                     hidden: hideDetachedSiteSummary
                 )
 
-                controlsOverlay
+                controlsOverlay(sceneSize: sceneSize)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding()
             }
@@ -129,6 +129,7 @@ struct ContentView: View {
                 electricityMapsZone: $viewModel.electricityMapsZone,
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
+                showVehicles: $viewModel.showVehicles,
                 showInMenuBar: $viewModel.showInMenuBar,
                 keepWindowInFront: $viewModel.keepWindowInFront,
                 autoHideSummaryOnOverlap: $viewModel.autoHideSummaryOnOverlap,
@@ -168,6 +169,7 @@ struct ContentView: View {
                 electricityMapsZone: $viewModel.electricityMapsZone,
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
+                showVehicles: $viewModel.showVehicles,
                 showInMenuBar: $viewModel.showInMenuBar,
                 keepWindowInFront: $viewModel.keepWindowInFront,
                 autoHideSummaryOnOverlap: $viewModel.autoHideSummaryOnOverlap,
@@ -211,8 +213,10 @@ struct ContentView: View {
                     site: PowerwallData.Site(instantPower: homeLoad * 0.1),
                     wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: homeLoad * 0.05)]
                 )
-                viewModel.batteryPercentage = BatteryPercentage(percentage: 81)
+                viewModel.batteryPercentage = BatteryPercentage(percentage: 80)
                 viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
+                configureDemoVehicleData(batteryLevel: 64)
+                configureDemoElectricityGridData()
             } else {
                 switch viewModel.loginMode {
                 case .local:
@@ -230,14 +234,17 @@ struct ContentView: View {
             }
         }
         .onReceive(timerElectricityMaps) { _ in
-            viewModel.fetchElectricityMapsData()
+            if viewModel.ipAddress == "demo" {
+                configureDemoElectricityGridData()
+            } else {
+                viewModel.fetchElectricityMapsData()
+            }
         }
         .onAppear {
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
             if demo {
                 viewModel.ipAddress = "demo"
             }
-            viewModel.fetchElectricityMapsData()
             if shouldAutoOpenSettingsOnLaunch {
                 showingSettings = true
             } else if viewModel.ipAddress == "demo" {
@@ -254,11 +261,14 @@ struct ContentView: View {
                 viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
                 viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
                 viewModel.siteName = "Home sweet home"
+                configureDemoVehicleData(batteryLevel: 80)
+                configureDemoElectricityGridData()
                 // viewModel.errorMessage = "An error has occured"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     startAnimations = true
                 }
             } else {
+                viewModel.fetchElectricityMapsData()
                 viewModel.fetchData()
                 // Trigger animations after a slight delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -354,7 +364,7 @@ struct ContentView: View {
         }
         let chargerActive = wallConnectorEnergyTotal(data: viewModel.data) > 10
             || wallConnectorIsCharging(data: viewModel.data)
-            || wallConnectorDisplay(data: viewModel.data, precision: precision) == "Plugged in"
+            || wallConnectorHasConnectedVehicle(data: viewModel.data)
         if !chargerActive {
             return "home-charger-empty.png"
         }
@@ -732,8 +742,8 @@ struct ContentView: View {
 #endif
     }
 
-    private var controlsOverlay: some View {
-        HStack {
+    private func controlsOverlay(sceneSize: CGSize) -> some View {
+        HStack(alignment: .bottom) {
             HStack {
                 Button(action: {
                     revealAutoHiddenOverlays()
@@ -800,7 +810,114 @@ struct ContentView: View {
             .reportFrame(.controlsOverlay)
 
             Spacer()
+
+            if viewModel.loginMode == .fleetAPI && viewModel.showVehicles && !viewModel.vehicles.isEmpty {
+                HStack {
+                    ForEach(viewModel.vehicles, id: \.vin) { vehicle in
+                        vehicleStatusView(vehicle: vehicle, labelFont: labelFont(for: sceneSize))
+                    }
+                }
+                .overlayChromeBackground(
+                    isVisible: !hideControlsOverlay,
+                    isOverlapping: controlsOverlayOverlapsScene && viewModel.autoHideButtonsOnOverlap
+                )
+                .opacity(hideControlsOverlay ? 0 : 1)
+                .allowsHitTesting(!hideControlsOverlay)
+            }
         }
+    }
+
+    private func vehicleStatusView(vehicle: FleetVehicle, labelFont: Font) -> some View {
+        VStack(spacing: 1) {
+            if let batteryDisplay = vehicleBatteryDisplay(vehicle: vehicle) {
+                Text(batteryDisplay)
+                    .fontWeight(.bold)
+                    .font(labelFont)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            } else {
+                Image(systemName: "zzz")
+                    .font(labelFont)
+                    .foregroundColor(.white)
+            }
+
+            Image(systemName: "car.fill")
+#if os(macOS)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundColor(.white)
+                .opacity(0.6)
+                .font(.system(size: 20, weight: .semibold))
+                .frame(width: 40, height: 24)
+#elseif os(iOS)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundColor(.white)
+                .opacity(0.6)
+                .font(.system(size: 30, weight: .semibold))
+                .frame(width: 40, height: 30)
+                .padding(4)
+#else
+                .font(.title2)
+                .opacity(0.6)
+                .frame(width: 80, height: 36)
+                .padding()
+#endif
+
+            Text(vehicleFirstName(vehicle))
+                .fontWeight(.bold)
+                .font(labelFont)
+                .foregroundColor(.white)
+                .opacity(0.6)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+#if os(tvOS)
+        .frame(width: 80)
+#elseif os(macOS)
+        .frame(width: 80)
+#else
+        .frame(width: 40)
+#endif
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(vehicleAccessibilityLabel(vehicle: vehicle))
+    }
+
+    private func vehicleBatteryDisplay(vehicle: FleetVehicle) -> String? {
+        guard let batteryLevel = viewModel.vehicleChargeStates[vehicle.vin]?.batteryLevel else {
+            return nil
+        }
+        return "\(Int(batteryLevel.rounded()))%"
+    }
+
+    private func vehicleAccessibilityLabel(vehicle: FleetVehicle) -> String {
+        let name = vehicle.displayName ?? "Vehicle"
+        guard let batteryDisplay = vehicleBatteryDisplay(vehicle: vehicle) else {
+            return name
+        }
+        return "\(name) \(batteryDisplay)"
+    }
+
+    private func configureDemoVehicleData(batteryLevel: Double) {
+        let demoVIN = "abc123"
+        viewModel.vehicles = [
+            FleetVehicle(vin: demoVIN, displayName: "Demo Tesla", state: "online")
+        ]
+        viewModel.vehicleChargeStates[demoVIN] = VehicleChargeSnapshot(
+            batteryLevel: batteryLevel,
+            chargingState: "Charging",
+            minutesToFullCharge: 45
+        )
+        viewModel.showVehicles = true
+    }
+
+    private func configureDemoElectricityGridData() {
+        viewModel.gridCarbonIntensity = 256
+        viewModel.gridFossilFuelPercentage = 58
+    }
+
+    private func vehicleFirstName(_ vehicle: FleetVehicle) -> String {
+        let displayName = vehicle.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return displayName.split(separator: " ").first.map(String.init) ?? "Car"
     }
 
     private func valueFont(for sceneSize: CGSize) -> Font {
@@ -1143,14 +1260,27 @@ struct ContentView: View {
         data?.wallConnectors.contains { $0.wallConnectorState == 1.0 } ?? false
     }
 
+    private func wallConnectorHasConnectedVehicle(data: PowerwallData?) -> Bool {
+        data?.wallConnectors.contains(where: \.isVehicleConnected) ?? false
+    }
+
     private func wallConnectorDisplay(data: PowerwallData?, precision: String) -> String {
-        let hasCharging = wallConnectorIsCharging(data: data)
-        if hasCharging {
-            let powerKW = self.wallConnectorEnergyTotal(data: data!) / 1000
+        guard let data = data else { return "Idle" }
+
+        if let chargingConnector = data.wallConnectors.first(where: \.isVehicleCharging) {
+            let powerKW = self.wallConnectorEnergyTotal(data: data) / 1000
+            if let vin = chargingConnector.vin,
+               let batteryLevel = viewModel.vehicleChargeStates[vin]?.batteryLevel {
+                return "\(fmt(powerKW)) kW · \(Int(batteryLevel.rounded()))%"
+            }
             return "\(fmt(powerKW)) kW"
         }
-        let hasPluggedIn = data?.wallConnectors.contains { $0.wallConnectorState == 4.0 } ?? false
-        if hasPluggedIn {
+
+        if let connectedConnector = data.wallConnectors.first(where: \.isVehicleConnected) {
+            if let vin = connectedConnector.vin,
+               let batteryLevel = viewModel.vehicleChargeStates[vin]?.batteryLevel {
+                return "Plugged in · \(Int(batteryLevel.rounded()))%"
+            }
             return "Plugged in"
         }
         return "Idle"

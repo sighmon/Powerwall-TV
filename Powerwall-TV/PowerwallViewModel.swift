@@ -50,6 +50,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var password: String = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
     @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
+    @Published var showVehicles: Bool = UserDefaults.standard.object(forKey: "showVehicles") as? Bool ?? false
     @Published var showInMenuBar: Bool = UserDefaults.standard.bool(forKey: "showInMenuBar")
     @Published var keepWindowInFront: Bool = UserDefaults.standard.bool(forKey: "keepWindowInFront")
     @Published var autoHideSummaryOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideSummaryOnOverlap") as? Bool ?? false
@@ -74,7 +75,7 @@ class PowerwallViewModel: ObservableObject {
     private let clientID = Secrets.clientID
     private let clientSecret = Secrets.clientSecret
     private let redirectURI = "powerwalltv://app/callback"
-    private let scopes = "openid energy_device_data offline_access"
+    private let scopes = "openid energy_device_data vehicle_device_data offline_access"
     private var wiggleWatts = 10.0
 
     // Fleet API-specific properties
@@ -91,9 +92,57 @@ class PowerwallViewModel: ObservableObject {
     @Published var batteryCount: Double?
     @Published var version: String?
     @Published var installationDate: Date?
+    @Published var vehicles: [FleetVehicle] = []
+    @Published var vehicleChargeStates: [String: VehicleChargeSnapshot] = [:]
     private var fleetRegionResolved: Bool = false
     @Published var fleetBaseURL: String = UserDefaults.standard.string(forKey: "fleetBaseURL") ?? "https://fleet-api.prd.na.vn.cloud.tesla.com"
     @Published var electricityMapsAPIKey: String = KeychainWrapper.standard.string(forKey: "electricityMaps_apiKey") ?? ""
+    private let vehicleListRefreshInterval: TimeInterval = 15 * 60
+    private let vehicleChargingRefreshInterval: TimeInterval = 60
+    private let vehicleConnectedRefreshInterval: TimeInterval = 60 * 60
+    private let listedVehicleRefreshInterval: TimeInterval = 60 * 60
+    private let vehicleDataRetryInterval: TimeInterval = 5 * 60
+    private let listedVehicleRequestSpacing: TimeInterval = 2
+    private var lastVehicleListFetchAt: Date?
+    private var lastVehicleDataFetchAt: [String: Date] = [:]
+    private var lastVehicleDataAttemptAt: [String: Date] = [:]
+    private var isFetchingVehicleList = false
+    private var vehicleDataFetchesInFlight = Set<String>()
+    private var hasShownVehicleScopeWarning = false
+
+    private func redactedVIN(_ vin: String) -> String {
+        let suffix = vin.suffix(6)
+        return "...\(suffix)"
+    }
+
+    private func vehicleResponsePreview(from data: Data?) -> String {
+        guard let data = data, !data.isEmpty else { return "<empty>" }
+
+        let text = String(data: data, encoding: .utf8) ?? data.map { String(format: "%02x", $0) }.joined()
+        let maxLength = 1200
+        if text.count > maxLength {
+            return "\(text.prefix(maxLength))...<truncated>"
+        }
+
+        return text
+    }
+
+    private func logVehicleDebug(_ message: String) {
+        #if DEBUG
+        print("Vehicle API: \(message)")
+        #endif
+    }
+
+    private func vehicleDataResponseIsAsleepOrOffline(statusCode: Int, data: Data) -> Bool {
+        guard statusCode == 408,
+              let response = try? JSONDecoder().decode(TeslaAPIErrorResponse.self, from: data) else {
+            return false
+        }
+
+        return response.error.localizedCaseInsensitiveContains("offline")
+            || response.error.localizedCaseInsensitiveContains("asleep")
+            || response.error.localizedCaseInsensitiveContains("unavailable")
+    }
 
     private let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -159,7 +208,7 @@ class PowerwallViewModel: ObservableObject {
 
     @discardableResult
     func startFleetLoginManually() -> Bool {
-        loginWithTeslaFleetAPI(isAutomaticPrompt: false)
+        loginWithTeslaFleetAPI(isAutomaticPrompt: false, promptMissingScopes: true)
     }
 
     // MARK: - Local Login
@@ -216,7 +265,7 @@ class PowerwallViewModel: ObservableObject {
     // MARK: - Tesla Fleet API Login
 
     @discardableResult
-    private func loginWithTeslaFleetAPI(isAutomaticPrompt: Bool = false) -> Bool {
+    private func loginWithTeslaFleetAPI(isAutomaticPrompt: Bool = false, promptMissingScopes: Bool = false) -> Bool {
         if isAutomaticPrompt {
             guard !hasAttemptedAutomaticFleetLogin else { return false }
             hasAttemptedAutomaticFleetLogin = true
@@ -225,9 +274,19 @@ class PowerwallViewModel: ObservableObject {
         guard !isPresentingFleetLogin else { return false }
 
         let state = UUID().uuidString
-        let authURLString = "https://auth.tesla.com/oauth2/v3/authorize?client_id=\(clientID)&redirect_uri=\(redirectURI)&response_type=code&scope=\(scopes)&state=\(state)"
+        var authURLComponents = URLComponents(string: "https://auth.tesla.com/oauth2/v3/authorize")
+        authURLComponents?.queryItems = [
+            URLQueryItem(name: "client_id", value: clientID),
+            URLQueryItem(name: "redirect_uri", value: redirectURI),
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "scope", value: scopes),
+            URLQueryItem(name: "state", value: state)
+        ]
+        if promptMissingScopes {
+            authURLComponents?.queryItems?.append(URLQueryItem(name: "prompt_missing_scopes", value: "true"))
+        }
 
-        guard let authURL = URL(string: authURLString) else {
+        guard let authURL = authURLComponents?.url else {
             errorMessage = "Invalid authorization URL"
             return false
         }
@@ -303,6 +362,7 @@ class PowerwallViewModel: ObservableObject {
             DispatchQueue.main.async {
                 self.accessToken = tokenResponse.access_token
                 self.hasAttemptedAutomaticFleetLogin = false
+                self.hasShownVehicleScopeWarning = false
                 // Save the accessToken to Keychain
                 KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
                 if let refreshToken = tokenResponse.refresh_token {
@@ -368,6 +428,7 @@ class PowerwallViewModel: ObservableObject {
 
             DispatchQueue.main.async {
                 self.accessToken = tokenResponse.access_token
+                self.hasShownVehicleScopeWarning = false
                 KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
                 if let refreshToken = tokenResponse.refresh_token { // Some APIs issue new refresh tokens
                     KeychainWrapper.standard.set(refreshToken, forKey: "fleetAPI_refreshToken")
@@ -472,6 +533,10 @@ class PowerwallViewModel: ObservableObject {
             } receiveValue: { [weak self] productsResponse in
                 guard let self = self else { return }
                 let energySites = productsResponse.response.filter { $0.energySiteId != nil }
+                if self.showVehicles {
+                    self.mergeVehicles(productsResponse.response.compactMap(\.fleetVehicle))
+                    self.fetchListedVehicleDataIfNeeded(force: true)
+                }
                 self.energySites = energySites
                 if energySites.isEmpty {
                     self.errorMessage = "No energy products found"
@@ -520,6 +585,9 @@ class PowerwallViewModel: ObservableObject {
                     self.siteName = currentSite.siteName ?? "Energy Site \(id)"
                     self.fetchFleetAPIData()
                     self.fetchSolarEnergyToday()
+                    if self.showVehicles {
+                        self.fetchListedVehicleDataIfNeeded()
+                    }
                     if self.batteryCount == nil {
                         self.fetchSiteInfo()
                     }
@@ -745,19 +813,270 @@ class PowerwallViewModel: ObservableObject {
                     }
                 }
             } receiveValue: { [weak self] data in
+                guard let self = self else { return }
+
                 let powerwall = PowerwallData(
-                    battery: PowerwallData.Battery(instantPower: data.response.batteryPower, count: self?.batteryCount ?? 0),
+                    battery: PowerwallData.Battery(instantPower: data.response.batteryPower, count: self.batteryCount ?? 0),
                     load: PowerwallData.Load(instantPower: data.response.loadPower),
                     solar: PowerwallData.Solar(instantPower: data.response.solarPower, energyExported: 0),
                     site: PowerwallData.Site(instantPower: data.response.gridPower),
                     wallConnectors: data.response.wallConnectors
                 )
-                self?.persistLastChargingWallConnectorVIN(from: data.response.wallConnectors)
-                self?.data = powerwall
-                self?.batteryPercentage = BatteryPercentage(percentage: data.response.batteryPercentage)
-                self?.gridStatus = GridStatus(status: data.response.gridStatus)
+                self.persistLastChargingWallConnectorVIN(from: data.response.wallConnectors)
+                self.data = powerwall
+                self.batteryPercentage = BatteryPercentage(percentage: data.response.batteryPercentage)
+                self.gridStatus = GridStatus(status: data.response.gridStatus)
+
+                let connectedVINs = self.connectedVehicleVINs(from: data.response.wallConnectors)
+                self.fetchFleetVehiclesIfNeeded(for: connectedVINs)
+                self.fetchVehicleDataIfNeeded(for: data.response.wallConnectors)
             }
             .store(in: &cancellables)
+    }
+
+    private func connectedVehicleVINs(from wallConnectors: [WallConnector]) -> [String] {
+        var vins: [String] = []
+        var seen = Set<String>()
+
+        for wallConnector in wallConnectors {
+            guard wallConnector.isVehicleConnected,
+                  let vin = wallConnector.vin?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !vin.isEmpty,
+                  seen.insert(vin).inserted else {
+                continue
+            }
+            vins.append(vin)
+        }
+
+        return vins
+    }
+
+    private func fetchFleetVehiclesIfNeeded(for candidateVINs: [String]) {
+        guard !candidateVINs.isEmpty, !accessToken.isEmpty else { return }
+
+        let now = Date()
+        let knownVINs = Set(vehicles.map(\.vin))
+        let hasMissingVIN = candidateVINs.contains { !knownVINs.contains($0) }
+        let isStale = lastVehicleListFetchAt.map { now.timeIntervalSince($0) >= vehicleListRefreshInterval } ?? true
+
+        guard (vehicles.isEmpty || hasMissingVIN || isStale), !isFetchingVehicleList else { return }
+        guard let url = URL(string: "\(fleetBaseURL)/api/1/vehicles") else { return }
+
+        isFetchingVehicleList = true
+        logVehicleDebug("GET /vehicles start candidateVINs=\(candidateVINs.map(redactedVIN)) knownVehicles=\(vehicles.count)")
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+
+            defer {
+                DispatchQueue.main.async {
+                    self.isFetchingVehicleList = false
+                }
+            }
+
+            guard error == nil,
+                  let http = response as? HTTPURLResponse,
+                  let data = data else {
+                self.logVehicleDebug("GET /vehicles failed status=\((response as? HTTPURLResponse)?.statusCode.description ?? "nil") error=\(String(describing: error)) body=\(self.vehicleResponsePreview(from: data))")
+                return
+            }
+
+            self.logVehicleDebug("GET /vehicles status=\(http.statusCode) bytes=\(data.count)")
+            if http.statusCode != 200 {
+                self.logVehicleDebug("GET /vehicles non-200 body=\(self.vehicleResponsePreview(from: data))")
+            }
+            guard self.handleVehicleEndpointStatus(http.statusCode) else { return }
+            do {
+                let vehiclesResponse = try JSONDecoder().decode(FleetVehiclesResponse.self, from: data)
+                DispatchQueue.main.async {
+                    self.logVehicleDebug("GET /vehicles decoded count=\(vehiclesResponse.response.count) vins=\(vehiclesResponse.response.map { self.redactedVIN($0.vin) }) states=\(vehiclesResponse.response.map { $0.state ?? "nil" })")
+                    self.mergeVehicles(vehiclesResponse.response)
+                    self.lastVehicleListFetchAt = now
+                    let connectors = self.data?.wallConnectors ?? []
+                    self.fetchVehicleDataIfNeeded(for: connectors)
+                }
+            } catch {
+                self.logVehicleDebug("GET /vehicles decode failed error=\(error) body=\(self.vehicleResponsePreview(from: data))")
+                return
+            }
+        }.resume()
+    }
+
+    private func mergeVehicles(_ incomingVehicles: [FleetVehicle]) {
+        guard !incomingVehicles.isEmpty else { return }
+
+        var vehiclesByVIN = Dictionary(uniqueKeysWithValues: vehicles.map { ($0.vin, $0) })
+        var orderedVINs = vehicles.map(\.vin)
+
+        for incomingVehicle in incomingVehicles {
+            if let existingVehicle = vehiclesByVIN[incomingVehicle.vin] {
+                vehiclesByVIN[incomingVehicle.vin] = existingVehicle.merging(incomingVehicle)
+            } else {
+                vehiclesByVIN[incomingVehicle.vin] = incomingVehicle
+                orderedVINs.append(incomingVehicle.vin)
+            }
+        }
+
+        vehicles = orderedVINs.compactMap { vehiclesByVIN[$0] }
+    }
+
+    private func fetchListedVehicleDataIfNeeded(force: Bool = false) {
+        guard showVehicles, !vehicles.isEmpty, !accessToken.isEmpty else { return }
+
+        let vehicleVINs = vehicles
+            .map(\.vin)
+            .filter { shouldFetchVehicleData(vin: $0, refreshInterval: listedVehicleRefreshInterval, force: force) }
+
+        if !vehicleVINs.isEmpty {
+            logVehicleDebug("listed vehicle_data eligible force=\(force) vins=\(vehicleVINs.map(redactedVIN))")
+        }
+
+        for (index, vin) in vehicleVINs.enumerated() {
+            let delay = listedVehicleRequestSpacing * TimeInterval(index)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self,
+                      self.showVehicles,
+                      self.shouldFetchVehicleData(vin: vin, refreshInterval: self.listedVehicleRefreshInterval, force: force) else {
+                    return
+                }
+                self.fetchVehicleData(vin: vin)
+            }
+        }
+    }
+
+    private func fetchVehicleDataIfNeeded(for wallConnectors: [WallConnector]) {
+        guard !wallConnectors.isEmpty, !accessToken.isEmpty else { return }
+
+        let now = Date()
+        let knownVINs = Set(vehicles.map(\.vin))
+
+        for wallConnector in wallConnectors {
+            guard wallConnector.isVehicleConnected,
+                  let vin = wallConnector.vin?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !vin.isEmpty,
+                  knownVINs.contains(vin) else {
+                continue
+            }
+
+            if vehicleDataFetchesInFlight.contains(vin) {
+                continue
+            }
+
+            let lastFetch = lastVehicleDataFetchAt[vin]
+            let refreshInterval = wallConnector.isVehicleCharging
+                ? vehicleChargingRefreshInterval
+                : vehicleConnectedRefreshInterval
+            let isStale = lastFetch.map { now.timeIntervalSince($0) >= refreshInterval } ?? true
+            let lastAttempt = lastVehicleDataAttemptAt[vin]
+            let canRetry = lastAttempt.map { now.timeIntervalSince($0) >= vehicleDataRetryInterval } ?? true
+            guard isStale && canRetry else { continue }
+
+            fetchVehicleData(vin: vin)
+        }
+    }
+
+    private func shouldFetchVehicleData(vin: String, refreshInterval: TimeInterval, force: Bool = false) -> Bool {
+        guard !vehicleDataFetchesInFlight.contains(vin) else { return false }
+
+        let now = Date()
+        let lastFetch = lastVehicleDataFetchAt[vin]
+        let isStale = lastFetch.map { now.timeIntervalSince($0) >= refreshInterval } ?? true
+        let lastAttempt = lastVehicleDataAttemptAt[vin]
+        let canRetry = lastAttempt.map { now.timeIntervalSince($0) >= vehicleDataRetryInterval } ?? true
+
+        return (force || isStale) && canRetry
+    }
+
+    private func fetchVehicleData(vin: String) {
+        guard !vehicleDataFetchesInFlight.contains(vin) else { return }
+        guard let url = URL(string: "\(fleetBaseURL)/api/1/vehicles/\(vin)/vehicle_data") else { return }
+
+        vehicleDataFetchesInFlight.insert(vin)
+        lastVehicleDataAttemptAt[vin] = Date()
+        logVehicleDebug("GET /vehicles/\(redactedVIN(vin))/vehicle_data start")
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+
+            defer {
+                DispatchQueue.main.async {
+                    self.vehicleDataFetchesInFlight.remove(vin)
+                }
+            }
+
+            guard error == nil,
+                  let http = response as? HTTPURLResponse,
+                  let data = data else {
+                self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data failed status=\((response as? HTTPURLResponse)?.statusCode.description ?? "nil") error=\(String(describing: error)) body=\(self.vehicleResponsePreview(from: data))")
+                return
+            }
+
+            self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data status=\(http.statusCode) bytes=\(data.count)")
+            if http.statusCode != 200 {
+                self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data non-200 body=\(self.vehicleResponsePreview(from: data))")
+            }
+            if self.vehicleDataResponseIsAsleepOrOffline(statusCode: http.statusCode, data: data) {
+                self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data unavailable because vehicle is asleep/offline")
+                DispatchQueue.main.async {
+                    self.vehicleChargeStates.removeValue(forKey: vin)
+                    self.lastVehicleDataFetchAt[vin] = Date()
+                }
+                return
+            }
+            guard self.handleVehicleEndpointStatus(http.statusCode) else { return }
+            let vehicleData: VehicleDataResponse
+            do {
+                vehicleData = try JSONDecoder().decode(VehicleDataResponse.self, from: data)
+            } catch {
+                self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data decode failed error=\(error) body=\(self.vehicleResponsePreview(from: data))")
+                return
+            }
+
+            guard let chargeState = vehicleData.response.chargeState else {
+                self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data missing charge_state body=\(self.vehicleResponsePreview(from: data))")
+                return
+            }
+
+            self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data charge_state battery_level=\(String(describing: chargeState.batteryLevel)) charging_state=\(String(describing: chargeState.chargingState)) minutes_to_full_charge=\(String(describing: chargeState.minutesToFullCharge))")
+
+            let snapshot = VehicleChargeSnapshot(
+                batteryLevel: chargeState.batteryLevel,
+                chargingState: chargeState.chargingState,
+                minutesToFullCharge: chargeState.minutesToFullCharge
+            )
+
+            DispatchQueue.main.async {
+                self.vehicleChargeStates[vin] = snapshot
+                self.lastVehicleDataFetchAt[vin] = Date()
+            }
+        }.resume()
+    }
+
+    private func handleVehicleEndpointStatus(_ statusCode: Int) -> Bool {
+        switch statusCode {
+        case 200:
+            return true
+        case 401:
+            DispatchQueue.main.async {
+                self.refreshAccessToken()
+            }
+            return false
+        case 403:
+            DispatchQueue.main.async {
+                guard !self.hasShownVehicleScopeWarning else { return }
+                self.infoMessage = "Re-login to grant vehicle charge data access."
+                self.hasShownVehicleScopeWarning = true
+            }
+            return false
+        default:
+            return false
+        }
     }
 
     private func fetchPowerHistory(completion: @escaping (Result<[HistoricalDataPoint], Error>) -> Void) {
@@ -1021,15 +1340,71 @@ struct ProductsResponse: Codable {
     let count: Int
 }
 
+struct FleetVehiclesResponse: Codable {
+    let response: [FleetVehicle]
+}
+
+struct TeslaAPIErrorResponse: Codable {
+    let error: String
+    let errorDescription: String?
+    let txid: String?
+
+    enum CodingKeys: String, CodingKey {
+        case error
+        case errorDescription = "error_description"
+        case txid
+    }
+}
+
+struct FleetVehicle: Codable {
+    let vin: String
+    let displayName: String?
+    let state: String?
+
+    enum CodingKeys: String, CodingKey {
+        case vin
+        case displayName = "display_name"
+        case state
+    }
+
+    func merging(_ other: FleetVehicle) -> FleetVehicle {
+        FleetVehicle(
+            vin: vin,
+            displayName: other.displayName ?? displayName,
+            state: other.state ?? state
+        )
+    }
+}
+
 struct Product: Codable {
     let deviceType: String?
     let energySiteId: Int?
     let siteName: String?
+    let vin: String?
+    let displayName: String?
+    let state: String?
 
     enum CodingKeys: String, CodingKey {
         case deviceType = "device_type"
         case energySiteId = "energy_site_id"
         case siteName = "site_name"
+        case vin
+        case displayName = "display_name"
+        case state
+    }
+
+    var fleetVehicle: FleetVehicle? {
+        guard deviceType == "vehicle",
+              let normalizedVIN = vin?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalizedVIN.isEmpty else {
+            return nil
+        }
+
+        return FleetVehicle(
+            vin: normalizedVIN,
+            displayName: displayName,
+            state: state
+        )
     }
 }
 
@@ -1068,6 +1443,14 @@ struct WallConnector: Codable {
         case din
         case wallConnectorState = "wall_connector_state"
         case wallConnectorPower = "wall_connector_power"
+    }
+}
+
+extension WallConnector {
+    var isVehicleCharging: Bool { wallConnectorState == 1.0 }
+
+    var isVehicleConnected: Bool {
+        isVehicleCharging || wallConnectorState == 4.0
     }
 }
 
@@ -1259,6 +1642,36 @@ struct RegionResponse: Codable {
 
 struct ElectricityMapsResponse: Codable {
     let data: ElectricityMapsData
+}
+
+struct VehicleDataResponse: Codable {
+    let response: VehicleData
+}
+
+struct VehicleData: Codable {
+    let chargeState: VehicleChargeState?
+
+    enum CodingKeys: String, CodingKey {
+        case chargeState = "charge_state"
+    }
+}
+
+struct VehicleChargeState: Codable {
+    let batteryLevel: Double?
+    let chargingState: String?
+    let minutesToFullCharge: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case batteryLevel = "battery_level"
+        case chargingState = "charging_state"
+        case minutesToFullCharge = "minutes_to_full_charge"
+    }
+}
+
+struct VehicleChargeSnapshot {
+    let batteryLevel: Double?
+    let chargingState: String?
+    let minutesToFullCharge: Double?
 }
 
 struct ElectricityMapsData: Codable {
