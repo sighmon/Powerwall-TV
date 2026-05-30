@@ -1238,6 +1238,11 @@ class PowerwallViewModel: ObservableObject {
         retryCount: Int = 3,
         completion: @escaping (Result<Void, Error>) -> Void
     ) {
+        if mode.islandModeValue != nil {
+            setPowerwallIslandMode(mode, retryCount: retryCount, completion: completion)
+            return
+        }
+
         if accessToken.isEmpty {
             completion(.failure(NSError(domain: "Fleet API", code: 0, userInfo: [
                 NSLocalizedDescriptionKey: "Must log in first"
@@ -1257,7 +1262,13 @@ class PowerwallViewModel: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONEncoder().encode(["default_real_mode": mode.fleetAPIValue])
+        guard let fleetOperationValue = mode.fleetOperationValue else {
+            completion(.failure(NSError(domain: "Fleet API", code: 0, userInfo: [
+                NSLocalizedDescriptionKey: "\(mode.title) is not a Fleet operation mode"
+            ])))
+            return
+        }
+        request.httpBody = try? JSONEncoder().encode(["default_real_mode": fleetOperationValue])
 
         fleetURLSession.dataTask(with: request) { [weak self] data, response, error in
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -1322,6 +1333,100 @@ class PowerwallViewModel: ObservableObject {
         let delay = min(pow(2.0, Double(attempt - 1)), 8.0)
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.setPowerwallOperationMode(mode, retryCount: retryCount - 1, completion: completion)
+        }
+    }
+
+    private func setPowerwallIslandMode(
+        _ mode: PowerwallOperationMode,
+        retryCount: Int,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard let islandModeValue = mode.islandModeValue else {
+            completion(.failure(NSError(domain: "Powerwall Gateway", code: 0, userInfo: [
+                NSLocalizedDescriptionKey: "\(mode.title) is not an islanding mode"
+            ])))
+            return
+        }
+
+        guard !ipAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !password.isEmpty,
+              let url = URL(string: "https://\(ipAddress)/api/v2/islanding/mode") else {
+            let message = "\(mode.title) scheduling requires local Gateway IP and password. Tesla Fleet API does not expose Go Off-Grid or Reconnect to Grid."
+            DispatchQueue.main.async {
+                self.infoMessage = message
+            }
+            completion(.failure(NSError(domain: "Powerwall Gateway", code: 0, userInfo: [
+                NSLocalizedDescriptionKey: message
+            ])))
+            return
+        }
+
+        localLogin(ipAddress: ipAddress, password: password) { [weak self] success in
+            guard let self else { return }
+            guard success else {
+                completion(.failure(NSError(domain: "Powerwall Gateway", code: 0, userInfo: [
+                    NSLocalizedDescriptionKey: "Local Gateway login failed"
+                ])))
+                return
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONEncoder().encode(["island_mode": islandModeValue])
+
+            self.localURLSession.dataTask(with: request) { [weak self] data, response, error in
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+                if let error {
+                    self?.retrySetPowerwallIslandMode(
+                        mode,
+                        retryCount: retryCount,
+                        error: error,
+                        completion: completion
+                    )
+                    return
+                }
+
+                guard (200...299).contains(statusCode) else {
+                    let message = data.flatMap { String(data: $0, encoding: .utf8) } ?? "HTTP \(statusCode)"
+                    let apiError = NSError(domain: "Powerwall Gateway", code: statusCode, userInfo: [
+                        NSLocalizedDescriptionKey: "\(mode.title) update failed: \(message)"
+                    ])
+                    self?.retrySetPowerwallIslandMode(
+                        mode,
+                        retryCount: retryCount,
+                        error: apiError,
+                        completion: completion
+                    )
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    self?.infoMessage = "Powerwall set to \(mode.title)"
+                    completion(.success(()))
+                }
+            }.resume()
+        }
+    }
+
+    private func retrySetPowerwallIslandMode(
+        _ mode: PowerwallOperationMode,
+        retryCount: Int,
+        error: Error,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard retryCount > 0 else {
+            DispatchQueue.main.async {
+                completion(.failure(error))
+            }
+            return
+        }
+
+        let attempt = max(1, 4 - retryCount)
+        let delay = min(pow(2.0, Double(attempt - 1)), 8.0)
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.setPowerwallIslandMode(mode, retryCount: retryCount - 1, completion: completion)
         }
     }
 

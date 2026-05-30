@@ -9,6 +9,7 @@ enum PowerwallOperationMode: String, Codable, CaseIterable, Identifiable {
     case selfPowered
     case timeBasedControl
     case offGrid
+    case onGrid
 
     var id: String { rawValue }
 
@@ -20,17 +21,30 @@ enum PowerwallOperationMode: String, Codable, CaseIterable, Identifiable {
             return "Time-Based Control"
         case .offGrid:
             return "Off-Grid"
+        case .onGrid:
+            return "On-Grid"
         }
     }
 
-    var fleetAPIValue: String {
+    var fleetOperationValue: String? {
         switch self {
         case .selfPowered:
             return "self_consumption"
         case .timeBasedControl:
             return "autonomous"
+        case .offGrid, .onGrid:
+            return nil
+        }
+    }
+
+    var islandModeValue: String? {
+        switch self {
         case .offGrid:
+            return "intentional_reconnect_failsafe"
+        case .onGrid:
             return "backup"
+        case .selfPowered, .timeBasedControl:
+            return nil
         }
     }
 }
