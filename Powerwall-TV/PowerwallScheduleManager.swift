@@ -40,6 +40,10 @@ final class PowerwallScheduleManager: ObservableObject {
         schedules.remove(atOffsets: offsets)
     }
 
+    func deleteSchedule(id: UUID) {
+        schedules.removeAll { $0.id == id }
+    }
+
     func update(_ schedule: PowerwallSchedule) {
         guard let index = schedules.firstIndex(where: { $0.id == schedule.id }) else { return }
         schedules[index] = schedule
