@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var animations = true
     @State private var showingSettings = false
     @State private var showingGraph = false
+    @State private var showingScheduler = false
     @State private var wiggleWatts = 40.0
     @State private var startAnimations = false
     @State private var precision = "%.3f"
@@ -155,6 +156,14 @@ struct ContentView: View {
                         .ignoresSafeArea()
                 )
         }
+        .sheet(isPresented: $showingScheduler) {
+            SchedulerView(viewModel: viewModel)
+                .background(
+                    Color.clear
+                        .background(.regularMaterial)
+                        .ignoresSafeArea()
+                )
+        }
 #else
         .fullScreenCover(isPresented: $showingSettings) {
             SettingsView(
@@ -195,11 +204,22 @@ struct ContentView: View {
                         .ignoresSafeArea()
                 )
         }
+        .fullScreenCover(isPresented: $showingScheduler) {
+            SchedulerView(viewModel: viewModel)
+                .background(
+                    Color.clear
+                        .background(.regularMaterial)
+                        .ignoresSafeArea()
+                )
+        }
 #endif
         .onReceive(timer) { _ in
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
             if showingSettings {
                 return
+            }
+            if viewModel.loginMode == .fleetAPI {
+                PowerwallScheduleManager.shared.applyDueSchedules(using: viewModel)
             }
             if viewModel.ipAddress == "demo" {
                 let homeLoad = Double(arc4random_uniform(4096)) + 256
@@ -245,6 +265,7 @@ struct ContentView: View {
             if demo {
                 viewModel.ipAddress = "demo"
             }
+            PowerwallScheduleManager.shared.scheduleBackgroundRefresh()
             if shouldAutoOpenSettingsOnLaunch {
                 showingSettings = true
             } else if viewModel.ipAddress == "demo" {
@@ -328,12 +349,12 @@ struct ContentView: View {
             hasKeyboardFocus = true
         }
         .onKeyPress(.upArrow, phases: .down) { _ in
-            guard !showingGraph else { return .ignored }
+            guard !showingGraph, !showingScheduler else { return .ignored }
             updateEnergySite(-1)
             return .handled
         }
         .onKeyPress(.downArrow, phases: .down) { _ in
-            guard !showingGraph else { return .ignored }
+            guard !showingGraph, !showingScheduler else { return .ignored }
             updateEnergySite(+1)
             return .handled
         }
@@ -773,6 +794,33 @@ struct ContentView: View {
                 .environment(\.colorScheme, .dark)
 
                 if viewModel.loginMode == .fleetAPI {
+                    Button(action: {
+                        revealAutoHiddenOverlays()
+                        showingScheduler = true
+                    }) {
+                        ZStack {
+                            Image(systemName: "calendar.badge.clock")
+#if os(macOS)
+                                .font(.system(size: 18, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.primary)
+                                .frame(width: 40, height: 40)
+#elseif os(iOS)
+                                .font(.system(size: 24, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.gray)
+                                .frame(width: 40, height: 40)
+#else
+                                .font(.title3)
+                                .frame(width: 80, height: 80)
+#endif
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .accessibilityLabel("Scheduler")
+                    .environment(\.colorScheme, .dark)
+
                     Button(action: {
                         revealAutoHiddenOverlays()
                         showingGraph = true
@@ -1236,7 +1284,7 @@ struct ContentView: View {
 #endif
 
     private func handleSiteSwipe(_ translation: CGSize) {
-        guard !showingGraph else { return }
+        guard !showingGraph, !showingScheduler else { return }
         let threshold: CGFloat = 40
         let absX = abs(translation.width)
         let absY = abs(translation.height)

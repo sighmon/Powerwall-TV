@@ -70,12 +70,13 @@ class PowerwallViewModel: ObservableObject {
     @Published var gridStatus: GridStatus?
     @Published var errorMessage: String?
     @Published var infoMessage: String?
+    @Published var fleetCommandPermissionWarning: String?
 
     // Tesla Fleet API credentials (replace with your actual values)
     private let clientID = Secrets.clientID
     private let clientSecret = Secrets.clientSecret
     private let redirectURI = "powerwalltv://app/callback"
-    private let scopes = "openid energy_device_data vehicle_device_data offline_access"
+    private let scopes = "openid energy_device_data vehicle_device_data energy_cmds offline_access"
     private var wiggleWatts = 10.0
 
     // Fleet API-specific properties
@@ -363,6 +364,7 @@ class PowerwallViewModel: ObservableObject {
                 self.accessToken = tokenResponse.access_token
                 self.hasAttemptedAutomaticFleetLogin = false
                 self.hasShownVehicleScopeWarning = false
+                self.fleetCommandPermissionWarning = nil
                 // Save the accessToken to Keychain
                 KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
                 if let refreshToken = tokenResponse.refresh_token {
@@ -429,6 +431,7 @@ class PowerwallViewModel: ObservableObject {
             DispatchQueue.main.async {
                 self.accessToken = tokenResponse.access_token
                 self.hasShownVehicleScopeWarning = false
+                self.fleetCommandPermissionWarning = nil
                 KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
                 if let refreshToken = tokenResponse.refresh_token { // Some APIs issue new refresh tokens
                     KeychainWrapper.standard.set(refreshToken, forKey: "fleetAPI_refreshToken")
@@ -1228,6 +1231,98 @@ class PowerwallViewModel: ObservableObject {
                 self?.installationDate = payload.response.installationDate
             }
         }.resume()
+    }
+
+    func setPowerwallOperationMode(
+        _ mode: PowerwallOperationMode,
+        retryCount: Int = 3,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        if accessToken.isEmpty {
+            completion(.failure(NSError(domain: "Fleet API", code: 0, userInfo: [
+                NSLocalizedDescriptionKey: "Must log in first"
+            ])))
+            return
+        }
+
+        guard let energySiteId = energySiteId,
+              let url = URL(string: "\(fleetBaseURL)/api/1/energy_sites/\(energySiteId)/operation") else {
+            completion(.failure(NSError(domain: "Fleet API", code: 0, userInfo: [
+                NSLocalizedDescriptionKey: "No energy site ID"
+            ])))
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(["default_real_mode": mode.fleetAPIValue])
+
+        fleetURLSession.dataTask(with: request) { [weak self] data, response, error in
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+            if statusCode == 401 || statusCode == 403 {
+                let warning = "Re-login to grant Powerwall command access for scheduled mode changes."
+                DispatchQueue.main.async {
+                    self?.fleetCommandPermissionWarning = warning
+                    self?.infoMessage = warning
+                    completion(.failure(NSError(domain: "Fleet API", code: statusCode, userInfo: [
+                        NSLocalizedDescriptionKey: warning
+                    ])))
+                }
+                return
+            }
+
+            if let error = error {
+                self?.retrySetPowerwallOperationMode(
+                    mode,
+                    retryCount: retryCount,
+                    error: error,
+                    completion: completion
+                )
+                return
+            }
+
+            guard (200...299).contains(statusCode) else {
+                let message = data.flatMap { String(data: $0, encoding: .utf8) } ?? "HTTP \(statusCode)"
+                let apiError = NSError(domain: "Fleet API", code: statusCode, userInfo: [
+                    NSLocalizedDescriptionKey: "Operation mode update failed: \(message)"
+                ])
+                self?.retrySetPowerwallOperationMode(
+                    mode,
+                    retryCount: retryCount,
+                    error: apiError,
+                    completion: completion
+                )
+                return
+            }
+
+            DispatchQueue.main.async {
+                self?.infoMessage = "Powerwall mode set to \(mode.title)"
+                completion(.success(()))
+            }
+        }.resume()
+    }
+
+    private func retrySetPowerwallOperationMode(
+        _ mode: PowerwallOperationMode,
+        retryCount: Int,
+        error: Error,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard retryCount > 0 else {
+            DispatchQueue.main.async {
+                completion(.failure(error))
+            }
+            return
+        }
+
+        let attempt = max(1, 4 - retryCount)
+        let delay = min(pow(2.0, Double(attempt - 1)), 8.0)
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.setPowerwallOperationMode(mode, retryCount: retryCount - 1, completion: completion)
+        }
     }
 
     private func fetchSOEHistory(completion: @escaping (Result<[HistoricalDataPoint], Error>) -> Void) {
