@@ -14,6 +14,8 @@ struct SchedulerView: View {
         Group {
 #if os(macOS)
             macOSBody
+#elseif os(tvOS)
+            tvOSBody
 #else
             navigationBody
 #endif
@@ -43,8 +45,8 @@ struct SchedulerView: View {
                         }
                         .padding(.vertical, 6)
                     } else {
-                        ForEach($scheduleManager.schedules) { $schedule in
-                            PowerwallScheduleRow(schedule: $schedule)
+                        ForEach(scheduleManager.schedules) { schedule in
+                            PowerwallScheduleRow(schedule: binding(for: schedule))
                         }
                         .onDelete(perform: scheduleManager.deleteSchedules)
                     }
@@ -93,6 +95,74 @@ struct SchedulerView: View {
         }
     }
 
+#if os(tvOS)
+    private var tvOSBody: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 32) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        schedulerControls
+                    }
+
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("Schedules")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+
+                        if scheduleManager.schedules.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("No schedules")
+                                    .foregroundStyle(.secondary)
+                                Button {
+                                    scheduleManager.addSchedule()
+                                } label: {
+                                    Label("Create Schedule", systemImage: "calendar.badge.plus")
+                                }
+                            }
+                        } else {
+                            ForEach(scheduleManager.schedules) { schedule in
+                                VStack(alignment: .leading, spacing: 18) {
+                                    HStack(alignment: .top, spacing: 20) {
+                                        PowerwallScheduleRow(schedule: binding(for: schedule))
+                                        Button(role: .destructive) {
+                                            scheduleManager.deleteSchedule(id: schedule.id)
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
+                                    if schedule.id != scheduleManager.schedules.last?.id {
+                                        Divider()
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 16) {
+                        runControls
+                    }
+                }
+                .padding(48)
+            }
+            .navigationTitle("Powerwall Scheduler")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        scheduleManager.addSchedule()
+                    } label: {
+                        Label("Add Schedule", systemImage: "plus")
+                    }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+#endif
+
 #if os(macOS)
     private var macOSBody: some View {
         VStack(spacing: 0) {
@@ -137,10 +207,10 @@ struct SchedulerView: View {
                                     }
                                 }
                             } else {
-                                ForEach($scheduleManager.schedules) { $schedule in
+                                ForEach(scheduleManager.schedules) { schedule in
                                     VStack(alignment: .leading, spacing: 8) {
                                         HStack(alignment: .top) {
-                                            PowerwallScheduleRow(schedule: $schedule)
+                                            PowerwallScheduleRow(schedule: binding(for: schedule))
                                             Button {
                                                 scheduleManager.deleteSchedule(id: schedule.id)
                                             } label: {
@@ -172,6 +242,14 @@ struct SchedulerView: View {
         .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 680)
     }
 #endif
+
+    private func binding(for schedule: PowerwallSchedule) -> Binding<PowerwallSchedule> {
+        Binding {
+            scheduleManager.schedules.first { $0.id == schedule.id } ?? schedule
+        } set: { updatedSchedule in
+            scheduleManager.update(updatedSchedule)
+        }
+    }
 
     private var schedulerControls: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -222,23 +300,37 @@ private struct PowerwallScheduleRow: View {
                 Toggle("Schedule Enabled", isOn: $schedule.isEnabled)
             }
 
-            Picker("Start Mode", selection: $schedule.startMode) {
-                ForEach(PowerwallOperationMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
+            ScheduleModePicker(title: "Start Mode", mode: $schedule.startMode)
 
             ScheduleTimePicker(title: "Start", minutes: $schedule.startMinutes)
 
-            Picker("End Mode", selection: $schedule.endMode) {
-                ForEach(PowerwallOperationMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
+            ScheduleModePicker(title: "End Mode", mode: $schedule.endMode)
 
             ScheduleTimePicker(title: "End", minutes: $schedule.endMinutes)
         }
         .padding(.vertical, 6)
+    }
+}
+
+private struct ScheduleModePicker: View {
+    let title: String
+    @Binding var mode: PowerwallOperationMode
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+            Picker(title, selection: $mode) {
+                ForEach(PowerwallOperationMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+#if os(tvOS)
+            .pickerStyle(.navigationLink)
+#elseif os(iOS)
+            .pickerStyle(.menu)
+            .labelsHidden()
+#endif
+        }
     }
 }
 
@@ -247,9 +339,11 @@ private struct ScheduleTimePicker: View {
     @Binding var minutes: Int
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Text(title)
+#if !os(iOS)
             Spacer()
+#endif
             Picker("Hour", selection: hourBinding) {
                 ForEach(0..<24, id: \.self) { hour in
                     Text(String(format: "%02d", hour)).tag(hour)
@@ -257,6 +351,10 @@ private struct ScheduleTimePicker: View {
             }
 #if os(tvOS)
             .pickerStyle(.navigationLink)
+#elseif os(iOS)
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(width: 70)
 #else
             .frame(minWidth: 110)
 #endif
@@ -267,6 +365,10 @@ private struct ScheduleTimePicker: View {
             }
 #if os(tvOS)
             .pickerStyle(.navigationLink)
+#elseif os(iOS)
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(width: 70)
 #else
             .frame(minWidth: 110)
 #endif
