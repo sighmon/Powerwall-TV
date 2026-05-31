@@ -132,6 +132,7 @@ struct ContentView: View {
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
                 showVehicles: $viewModel.showVehicles,
+                showSchedulerButton: $viewModel.showSchedulerButton,
                 showInMenuBar: $viewModel.showInMenuBar,
                 keepWindowInFront: $viewModel.keepWindowInFront,
                 autoHideSummaryOnOverlap: $viewModel.autoHideSummaryOnOverlap,
@@ -180,6 +181,7 @@ struct ContentView: View {
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
                 showVehicles: $viewModel.showVehicles,
+                showSchedulerButton: $viewModel.showSchedulerButton,
                 showInMenuBar: $viewModel.showInMenuBar,
                 keepWindowInFront: $viewModel.keepWindowInFront,
                 autoHideSummaryOnOverlap: $viewModel.autoHideSummaryOnOverlap,
@@ -783,7 +785,7 @@ struct ContentView: View {
 
     private func controlsOverlay(sceneSize: CGSize) -> some View {
         HStack(alignment: .bottom) {
-            HStack {
+            HStack(spacing: controlsButtonSpacing) {
                 Button(action: {
                     revealAutoHiddenOverlays()
                     showingSettings = true
@@ -812,32 +814,34 @@ struct ContentView: View {
                 .environment(\.colorScheme, .dark)
 
                 if viewModel.loginMode == .fleetAPI {
-                    Button(action: {
-                        revealAutoHiddenOverlays()
-                        showingScheduler = true
-                    }) {
-                        ZStack {
-                            Image(systemName: "calendar.badge.clock")
+                    if viewModel.showSchedulerButton {
+                        Button(action: {
+                            revealAutoHiddenOverlays()
+                            showingScheduler = true
+                        }) {
+                            ZStack {
+                                Image(systemName: "calendar.badge.clock")
 #if os(macOS)
-                                .font(.system(size: 18, weight: .semibold))
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(.primary)
-                                .frame(width: 40, height: 40)
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .symbolRenderingMode(.hierarchical)
+                                    .foregroundStyle(.primary)
+                                    .frame(width: 40, height: 40)
 #elseif os(iOS)
-                                .font(.system(size: 24, weight: .semibold))
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(.gray)
-                                .frame(width: 40, height: 40)
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .symbolRenderingMode(.hierarchical)
+                                    .foregroundStyle(.gray)
+                                    .frame(width: 40, height: 40)
 #else
-                                .font(.title3)
-                                .frame(width: 80, height: 80)
+                                    .font(.title3)
+                                    .frame(width: 80, height: 80)
 #endif
+                            }
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .accessibilityLabel("Scheduler")
+                        .environment(\.colorScheme, .dark)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .accessibilityLabel("Scheduler")
-                    .environment(\.colorScheme, .dark)
 
                     Button(action: {
                         revealAutoHiddenOverlays()
@@ -891,6 +895,14 @@ struct ContentView: View {
                 .allowsHitTesting(!hideControlsOverlay)
             }
         }
+    }
+
+    private var controlsButtonSpacing: CGFloat? {
+#if os(tvOS)
+        24
+#else
+        nil
+#endif
     }
 
     private func vehicleStatusView(vehicle: FleetVehicle, labelFont: Font) -> some View {

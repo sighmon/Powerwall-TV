@@ -51,6 +51,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
     @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
     @Published var showVehicles: Bool = UserDefaults.standard.object(forKey: "showVehicles") as? Bool ?? false
+    @Published var showSchedulerButton: Bool = UserDefaults.standard.object(forKey: "showSchedulerButton") as? Bool ?? true
     @Published var showInMenuBar: Bool = UserDefaults.standard.bool(forKey: "showInMenuBar")
     @Published var keepWindowInFront: Bool = UserDefaults.standard.bool(forKey: "keepWindowInFront")
     @Published var autoHideSummaryOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideSummaryOnOverlap") as? Bool ?? false

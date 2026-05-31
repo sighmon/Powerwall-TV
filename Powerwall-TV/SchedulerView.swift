@@ -316,7 +316,7 @@ private struct PowerwallScheduleRow: View {
     }
 
     private var scheduleSummary: String {
-        "Schedule: \(schedule.startMode.title) ~> \(durationSummary) ~> \(schedule.endMode.title)"
+        "Schedule: \(schedule.startMode.title) for \(durationSummary) then \(schedule.endMode.title)"
     }
 
     private var durationSummary: String {
