@@ -715,6 +715,7 @@ struct ContentView: View {
             label = label
                 + Text(" · ")
                 + Text(Image(systemName: "alarm.fill"))
+                    .foregroundColor(isWithinEnabledScheduleWindow ? .green : .white)
 
             if activeScheduleCount > 1 {
                 label = label + Text(" \(activeScheduleCount)")
@@ -722,6 +723,27 @@ struct ContentView: View {
         }
 
         return label
+    }
+
+    private var isWithinEnabledScheduleWindow: Bool {
+        let now = Date()
+        let components = Calendar.current.dateComponents([.hour, .minute], from: now)
+        guard let hour = components.hour, let minute = components.minute else { return false }
+
+        let currentMinutes = (hour * 60) + minute
+        return scheduleManager.schedules
+            .filter(\.isEnabled)
+            .contains { schedule in
+                if schedule.startMinutes == schedule.endMinutes {
+                    return true
+                }
+
+                if schedule.startMinutes < schedule.endMinutes {
+                    return currentMinutes >= schedule.startMinutes && currentMinutes < schedule.endMinutes
+                }
+
+                return currentMinutes >= schedule.startMinutes || currentMinutes < schedule.endMinutes
+            }
     }
 
     private func wallConnectorMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
