@@ -18,6 +18,7 @@ func formatPowerValue(_ value: Double, precision: String, showLessPrecision: Boo
 
 struct ContentView: View {
     @ObservedObject var viewModel: PowerwallViewModel
+    @ObservedObject private var scheduleManager = PowerwallScheduleManager.shared
     @State private var demo = false
     @State private var animations = true
     @State private var showingSettings = false
@@ -696,12 +697,29 @@ struct ContentView: View {
             .fontWeight(.bold)
             .font(valueFont)
 
-            Text("POWERWALL\(viewModel.batteryCountString())")
+            powerwallLabel
                 .opacity(0.6)
                 .fontWeight(.bold)
                 .font(labelFont)
         }
         .multilineTextAlignment(.center)
+    }
+
+    private var powerwallLabel: Text {
+        let activeScheduleCount = scheduleManager.schedules.filter(\.isEnabled).count
+        var label = Text("POWERWALL\(viewModel.batteryCountString())")
+
+        if scheduleManager.isSchedulerEnabled && activeScheduleCount > 0 {
+            label = label
+                + Text(" · ")
+                + Text(Image(systemName: "alarm.fill"))
+
+            if activeScheduleCount > 1 {
+                label = label + Text(" \(activeScheduleCount)")
+            }
+        }
+
+        return label
     }
 
     private func wallConnectorMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {

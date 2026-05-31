@@ -307,8 +307,38 @@ private struct PowerwallScheduleRow: View {
             ScheduleModePicker(title: "End Mode", mode: $schedule.endMode)
 
             ScheduleTimePicker(title: "End", minutes: $schedule.endMinutes)
+
+            Text(scheduleSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
+    }
+
+    private var scheduleSummary: String {
+        "Schedule: \(schedule.startMode.title) ~> \(durationSummary) ~> \(schedule.endMode.title)"
+    }
+
+    private var durationSummary: String {
+        let minutesPerDay = 24 * 60
+        let rawDuration = (schedule.endMinutes - schedule.startMinutes + minutesPerDay) % minutesPerDay
+        let duration = rawDuration == 0 ? minutesPerDay : rawDuration
+        let hours = duration / 60
+        let minutes = duration % 60
+
+        if hours == 0 {
+            return pluralized(minutes, singular: "minute")
+        }
+
+        if minutes == 0 {
+            return pluralized(hours, singular: "hour")
+        }
+
+        return "\(pluralized(hours, singular: "hour")) \(pluralized(minutes, singular: "minute"))"
+    }
+
+    private func pluralized(_ value: Int, singular: String) -> String {
+        "\(value) \(singular)\(value == 1 ? "" : "s")"
     }
 }
 
