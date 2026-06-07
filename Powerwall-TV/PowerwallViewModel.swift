@@ -84,6 +84,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var accessToken: String = KeychainWrapper.standard.string(forKey: "fleetAPI_accessToken") ?? ""
     @Published var energySiteId: String?
     @Published var siteName: String?
+    private var energySiteNameCache: [String: String] = UserDefaults.standard.dictionary(forKey: "fleetEnergySiteNames") as? [String: String] ?? [:]
     @Published var batteryPowerHistory: [HistoricalDataPoint] = []
     @Published var batteryPercentageHistory: [HistoricalDataPoint] = []
     @Published var solarPowerHistory: [HistoricalDataPoint] = []
@@ -585,8 +586,9 @@ class PowerwallViewModel: ObservableObject {
             if !self.energySites.isEmpty {
                 let currentSite = self.energySites[self.currentEnergySiteIndex]
                 if let id = currentSite.energySiteId {
-                    self.energySiteId = String(id)
-                    self.siteName = currentSite.siteName ?? "Energy Site \(id)"
+                    let siteId = String(id)
+                    self.energySiteId = siteId
+                    self.applyEnergySiteDisplayName(for: siteId, preferred: currentSite.energySiteDisplayName)
                     self.fetchFleetAPIData()
                     self.fetchSolarEnergyToday()
                     if self.showVehicles {
@@ -1212,6 +1214,7 @@ class PowerwallViewModel: ObservableObject {
 
     func fetchSiteInfo() {
         guard let energySiteId = energySiteId else { return }
+        let requestedEnergySiteId = energySiteId
 
         let urlStr = "\(fleetBaseURL)/api/1/energy_sites/\(energySiteId)/site_info"
         guard let url = URL(string: urlStr) else { return }
@@ -1227,11 +1230,27 @@ class PowerwallViewModel: ObservableObject {
             else { return }
 
             DispatchQueue.main.async {
-                self?.batteryCount = payload.response.batteryCount
-                self?.version = payload.response.version
-                self?.installationDate = payload.response.installationDate
+                guard let self, self.energySiteId == requestedEnergySiteId else { return }
+
+                self.batteryCount = payload.response.batteryCount
+                self.version = payload.response.version
+                self.installationDate = payload.response.installationDate
+                if let siteName = payload.response.energySiteDisplayName {
+                    self.applyEnergySiteDisplayName(for: requestedEnergySiteId, preferred: siteName)
+                }
             }
         }.resume()
+    }
+
+    private func applyEnergySiteDisplayName(for siteId: String, preferred siteName: String?) {
+        if let siteName {
+            energySiteNameCache[siteId] = siteName
+            UserDefaults.standard.set(energySiteNameCache, forKey: "fleetEnergySiteNames")
+            self.siteName = siteName
+            return
+        }
+
+        self.siteName = energySiteNameCache[siteId]
     }
 
     func setPowerwallOperationMode(
@@ -1545,6 +1564,23 @@ struct FleetVehiclesResponse: Codable {
     let response: [FleetVehicle]
 }
 
+private func normalizedSiteName(_ rawValue: String?, siteId: String?) -> String? {
+    guard let rawValue else { return nil }
+
+    let name = rawValue
+        .components(separatedBy: .whitespacesAndNewlines)
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+
+    guard !name.isEmpty else { return nil }
+
+    if let siteId, name.caseInsensitiveCompare("Energy Site \(siteId)") == .orderedSame {
+        return nil
+    }
+
+    return name
+}
+
 struct TeslaAPIErrorResponse: Codable {
     let error: String
     let errorDescription: String?
@@ -1581,17 +1617,36 @@ struct Product: Codable {
     let deviceType: String?
     let energySiteId: Int?
     let siteName: String?
+    let name: String?
+    let title: String?
     let vin: String?
     let displayName: String?
+    let siteDisplayName: String?
     let state: String?
 
     enum CodingKeys: String, CodingKey {
         case deviceType = "device_type"
         case energySiteId = "energy_site_id"
         case siteName = "site_name"
+        case name
+        case title
         case vin
         case displayName = "display_name"
+        case siteDisplayName = "site_display_name"
         case state
+    }
+
+    var energySiteDisplayName: String? {
+        let id = energySiteId.map(String.init)
+        return [
+            displayName,
+            siteDisplayName,
+            name,
+            title,
+            siteName
+        ]
+        .compactMap { normalizedSiteName($0, siteId: id) }
+        .first
     }
 
     var fleetVehicle: FleetVehicle? {
@@ -1742,6 +1797,10 @@ struct SiteInfoResponse: Codable {
 struct SiteInfo: Codable {
     let id: String?
     let siteName: String?
+    let name: String?
+    let title: String?
+    let displayName: String?
+    let siteDisplayName: String?
     let version: String?
     let batteryCount: Double?
     let installationDate: Date?
@@ -1749,9 +1808,25 @@ struct SiteInfo: Codable {
     enum CodingKeys: String, CodingKey {
         case id
         case siteName = "site_name"
+        case name
+        case title
+        case displayName = "display_name"
+        case siteDisplayName = "site_display_name"
         case version
         case batteryCount = "battery_count"
         case installationDate = "installation_date"
+    }
+
+    var energySiteDisplayName: String? {
+        [
+            displayName,
+            siteDisplayName,
+            name,
+            title,
+            siteName
+        ]
+        .compactMap { normalizedSiteName($0, siteId: id) }
+        .first
     }
 }
 

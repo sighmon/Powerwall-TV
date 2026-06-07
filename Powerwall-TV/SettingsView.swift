@@ -232,6 +232,7 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "currentEnergySiteIndex")
         UserDefaults.standard.removeObject(forKey: "fleetAPI_tokenExpiration")
         UserDefaults.standard.removeObject(forKey: "fleetBaseURL")
+        UserDefaults.standard.removeObject(forKey: "fleetEnergySiteNames")
         UserDefaults.standard.removeObject(forKey: "electricityMaps_zone")
         UserDefaults.standard.removeObject(forKey: "keepWindowInFront")
         UserDefaults.standard.removeObject(forKey: "autoHideSummaryOnOverlap")
