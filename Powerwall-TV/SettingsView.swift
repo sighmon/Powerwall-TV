@@ -105,7 +105,7 @@ struct SettingsView: View {
                 Toggle("Auto-hide buttons", isOn: $autoHideButtonsOnOverlap)
 #endif
                 Toggle("Limit data to one decimal place", isOn: $showLessPrecision)
-                Toggle("Show schedule button", isOn: $showSchedulerButton)
+                Toggle("Show schedule (beta)", isOn: $showSchedulerButton)
                 // For debugging vehicles on accounts without a v3 wall connector
                 // Toggle("Show vehicles", isOn: $showVehicles)
                 Toggle("Prevent screen saver from showing", isOn: $preventScreenSaver)
@@ -246,7 +246,7 @@ struct SettingsView: View {
         autoHideSummaryOnOverlap = true
         autoHideButtonsOnOverlap = true
         showVehicles = false
-        showSchedulerButton = true
+        showSchedulerButton = false
         sceneScale = 1.0
         sceneHorizontalOffset = 0.0
         sceneVerticalOffset = 0.0
