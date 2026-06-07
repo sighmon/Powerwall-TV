@@ -16,6 +16,19 @@ func formatPowerValue(_ value: Double, precision: String, showLessPrecision: Boo
     return String(format: precision, displayedValue)
 }
 
+private extension View {
+    @ViewBuilder
+    func numericUpdateAnimation<Value: Equatable>(for value: Value) -> some View {
+        if #available(iOS 17.0, macOS 14.0, tvOS 17.0, *) {
+            self
+                .contentTransition(.numericText())
+                .animation(.default, value: value)
+        } else {
+            self
+        }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var viewModel: PowerwallViewModel
     @ObservedObject private var scheduleManager = PowerwallScheduleManager.shared
@@ -643,6 +656,7 @@ struct ContentView: View {
                 Text("\(exportedEnergy, specifier: specifier) kWh")
                     .fontWeight(.bold)
                     .font(valueFont)
+                    .numericUpdateAnimation(for: exportedEnergy)
                 Text("ENERGY GENERATED \(data.solar.energyExported > 0 ? "" : "TODAY")")
                     .opacity(0.6)
                     .fontWeight(.bold)
@@ -667,6 +681,7 @@ struct ContentView: View {
             Text("\(fmt(data.solar.instantPower / 1000)) kW")
                 .fontWeight(.bold)
                 .font(valueFont)
+                .numericUpdateAnimation(for: data.solar.instantPower)
             Text("SOLAR")
                 .opacity(0.6)
                 .fontWeight(.bold)
@@ -680,6 +695,7 @@ struct ContentView: View {
             Text("\(fmt(homeEnergyToDisplay(data: data) / 1000)) kW")
                 .fontWeight(.bold)
                 .font(valueFont)
+                .numericUpdateAnimation(for: homeEnergyToDisplay(data: data))
             Text("HOME")
                 .opacity(0.6)
                 .fontWeight(.bold)
@@ -698,6 +714,7 @@ struct ContentView: View {
             )
             .fontWeight(.bold)
             .font(valueFont)
+            .numericUpdateAnimation(for: "\(data.battery.instantPower)-\(viewModel.batteryPercentage?.percentage ?? 0)")
 
             powerwallLabel
                 .opacity(0.6)
@@ -751,6 +768,7 @@ struct ContentView: View {
             Text(wallConnectorDisplay(data: data, precision: precision))
                 .fontWeight(.bold)
                 .font(valueFont)
+                .numericUpdateAnimation(for: wallConnectorDisplay(data: data, precision: precision))
             Text("VEHICLE\(data.wallConnectors.count > 1 ? "S (\(data.wallConnectors.count))" : "")")
                 .opacity(0.6)
                 .fontWeight(.bold)
@@ -771,10 +789,12 @@ struct ContentView: View {
                 )
                 .fontWeight(.bold)
                 .font(valueFont)
+                .numericUpdateAnimation(for: "\(data.site.instantPower)-\(renewables)")
             } else {
                 Text("\(fmt(data.site.instantPower / 1000)) kW")
                     .fontWeight(.bold)
                     .font(valueFont)
+                    .numericUpdateAnimation(for: data.site.instantPower)
             }
 
             Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID\(viewModel.gridCarbonIntensity.map { " · \($0) gCO2" } ?? "")")
@@ -782,6 +802,7 @@ struct ContentView: View {
                 .fontWeight(.bold)
                 .font(labelFont)
                 .foregroundColor(viewModel.isOffGrid() ? .orange : .white)
+                .numericUpdateAnimation(for: viewModel.gridCarbonIntensity)
         }
         .multilineTextAlignment(.center)
     }
@@ -936,6 +957,7 @@ struct ContentView: View {
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
+                    .numericUpdateAnimation(for: batteryDisplay)
             } else {
                 Image(systemName: "zzz")
                     .font(labelFont)
@@ -1694,6 +1716,7 @@ private struct PowerwallMenuBarLabel: View {
             Text("\(left) · \(batteryPercentage, specifier: "%.0f")% \(trend)")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .monospacedDigit()
+                .numericUpdateAnimation(for: "\(left)-\(batteryPercentage)-\(trend)")
         )
     }
 }
@@ -1727,6 +1750,7 @@ private struct PowerwallMenuBarPopover: View {
                 } currentValueLabel: {
                     Text("\(batteryPercentage, specifier: "%.0f")%")
                         .monospacedDigit()
+                        .numericUpdateAnimation(for: batteryPercentage)
                 }
                 .tint(batteryPercentage >= 60 ? .green : (batteryPercentage >= 25 ? .yellow : .red))
                 .gaugeStyle(.accessoryCircular)
@@ -1737,6 +1761,7 @@ private struct PowerwallMenuBarPopover: View {
                         Text("\(formatPowerValue((viewModel.data?.solar.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
+                            .numericUpdateAnimation(for: viewModel.data?.solar.instantPower ?? 0)
                         Text("SOLAR")
                             .opacity(0.6)
                             .fontWeight(.bold)
@@ -1748,6 +1773,7 @@ private struct PowerwallMenuBarPopover: View {
                         Text("\(formatPowerValue((viewModel.data?.load.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
+                            .numericUpdateAnimation(for: viewModel.data?.load.instantPower ?? 0)
                         Text("HOME")
                             .opacity(0.6)
                             .fontWeight(.bold)
@@ -1762,6 +1788,7 @@ private struct PowerwallMenuBarPopover: View {
                         Text("\(formatPowerValue((viewModel.data?.battery.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
+                            .numericUpdateAnimation(for: viewModel.data?.battery.instantPower ?? 0)
                         Text("POWERWALL")
                             .opacity(0.6)
                             .fontWeight(.bold)
@@ -1773,6 +1800,7 @@ private struct PowerwallMenuBarPopover: View {
                         Text("\(formatPowerValue((viewModel.data?.site.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
+                            .numericUpdateAnimation(for: viewModel.data?.site.instantPower ?? 0)
                         Text("GRID")
                             .opacity(0.6)
                             .fontWeight(.bold)
