@@ -21,6 +21,7 @@ struct SettingsView: View {
     @Binding var preventScreenSaver: Bool
     @Binding var showLessPrecision: Bool
     @Binding var showVehicles: Bool
+    @Binding var showSchedulerButton: Bool
     @Binding var showInMenuBar: Bool
     @Binding var keepWindowInFront: Bool
     @Binding var autoHideSummaryOnOverlap: Bool
@@ -104,6 +105,7 @@ struct SettingsView: View {
                 Toggle("Auto-hide buttons", isOn: $autoHideButtonsOnOverlap)
 #endif
                 Toggle("Limit data to one decimal place", isOn: $showLessPrecision)
+                Toggle("Show schedule (beta)", isOn: $showSchedulerButton)
                 // For debugging vehicles on accounts without a v3 wall connector
                 // Toggle("Show vehicles", isOn: $showVehicles)
                 Toggle("Prevent screen saver from showing", isOn: $preventScreenSaver)
@@ -210,6 +212,7 @@ struct SettingsView: View {
         UserDefaults.standard.set(preventScreenSaver, forKey: "preventScreenSaver")
         UserDefaults.standard.set(showLessPrecision, forKey: "showLessPrecision")
         UserDefaults.standard.set(showVehicles, forKey: "showVehicles")
+        UserDefaults.standard.set(showSchedulerButton, forKey: "showSchedulerButton")
         UserDefaults.standard.set(showInMenuBar, forKey: "showInMenuBar")
         UserDefaults.standard.set(keepWindowInFront, forKey: "keepWindowInFront")
         UserDefaults.standard.set(autoHideSummaryOnOverlap, forKey: "autoHideSummaryOnOverlap")
@@ -229,11 +232,13 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "currentEnergySiteIndex")
         UserDefaults.standard.removeObject(forKey: "fleetAPI_tokenExpiration")
         UserDefaults.standard.removeObject(forKey: "fleetBaseURL")
+        UserDefaults.standard.removeObject(forKey: "fleetEnergySiteNames")
         UserDefaults.standard.removeObject(forKey: "electricityMaps_zone")
         UserDefaults.standard.removeObject(forKey: "keepWindowInFront")
         UserDefaults.standard.removeObject(forKey: "autoHideSummaryOnOverlap")
         UserDefaults.standard.removeObject(forKey: "autoHideButtonsOnOverlap")
         UserDefaults.standard.removeObject(forKey: "showVehicles")
+        UserDefaults.standard.removeObject(forKey: "showSchedulerButton")
         UserDefaults.standard.removeObject(forKey: "sceneScale")
         UserDefaults.standard.removeObject(forKey: "sceneHorizontalOffset")
         UserDefaults.standard.removeObject(forKey: "sceneVerticalOffset")
@@ -242,6 +247,7 @@ struct SettingsView: View {
         autoHideSummaryOnOverlap = true
         autoHideButtonsOnOverlap = true
         showVehicles = false
+        showSchedulerButton = false
         sceneScale = 1.0
         sceneHorizontalOffset = 0.0
         sceneVerticalOffset = 0.0
@@ -271,6 +277,7 @@ struct SettingsView_Previews: PreviewProvider {
             preventScreenSaver: .constant(false),
             showLessPrecision: .constant(false),
             showVehicles: .constant(true),
+            showSchedulerButton: .constant(true),
             showInMenuBar: .constant(false),
             keepWindowInFront: .constant(false),
             autoHideSummaryOnOverlap: .constant(true),

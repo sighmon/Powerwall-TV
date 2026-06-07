@@ -10,7 +10,16 @@ import SwiftData
 
 @main
 struct Powerwall_TVApp: App {
-    @StateObject private var viewModel = PowerwallViewModel()
+    @StateObject private var viewModel: PowerwallViewModel
+
+    init() {
+        let viewModel = PowerwallViewModel()
+        _viewModel = StateObject(wrappedValue: viewModel)
+#if canImport(BackgroundTasks) && !os(macOS)
+        PowerwallScheduleManager.registerBackgroundTask(viewModel: viewModel)
+#endif
+    }
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Item.self,

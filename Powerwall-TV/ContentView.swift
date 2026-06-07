@@ -16,12 +16,27 @@ func formatPowerValue(_ value: Double, precision: String, showLessPrecision: Boo
     return String(format: precision, displayedValue)
 }
 
+private extension View {
+    @ViewBuilder
+    func numericUpdateAnimation<Value: Equatable>(for value: Value) -> some View {
+        if #available(iOS 17.0, macOS 14.0, tvOS 17.0, *) {
+            self
+                .contentTransition(.numericText())
+                .animation(.default, value: value)
+        } else {
+            self
+        }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var viewModel: PowerwallViewModel
+    @ObservedObject private var scheduleManager = PowerwallScheduleManager.shared
     @State private var demo = false
     @State private var animations = true
     @State private var showingSettings = false
     @State private var showingGraph = false
+    @State private var showingScheduler = false
     @State private var wiggleWatts = 40.0
     @State private var startAnimations = false
     @State private var precision = "%.3f"
@@ -130,6 +145,7 @@ struct ContentView: View {
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
                 showVehicles: $viewModel.showVehicles,
+                showSchedulerButton: $viewModel.showSchedulerButton,
                 showInMenuBar: $viewModel.showInMenuBar,
                 keepWindowInFront: $viewModel.keepWindowInFront,
                 autoHideSummaryOnOverlap: $viewModel.autoHideSummaryOnOverlap,
@@ -155,6 +171,14 @@ struct ContentView: View {
                         .ignoresSafeArea()
                 )
         }
+        .sheet(isPresented: $showingScheduler) {
+            SchedulerView(viewModel: viewModel)
+                .background(
+                    Color.clear
+                        .background(.regularMaterial)
+                        .ignoresSafeArea()
+                )
+        }
 #else
         .fullScreenCover(isPresented: $showingSettings) {
             SettingsView(
@@ -170,6 +194,7 @@ struct ContentView: View {
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
                 showVehicles: $viewModel.showVehicles,
+                showSchedulerButton: $viewModel.showSchedulerButton,
                 showInMenuBar: $viewModel.showInMenuBar,
                 keepWindowInFront: $viewModel.keepWindowInFront,
                 autoHideSummaryOnOverlap: $viewModel.autoHideSummaryOnOverlap,
@@ -195,11 +220,22 @@ struct ContentView: View {
                         .ignoresSafeArea()
                 )
         }
+        .fullScreenCover(isPresented: $showingScheduler) {
+            SchedulerView(viewModel: viewModel)
+                .background(
+                    Color.clear
+                        .background(.regularMaterial)
+                        .ignoresSafeArea()
+                )
+        }
 #endif
         .onReceive(timer) { _ in
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
             if showingSettings {
                 return
+            }
+            if viewModel.loginMode == .fleetAPI {
+                PowerwallScheduleManager.shared.applyDueSchedules(using: viewModel)
             }
             if viewModel.ipAddress == "demo" {
                 let homeLoad = Double(arc4random_uniform(4096)) + 256
@@ -245,6 +281,7 @@ struct ContentView: View {
             if demo {
                 viewModel.ipAddress = "demo"
             }
+            PowerwallScheduleManager.shared.scheduleBackgroundRefresh()
             if shouldAutoOpenSettingsOnLaunch {
                 showingSettings = true
             } else if viewModel.ipAddress == "demo" {
@@ -328,12 +365,12 @@ struct ContentView: View {
             hasKeyboardFocus = true
         }
         .onKeyPress(.upArrow, phases: .down) { _ in
-            guard !showingGraph else { return .ignored }
+            guard !showingGraph, !showingScheduler else { return .ignored }
             updateEnergySite(-1)
             return .handled
         }
         .onKeyPress(.downArrow, phases: .down) { _ in
-            guard !showingGraph else { return .ignored }
+            guard !showingGraph, !showingScheduler else { return .ignored }
             updateEnergySite(+1)
             return .handled
         }
@@ -619,6 +656,7 @@ struct ContentView: View {
                 Text("\(exportedEnergy, specifier: specifier) kWh")
                     .fontWeight(.bold)
                     .font(valueFont)
+                    .numericUpdateAnimation(for: exportedEnergy)
                 Text("ENERGY GENERATED \(data.solar.energyExported > 0 ? "" : "TODAY")")
                     .opacity(0.6)
                     .fontWeight(.bold)
@@ -643,6 +681,7 @@ struct ContentView: View {
             Text("\(fmt(data.solar.instantPower / 1000)) kW")
                 .fontWeight(.bold)
                 .font(valueFont)
+                .numericUpdateAnimation(for: data.solar.instantPower)
             Text("SOLAR")
                 .opacity(0.6)
                 .fontWeight(.bold)
@@ -656,6 +695,7 @@ struct ContentView: View {
             Text("\(fmt(homeEnergyToDisplay(data: data) / 1000)) kW")
                 .fontWeight(.bold)
                 .font(valueFont)
+                .numericUpdateAnimation(for: homeEnergyToDisplay(data: data))
             Text("HOME")
                 .opacity(0.6)
                 .fontWeight(.bold)
@@ -674,8 +714,9 @@ struct ContentView: View {
             )
             .fontWeight(.bold)
             .font(valueFont)
+            .numericUpdateAnimation(for: "\(data.battery.instantPower)-\(viewModel.batteryPercentage?.percentage ?? 0)")
 
-            Text("POWERWALL\(viewModel.batteryCountString())")
+            powerwallLabel
                 .opacity(0.6)
                 .fontWeight(.bold)
                 .font(labelFont)
@@ -683,11 +724,51 @@ struct ContentView: View {
         .multilineTextAlignment(.center)
     }
 
+    private var powerwallLabel: Text {
+        let activeScheduleCount = scheduleManager.schedules.filter(\.isEnabled).count
+        var label = Text("POWERWALL\(viewModel.batteryCountString())")
+
+        if scheduleManager.isSchedulerEnabled && activeScheduleCount > 0 {
+            label = label
+                + Text(" · ")
+                + Text(Image(systemName: "alarm.fill"))
+                    .foregroundColor(isWithinEnabledScheduleWindow ? .green : .white)
+
+            if activeScheduleCount > 1 {
+                label = label + Text(" \(activeScheduleCount)")
+            }
+        }
+
+        return label
+    }
+
+    private var isWithinEnabledScheduleWindow: Bool {
+        let now = Date()
+        let components = Calendar.current.dateComponents([.hour, .minute], from: now)
+        guard let hour = components.hour, let minute = components.minute else { return false }
+
+        let currentMinutes = (hour * 60) + minute
+        return scheduleManager.schedules
+            .filter(\.isEnabled)
+            .contains { schedule in
+                if schedule.startMinutes == schedule.endMinutes {
+                    return true
+                }
+
+                if schedule.startMinutes < schedule.endMinutes {
+                    return currentMinutes >= schedule.startMinutes && currentMinutes < schedule.endMinutes
+                }
+
+                return currentMinutes >= schedule.startMinutes || currentMinutes < schedule.endMinutes
+            }
+    }
+
     private func wallConnectorMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
         VStack(spacing: 2) {
             Text(wallConnectorDisplay(data: data, precision: precision))
                 .fontWeight(.bold)
                 .font(valueFont)
+                .numericUpdateAnimation(for: wallConnectorDisplay(data: data, precision: precision))
             Text("VEHICLE\(data.wallConnectors.count > 1 ? "S (\(data.wallConnectors.count))" : "")")
                 .opacity(0.6)
                 .fontWeight(.bold)
@@ -708,10 +789,12 @@ struct ContentView: View {
                 )
                 .fontWeight(.bold)
                 .font(valueFont)
+                .numericUpdateAnimation(for: "\(data.site.instantPower)-\(renewables)")
             } else {
                 Text("\(fmt(data.site.instantPower / 1000)) kW")
                     .fontWeight(.bold)
                     .font(valueFont)
+                    .numericUpdateAnimation(for: data.site.instantPower)
             }
 
             Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID\(viewModel.gridCarbonIntensity.map { " · \($0) gCO2" } ?? "")")
@@ -719,6 +802,7 @@ struct ContentView: View {
                 .fontWeight(.bold)
                 .font(labelFont)
                 .foregroundColor(viewModel.isOffGrid() ? .orange : .white)
+                .numericUpdateAnimation(for: viewModel.gridCarbonIntensity)
         }
         .multilineTextAlignment(.center)
     }
@@ -744,7 +828,7 @@ struct ContentView: View {
 
     private func controlsOverlay(sceneSize: CGSize) -> some View {
         HStack(alignment: .bottom) {
-            HStack {
+            HStack(spacing: controlsButtonSpacing) {
                 Button(action: {
                     revealAutoHiddenOverlays()
                     showingSettings = true
@@ -773,6 +857,35 @@ struct ContentView: View {
                 .environment(\.colorScheme, .dark)
 
                 if viewModel.loginMode == .fleetAPI {
+                    if viewModel.showSchedulerButton {
+                        Button(action: {
+                            revealAutoHiddenOverlays()
+                            showingScheduler = true
+                        }) {
+                            ZStack {
+                                Image(systemName: "calendar.badge.clock")
+#if os(macOS)
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .symbolRenderingMode(.hierarchical)
+                                    .foregroundStyle(.primary)
+                                    .frame(width: 40, height: 40)
+#elseif os(iOS)
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .symbolRenderingMode(.hierarchical)
+                                    .foregroundStyle(.gray)
+                                    .frame(width: 40, height: 40)
+#else
+                                    .font(.title3)
+                                    .frame(width: 80, height: 80)
+#endif
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .accessibilityLabel("Scheduler")
+                        .environment(\.colorScheme, .dark)
+                    }
+
                     Button(action: {
                         revealAutoHiddenOverlays()
                         showingGraph = true
@@ -827,6 +940,14 @@ struct ContentView: View {
         }
     }
 
+    private var controlsButtonSpacing: CGFloat? {
+#if os(tvOS)
+        24
+#else
+        nil
+#endif
+    }
+
     private func vehicleStatusView(vehicle: FleetVehicle, labelFont: Font) -> some View {
         VStack(spacing: 1) {
             if let batteryDisplay = vehicleBatteryDisplay(vehicle: vehicle) {
@@ -836,6 +957,7 @@ struct ContentView: View {
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
+                    .numericUpdateAnimation(for: batteryDisplay)
             } else {
                 Image(systemName: "zzz")
                     .font(labelFont)
@@ -1236,7 +1358,7 @@ struct ContentView: View {
 #endif
 
     private func handleSiteSwipe(_ translation: CGSize) {
-        guard !showingGraph else { return }
+        guard !showingGraph, !showingScheduler else { return }
         let threshold: CGFloat = 40
         let absX = abs(translation.width)
         let absY = abs(translation.height)
@@ -1594,6 +1716,7 @@ private struct PowerwallMenuBarLabel: View {
             Text("\(left) · \(batteryPercentage, specifier: "%.0f")% \(trend)")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .monospacedDigit()
+                .numericUpdateAnimation(for: "\(left)-\(batteryPercentage)-\(trend)")
         )
     }
 }
@@ -1627,6 +1750,7 @@ private struct PowerwallMenuBarPopover: View {
                 } currentValueLabel: {
                     Text("\(batteryPercentage, specifier: "%.0f")%")
                         .monospacedDigit()
+                        .numericUpdateAnimation(for: batteryPercentage)
                 }
                 .tint(batteryPercentage >= 60 ? .green : (batteryPercentage >= 25 ? .yellow : .red))
                 .gaugeStyle(.accessoryCircular)
@@ -1637,6 +1761,7 @@ private struct PowerwallMenuBarPopover: View {
                         Text("\(formatPowerValue((viewModel.data?.solar.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
+                            .numericUpdateAnimation(for: viewModel.data?.solar.instantPower ?? 0)
                         Text("SOLAR")
                             .opacity(0.6)
                             .fontWeight(.bold)
@@ -1648,6 +1773,7 @@ private struct PowerwallMenuBarPopover: View {
                         Text("\(formatPowerValue((viewModel.data?.load.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
+                            .numericUpdateAnimation(for: viewModel.data?.load.instantPower ?? 0)
                         Text("HOME")
                             .opacity(0.6)
                             .fontWeight(.bold)
@@ -1662,6 +1788,7 @@ private struct PowerwallMenuBarPopover: View {
                         Text("\(formatPowerValue((viewModel.data?.battery.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
+                            .numericUpdateAnimation(for: viewModel.data?.battery.instantPower ?? 0)
                         Text("POWERWALL")
                             .opacity(0.6)
                             .fontWeight(.bold)
@@ -1673,6 +1800,7 @@ private struct PowerwallMenuBarPopover: View {
                         Text("\(formatPowerValue((viewModel.data?.site.instantPower ?? 0) / 1000, precision: precision, showLessPrecision: viewModel.showLessPrecision)) kW")
                             .fontWeight(.bold)
                             .font(.title2)
+                            .numericUpdateAnimation(for: viewModel.data?.site.instantPower ?? 0)
                         Text("GRID")
                             .opacity(0.6)
                             .fontWeight(.bold)

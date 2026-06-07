@@ -51,6 +51,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
     @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
     @Published var showVehicles: Bool = UserDefaults.standard.object(forKey: "showVehicles") as? Bool ?? false
+    @Published var showSchedulerButton: Bool = UserDefaults.standard.object(forKey: "showSchedulerButton") as? Bool ?? false
     @Published var showInMenuBar: Bool = UserDefaults.standard.bool(forKey: "showInMenuBar")
     @Published var keepWindowInFront: Bool = UserDefaults.standard.bool(forKey: "keepWindowInFront")
     @Published var autoHideSummaryOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideSummaryOnOverlap") as? Bool ?? false
@@ -70,18 +71,20 @@ class PowerwallViewModel: ObservableObject {
     @Published var gridStatus: GridStatus?
     @Published var errorMessage: String?
     @Published var infoMessage: String?
+    @Published var fleetCommandPermissionWarning: String?
 
     // Tesla Fleet API credentials (replace with your actual values)
     private let clientID = Secrets.clientID
     private let clientSecret = Secrets.clientSecret
     private let redirectURI = "powerwalltv://app/callback"
-    private let scopes = "openid energy_device_data vehicle_device_data offline_access"
+    private let scopes = "openid energy_device_data vehicle_device_data energy_cmds offline_access"
     private var wiggleWatts = 10.0
 
     // Fleet API-specific properties
     @Published var accessToken: String = KeychainWrapper.standard.string(forKey: "fleetAPI_accessToken") ?? ""
     @Published var energySiteId: String?
     @Published var siteName: String?
+    private var energySiteNameCache: [String: String] = UserDefaults.standard.dictionary(forKey: "fleetEnergySiteNames") as? [String: String] ?? [:]
     @Published var batteryPowerHistory: [HistoricalDataPoint] = []
     @Published var batteryPercentageHistory: [HistoricalDataPoint] = []
     @Published var solarPowerHistory: [HistoricalDataPoint] = []
@@ -363,6 +366,7 @@ class PowerwallViewModel: ObservableObject {
                 self.accessToken = tokenResponse.access_token
                 self.hasAttemptedAutomaticFleetLogin = false
                 self.hasShownVehicleScopeWarning = false
+                self.fleetCommandPermissionWarning = nil
                 // Save the accessToken to Keychain
                 KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
                 if let refreshToken = tokenResponse.refresh_token {
@@ -429,6 +433,7 @@ class PowerwallViewModel: ObservableObject {
             DispatchQueue.main.async {
                 self.accessToken = tokenResponse.access_token
                 self.hasShownVehicleScopeWarning = false
+                self.fleetCommandPermissionWarning = nil
                 KeychainWrapper.standard.set(tokenResponse.access_token, forKey: "fleetAPI_accessToken")
                 if let refreshToken = tokenResponse.refresh_token { // Some APIs issue new refresh tokens
                     KeychainWrapper.standard.set(refreshToken, forKey: "fleetAPI_refreshToken")
@@ -565,6 +570,7 @@ class PowerwallViewModel: ObservableObject {
                     self.fetchLocalDataAfterLogin()
                     self.fetchLocalBatteryPercentage()
                     self.fetchLocalGridStatus()
+                    self.fetchLocalSiteInfo()
                 }
                 // If login fails, errorMessage is already set by the login function
             }
@@ -581,8 +587,9 @@ class PowerwallViewModel: ObservableObject {
             if !self.energySites.isEmpty {
                 let currentSite = self.energySites[self.currentEnergySiteIndex]
                 if let id = currentSite.energySiteId {
-                    self.energySiteId = String(id)
-                    self.siteName = currentSite.siteName ?? "Energy Site \(id)"
+                    let siteId = String(id)
+                    self.energySiteId = siteId
+                    self.applyEnergySiteDisplayName(for: siteId, preferred: currentSite.energySiteDisplayName)
                     self.fetchFleetAPIData()
                     self.fetchSolarEnergyToday()
                     if self.showVehicles {
@@ -669,6 +676,31 @@ class PowerwallViewModel: ObservableObject {
                 }
             } receiveValue: { [weak self] status in
                 self?.gridStatus = status
+            }
+            .store(in: &cancellables)
+    }
+
+    private func fetchLocalSiteInfo() {
+        guard let url = URL(string: "https://\(ipAddress)/api/site_info") else {
+            self.errorMessage = "Invalid site info URL"
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+
+        localURLSession.dataTaskPublisher(for: request)
+            .map { $0.data }
+            .decode(type: LocalSiteInfo.self, decoder: JSONDecoder())
+            .receive(on: DispatchQueue.main)
+            .sink { completion in
+                if case .failure(let error) = completion {
+                    #if DEBUG
+                    print("Failed to fetch local site info: \(error.localizedDescription)")
+                    #endif
+                }
+            } receiveValue: { [weak self] siteInfo in
+                self?.siteName = siteInfo.energySiteDisplayName
             }
             .store(in: &cancellables)
     }
@@ -1208,6 +1240,7 @@ class PowerwallViewModel: ObservableObject {
 
     func fetchSiteInfo() {
         guard let energySiteId = energySiteId else { return }
+        let requestedEnergySiteId = energySiteId
 
         let urlStr = "\(fleetBaseURL)/api/1/energy_sites/\(energySiteId)/site_info"
         guard let url = URL(string: urlStr) else { return }
@@ -1223,11 +1256,224 @@ class PowerwallViewModel: ObservableObject {
             else { return }
 
             DispatchQueue.main.async {
-                self?.batteryCount = payload.response.batteryCount
-                self?.version = payload.response.version
-                self?.installationDate = payload.response.installationDate
+                guard let self, self.energySiteId == requestedEnergySiteId else { return }
+
+                self.batteryCount = payload.response.batteryCount
+                self.version = payload.response.version
+                self.installationDate = payload.response.installationDate
+                if let siteName = payload.response.energySiteDisplayName {
+                    self.applyEnergySiteDisplayName(for: requestedEnergySiteId, preferred: siteName)
+                }
             }
         }.resume()
+    }
+
+    private func applyEnergySiteDisplayName(for siteId: String, preferred siteName: String?) {
+        if let siteName {
+            energySiteNameCache[siteId] = siteName
+            UserDefaults.standard.set(energySiteNameCache, forKey: "fleetEnergySiteNames")
+            self.siteName = siteName
+            return
+        }
+
+        self.siteName = energySiteNameCache[siteId]
+    }
+
+    func setPowerwallOperationMode(
+        _ mode: PowerwallOperationMode,
+        retryCount: Int = 3,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        if mode.islandModeValue != nil {
+            setPowerwallIslandMode(mode, retryCount: retryCount, completion: completion)
+            return
+        }
+
+        if accessToken.isEmpty {
+            completion(.failure(NSError(domain: "Fleet API", code: 0, userInfo: [
+                NSLocalizedDescriptionKey: "Must log in first"
+            ])))
+            return
+        }
+
+        guard let energySiteId = energySiteId,
+              let url = URL(string: "\(fleetBaseURL)/api/1/energy_sites/\(energySiteId)/operation") else {
+            completion(.failure(NSError(domain: "Fleet API", code: 0, userInfo: [
+                NSLocalizedDescriptionKey: "No energy site ID"
+            ])))
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        guard let fleetOperationValue = mode.fleetOperationValue else {
+            completion(.failure(NSError(domain: "Fleet API", code: 0, userInfo: [
+                NSLocalizedDescriptionKey: "\(mode.title) is not a Fleet operation mode"
+            ])))
+            return
+        }
+        request.httpBody = try? JSONEncoder().encode(["default_real_mode": fleetOperationValue])
+
+        fleetURLSession.dataTask(with: request) { [weak self] data, response, error in
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+            if statusCode == 401 || statusCode == 403 {
+                let warning = "Re-login to grant Powerwall command access for scheduled mode changes."
+                DispatchQueue.main.async {
+                    self?.fleetCommandPermissionWarning = warning
+                    self?.infoMessage = warning
+                    completion(.failure(NSError(domain: "Fleet API", code: statusCode, userInfo: [
+                        NSLocalizedDescriptionKey: warning
+                    ])))
+                }
+                return
+            }
+
+            if let error = error {
+                self?.retrySetPowerwallOperationMode(
+                    mode,
+                    retryCount: retryCount,
+                    error: error,
+                    completion: completion
+                )
+                return
+            }
+
+            guard (200...299).contains(statusCode) else {
+                let message = data.flatMap { String(data: $0, encoding: .utf8) } ?? "HTTP \(statusCode)"
+                let apiError = NSError(domain: "Fleet API", code: statusCode, userInfo: [
+                    NSLocalizedDescriptionKey: "Operation mode update failed: \(message)"
+                ])
+                self?.retrySetPowerwallOperationMode(
+                    mode,
+                    retryCount: retryCount,
+                    error: apiError,
+                    completion: completion
+                )
+                return
+            }
+
+            DispatchQueue.main.async {
+                self?.infoMessage = "Powerwall mode set to \(mode.title)"
+                completion(.success(()))
+            }
+        }.resume()
+    }
+
+    private func retrySetPowerwallOperationMode(
+        _ mode: PowerwallOperationMode,
+        retryCount: Int,
+        error: Error,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard retryCount > 0 else {
+            DispatchQueue.main.async {
+                completion(.failure(error))
+            }
+            return
+        }
+
+        let attempt = max(1, 4 - retryCount)
+        let delay = min(pow(2.0, Double(attempt - 1)), 8.0)
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.setPowerwallOperationMode(mode, retryCount: retryCount - 1, completion: completion)
+        }
+    }
+
+    private func setPowerwallIslandMode(
+        _ mode: PowerwallOperationMode,
+        retryCount: Int,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard let islandModeValue = mode.islandModeValue else {
+            completion(.failure(NSError(domain: "Powerwall Gateway", code: 0, userInfo: [
+                NSLocalizedDescriptionKey: "\(mode.title) is not an islanding mode"
+            ])))
+            return
+        }
+
+        guard !ipAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !password.isEmpty,
+              let url = URL(string: "https://\(ipAddress)/api/v2/islanding/mode") else {
+            let message = "\(mode.title) scheduling requires local Gateway IP and password. Tesla Fleet API does not expose Go Off-Grid or Reconnect to Grid."
+            DispatchQueue.main.async {
+                self.infoMessage = message
+            }
+            completion(.failure(NSError(domain: "Powerwall Gateway", code: 0, userInfo: [
+                NSLocalizedDescriptionKey: message
+            ])))
+            return
+        }
+
+        localLogin(ipAddress: ipAddress, password: password) { [weak self] success in
+            guard let self else { return }
+            guard success else {
+                completion(.failure(NSError(domain: "Powerwall Gateway", code: 0, userInfo: [
+                    NSLocalizedDescriptionKey: "Local Gateway login failed"
+                ])))
+                return
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONEncoder().encode(["island_mode": islandModeValue])
+
+            self.localURLSession.dataTask(with: request) { [weak self] data, response, error in
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+                if let error {
+                    self?.retrySetPowerwallIslandMode(
+                        mode,
+                        retryCount: retryCount,
+                        error: error,
+                        completion: completion
+                    )
+                    return
+                }
+
+                guard (200...299).contains(statusCode) else {
+                    let message = data.flatMap { String(data: $0, encoding: .utf8) } ?? "HTTP \(statusCode)"
+                    let apiError = NSError(domain: "Powerwall Gateway", code: statusCode, userInfo: [
+                        NSLocalizedDescriptionKey: "\(mode.title) update failed: \(message)"
+                    ])
+                    self?.retrySetPowerwallIslandMode(
+                        mode,
+                        retryCount: retryCount,
+                        error: apiError,
+                        completion: completion
+                    )
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    self?.infoMessage = "Powerwall set to \(mode.title)"
+                    completion(.success(()))
+                }
+            }.resume()
+        }
+    }
+
+    private func retrySetPowerwallIslandMode(
+        _ mode: PowerwallOperationMode,
+        retryCount: Int,
+        error: Error,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard retryCount > 0 else {
+            DispatchQueue.main.async {
+                completion(.failure(error))
+            }
+            return
+        }
+
+        let attempt = max(1, 4 - retryCount)
+        let delay = min(pow(2.0, Double(attempt - 1)), 8.0)
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.setPowerwallIslandMode(mode, retryCount: retryCount - 1, completion: completion)
+        }
     }
 
     private func fetchSOEHistory(completion: @escaping (Result<[HistoricalDataPoint], Error>) -> Void) {
@@ -1344,6 +1590,23 @@ struct FleetVehiclesResponse: Codable {
     let response: [FleetVehicle]
 }
 
+private func normalizedSiteName(_ rawValue: String?, siteId: String?) -> String? {
+    guard let rawValue else { return nil }
+
+    let name = rawValue
+        .components(separatedBy: .whitespacesAndNewlines)
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+
+    guard !name.isEmpty else { return nil }
+
+    if let siteId, name.caseInsensitiveCompare("Energy Site \(siteId)") == .orderedSame {
+        return nil
+    }
+
+    return name
+}
+
 struct TeslaAPIErrorResponse: Codable {
     let error: String
     let errorDescription: String?
@@ -1380,17 +1643,36 @@ struct Product: Codable {
     let deviceType: String?
     let energySiteId: Int?
     let siteName: String?
+    let name: String?
+    let title: String?
     let vin: String?
     let displayName: String?
+    let siteDisplayName: String?
     let state: String?
 
     enum CodingKeys: String, CodingKey {
         case deviceType = "device_type"
         case energySiteId = "energy_site_id"
         case siteName = "site_name"
+        case name
+        case title
         case vin
         case displayName = "display_name"
+        case siteDisplayName = "site_display_name"
         case state
+    }
+
+    var energySiteDisplayName: String? {
+        let id = energySiteId.map(String.init)
+        return [
+            displayName,
+            siteDisplayName,
+            name,
+            title,
+            siteName
+        ]
+        .compactMap { normalizedSiteName($0, siteId: id) }
+        .first
     }
 
     var fleetVehicle: FleetVehicle? {
@@ -1541,6 +1823,10 @@ struct SiteInfoResponse: Codable {
 struct SiteInfo: Codable {
     let id: String?
     let siteName: String?
+    let name: String?
+    let title: String?
+    let displayName: String?
+    let siteDisplayName: String?
     let version: String?
     let batteryCount: Double?
     let installationDate: Date?
@@ -1548,9 +1834,37 @@ struct SiteInfo: Codable {
     enum CodingKeys: String, CodingKey {
         case id
         case siteName = "site_name"
+        case name
+        case title
+        case displayName = "display_name"
+        case siteDisplayName = "site_display_name"
         case version
         case batteryCount = "battery_count"
         case installationDate = "installation_date"
+    }
+
+    var energySiteDisplayName: String? {
+        [
+            displayName,
+            siteDisplayName,
+            name,
+            title,
+            siteName
+        ]
+        .compactMap { normalizedSiteName($0, siteId: id) }
+        .first
+    }
+}
+
+struct LocalSiteInfo: Codable {
+    let siteName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case siteName = "site_name"
+    }
+
+    var energySiteDisplayName: String? {
+        normalizedSiteName(siteName, siteId: nil)
     }
 }
 
