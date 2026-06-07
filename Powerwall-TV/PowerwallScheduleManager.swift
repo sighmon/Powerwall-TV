@@ -21,6 +21,9 @@ final class PowerwallScheduleManager: ObservableObject {
     }
     @Published var isSchedulerEnabled: Bool = UserDefaults.standard.object(forKey: "powerwallSchedulerEnabled") as? Bool ?? false {
         didSet {
+            if isSchedulerEnabled && !oldValue {
+                PowerwallScheduleStore.markMostRecentBoundariesApplied(from: schedules)
+            }
             UserDefaults.standard.set(isSchedulerEnabled, forKey: "powerwallSchedulerEnabled")
             scheduleBackgroundRefresh()
         }
@@ -33,7 +36,9 @@ final class PowerwallScheduleManager: ObservableObject {
     }
 
     func addSchedule() {
-        schedules.append(PowerwallSchedule())
+        let schedule = PowerwallSchedule()
+        PowerwallScheduleStore.markMostRecentBoundariesApplied(from: [schedule])
+        schedules.append(schedule)
     }
 
     func deleteSchedules(at offsets: IndexSet) {
@@ -46,6 +51,10 @@ final class PowerwallScheduleManager: ObservableObject {
 
     func update(_ schedule: PowerwallSchedule) {
         guard let index = schedules.firstIndex(where: { $0.id == schedule.id }) else { return }
+        let existingSchedule = schedules[index]
+        if schedule.shouldMarkCurrentBoundariesApplied(comparedTo: existingSchedule) {
+            PowerwallScheduleStore.markMostRecentBoundariesApplied(from: [schedule])
+        }
         schedules[index] = schedule
     }
 
@@ -158,5 +167,20 @@ final class PowerwallScheduleManager: ObservableObject {
     private func setLastRunStatus(_ status: String) {
         lastRunStatus = status
         UserDefaults.standard.set(status, forKey: "powerwallScheduleLastRunStatus")
+    }
+}
+
+private extension PowerwallSchedule {
+    func shouldMarkCurrentBoundariesApplied(comparedTo previous: PowerwallSchedule) -> Bool {
+        guard isEnabled else { return false }
+
+        if !previous.isEnabled {
+            return true
+        }
+
+        return startMinutes != previous.startMinutes
+            || endMinutes != previous.endMinutes
+            || startMode != previous.startMode
+            || endMode != previous.endMode
     }
 }

@@ -134,6 +134,16 @@ enum PowerwallScheduleStore {
         userDefaults.set(dueSchedule.key, forKey: lastAppliedKey(for: dueSchedule.schedule, boundary: dueSchedule.boundary))
     }
 
+    static func markMostRecentBoundariesApplied(
+        from schedules: [PowerwallSchedule],
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        userDefaults: UserDefaults = .standard
+    ) {
+        dueSchedules(from: schedules, now: now, calendar: calendar, userDefaults: userDefaults)
+            .forEach { markApplied($0, userDefaults: userDefaults) }
+    }
+
     static func nextDueDate(
         from schedules: [PowerwallSchedule],
         now: Date = Date(),
