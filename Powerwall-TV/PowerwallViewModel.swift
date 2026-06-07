@@ -570,6 +570,7 @@ class PowerwallViewModel: ObservableObject {
                     self.fetchLocalDataAfterLogin()
                     self.fetchLocalBatteryPercentage()
                     self.fetchLocalGridStatus()
+                    self.fetchLocalSiteInfo()
                 }
                 // If login fails, errorMessage is already set by the login function
             }
@@ -675,6 +676,31 @@ class PowerwallViewModel: ObservableObject {
                 }
             } receiveValue: { [weak self] status in
                 self?.gridStatus = status
+            }
+            .store(in: &cancellables)
+    }
+
+    private func fetchLocalSiteInfo() {
+        guard let url = URL(string: "https://\(ipAddress)/api/site_info") else {
+            self.errorMessage = "Invalid site info URL"
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+
+        localURLSession.dataTaskPublisher(for: request)
+            .map { $0.data }
+            .decode(type: LocalSiteInfo.self, decoder: JSONDecoder())
+            .receive(on: DispatchQueue.main)
+            .sink { completion in
+                if case .failure(let error) = completion {
+                    #if DEBUG
+                    print("Failed to fetch local site info: \(error.localizedDescription)")
+                    #endif
+                }
+            } receiveValue: { [weak self] siteInfo in
+                self?.siteName = siteInfo.energySiteDisplayName
             }
             .store(in: &cancellables)
     }
@@ -1827,6 +1853,18 @@ struct SiteInfo: Codable {
         ]
         .compactMap { normalizedSiteName($0, siteId: id) }
         .first
+    }
+}
+
+struct LocalSiteInfo: Codable {
+    let siteName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case siteName = "site_name"
+    }
+
+    var energySiteDisplayName: String? {
+        normalizedSiteName(siteName, siteId: nil)
     }
 }
 

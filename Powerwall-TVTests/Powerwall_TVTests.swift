@@ -99,6 +99,20 @@ struct Powerwall_TVTests {
         #expect(decoded.battery.count == 2)
     }
 
+    @Test func localSiteInfoUsesSiteName() throws {
+        let json = """
+        {
+          "max_system_energy_kWh": 27,
+          "max_system_power_kW": 10,
+          "site_name": "Queens",
+          "timezone": "Australia/Adelaide",
+          "net_meter_mode": "battery_ok"
+        }
+        """
+        let decoded = try JSONDecoder().decode(LocalSiteInfo.self, from: Data(json.utf8))
+        #expect(decoded.energySiteDisplayName == "Queens")
+    }
+
     @Test func wallConnectorVitalsPowerIsCalculated() {
         let vitals = WallConnectorVitals(
             contactorClosed: true,
