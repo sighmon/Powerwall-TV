@@ -82,6 +82,23 @@ struct GraphView: View {
         }
     }
 
+    private var selectedEnergyTotalKWh: Double {
+        powerHistory.reduce(0) { $0 + $1.value } / 1000
+    }
+
+    private var latestBatteryPercentage: Double? {
+        viewModel.batteryPercentageHistory.max(by: { $0.date < $1.date })?.value ?? viewModel.batteryPercentage?.percentage
+    }
+
+    private var selectedEnergyTotalLabel: String {
+        formatEnergyTotal(selectedEnergyTotalKWh)
+    }
+
+    private var latestBatteryPercentageLabel: String {
+        guard let latestBatteryPercentage else { return "--" }
+        return formatPercentage(latestBatteryPercentage)
+    }
+
     private func colorForPoint(_ point: HistoricalDataPoint, graph: GraphType) -> Color {
         switch graph {
         case .battery:
@@ -194,7 +211,7 @@ struct GraphView: View {
             // Battery Power Flow Chart
             Text(selectedGraph.title)
                 .font(.title)
-            Text("\(viewModel.currentDateLabel) · \(selectedGraph.subtitle) · kWh")
+            Text("\(viewModel.currentDateLabel) · \(selectedGraph.subtitle) · \(selectedEnergyTotalLabel) kWh")
                 .opacity(0.6)
                 .fontWeight(.bold)
                 .font(.footnote)
@@ -341,7 +358,7 @@ struct GraphView: View {
             }
 
             // Battery Percentage Chart
-            Text("CHARGE LEVEL · %")
+            Text("CHARGE LEVEL · \(latestBatteryPercentageLabel)%")
                 .opacity(0.6)
                 .fontWeight(.bold)
                 .font(.footnote)
@@ -492,6 +509,16 @@ func interpolateZeroCrossing(start: HistoricalDataPoint, end: HistoricalDataPoin
     let crossingDate = Date(timeIntervalSince1970: crossingTime)
 
     return HistoricalDataPoint(date: crossingDate, value: 0, from: start.from, to: start.to, source: start.source)
+}
+
+func formatEnergyTotal(_ value: Double) -> String {
+    let absoluteValue = abs(value)
+    let specifier = absoluteValue < 100 ? "%.1f" : "%.0f"
+    return String(format: specifier, value)
+}
+
+func formatPercentage(_ value: Double) -> String {
+    String(format: "%.0f", value.rounded())
 }
 
 // Sample data generation functions
