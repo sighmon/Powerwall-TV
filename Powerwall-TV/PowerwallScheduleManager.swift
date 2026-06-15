@@ -36,7 +36,7 @@ final class PowerwallScheduleManager: ObservableObject {
     }
 
     func addSchedule() {
-        let schedule = PowerwallSchedule()
+        let schedule = PowerwallSchedule(isEnabled: false)
         PowerwallScheduleStore.markMostRecentBoundariesApplied(from: [schedule])
         schedules.append(schedule)
     }
@@ -145,14 +145,22 @@ final class PowerwallScheduleManager: ObservableObject {
 
         isRunning = true
         let dueSchedule = dueSchedules[index]
-        viewModel.setPowerwallOperationMode(dueSchedule.mode) { [weak self] result in
+        guard let energySiteId = dueSchedule.schedule.energySiteId else {
+            isRunning = false
+            setLastRunStatus("Failed \(dueSchedule.schedule.name): select a home")
+            completion?(false)
+            return
+        }
+
+        viewModel.setPowerwallOperationMode(dueSchedule.mode, energySiteId: energySiteId) { [weak self] result in
             Task { @MainActor in
                 guard let self else { return }
 
                 switch result {
                 case .success:
                     PowerwallScheduleStore.markApplied(dueSchedule)
-                    self.setLastRunStatus("\(dueSchedule.schedule.name) \(dueSchedule.boundary.title): \(dueSchedule.mode.title)")
+                    let site = dueSchedule.schedule.energySiteName ?? "Energy Site \(energySiteId)"
+                    self.setLastRunStatus("\(dueSchedule.schedule.name) at \(site) (\(energySiteId)) \(dueSchedule.boundary.title): \(dueSchedule.mode.title)")
                     self.run(dueSchedules, index: index + 1, using: viewModel, completion: completion)
                 case .failure(let error):
                     self.isRunning = false
@@ -182,5 +190,6 @@ private extension PowerwallSchedule {
             || endMinutes != previous.endMinutes
             || startMode != previous.startMode
             || endMode != previous.endMode
+            || energySiteId != previous.energySiteId
     }
 }

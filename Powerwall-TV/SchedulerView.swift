@@ -46,7 +46,7 @@ struct SchedulerView: View {
                         .padding(.vertical, 6)
                     } else {
                         ForEach(scheduleManager.schedules) { schedule in
-                            PowerwallScheduleRow(schedule: binding(for: schedule))
+                            PowerwallScheduleRow(schedule: binding(for: schedule), sites: scheduleSites)
                         }
                         .onDelete(perform: scheduleManager.deleteSchedules)
                     }
@@ -123,7 +123,7 @@ struct SchedulerView: View {
                             ForEach(scheduleManager.schedules) { schedule in
                                 VStack(alignment: .leading, spacing: 18) {
                                     HStack(alignment: .top, spacing: 20) {
-                                        PowerwallScheduleRow(schedule: binding(for: schedule))
+                                        PowerwallScheduleRow(schedule: binding(for: schedule), sites: scheduleSites)
                                         Button(role: .destructive) {
                                             scheduleManager.deleteSchedule(id: schedule.id)
                                         } label: {
@@ -210,7 +210,7 @@ struct SchedulerView: View {
                                 ForEach(scheduleManager.schedules) { schedule in
                                     VStack(alignment: .leading, spacing: 8) {
                                         HStack(alignment: .top) {
-                                            PowerwallScheduleRow(schedule: binding(for: schedule))
+                                            PowerwallScheduleRow(schedule: binding(for: schedule), sites: scheduleSites)
                                             Button {
                                                 scheduleManager.deleteSchedule(id: schedule.id)
                                             } label: {
@@ -248,6 +248,18 @@ struct SchedulerView: View {
             scheduleManager.schedules.first { $0.id == schedule.id } ?? schedule
         } set: { updatedSchedule in
             scheduleManager.update(updatedSchedule)
+        }
+    }
+
+    private var scheduleSites: [ScheduleSiteOption] {
+        viewModel.energySites.compactMap { product in
+            guard let id = product.energySiteId.map(String.init) else { return nil }
+            return ScheduleSiteOption(
+                id: id,
+                name: product.energySiteDisplayName
+                    ?? (id == viewModel.energySiteId ? viewModel.siteName : nil)
+                    ?? "Energy Site \(id)"
+            )
         }
     }
 
@@ -292,12 +304,22 @@ struct SchedulerView: View {
 
 private struct PowerwallScheduleRow: View {
     @Binding var schedule: PowerwallSchedule
+    let sites: [ScheduleSiteOption]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 TextField("Name", text: $schedule.name)
-                Toggle("Schedule Enabled", isOn: $schedule.isEnabled)
+                Toggle("Schedule Enabled", isOn: enabledBinding)
+                    .disabled(schedule.energySiteId == nil)
+            }
+
+            ScheduleSitePicker(schedule: $schedule, sites: sites)
+
+            if schedule.energySiteId == nil {
+                Text("Select a home before enabling this schedule.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
 
             ScheduleModePicker(title: "Start Mode", mode: $schedule.startMode)
@@ -316,7 +338,16 @@ private struct PowerwallScheduleRow: View {
     }
 
     private var scheduleSummary: String {
-        "Schedule: \(schedule.startMode.title) for \(durationSummary) then \(schedule.endMode.title)"
+        let site = schedule.energySiteName.map { " at \($0)" } ?? ""
+        return "Schedule\(site): \(schedule.startMode.title) for \(durationSummary) then \(schedule.endMode.title)"
+    }
+
+    private var enabledBinding: Binding<Bool> {
+        Binding {
+            schedule.energySiteId != nil && schedule.isEnabled
+        } set: { isEnabled in
+            schedule.isEnabled = isEnabled && schedule.energySiteId != nil
+        }
     }
 
     private var durationSummary: String {
@@ -342,6 +373,60 @@ private struct PowerwallScheduleRow: View {
     }
 }
 
+private struct ScheduleSiteOption: Identifiable, Hashable {
+    let id: String
+    let name: String
+
+    var title: String { "\(name) (\(id))" }
+}
+
+private struct ScheduleSitePicker: View {
+    @Binding var schedule: PowerwallSchedule
+    let sites: [ScheduleSiteOption]
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Home")
+            Picker("Home", selection: selection) {
+                Text("Select Home").tag(String?.none)
+                ForEach(availableSites) { site in
+                    Text(site.title).tag(Optional(site.id))
+                }
+            }
+#if os(tvOS)
+            .pickerStyle(.navigationLink)
+#else
+            .pickerStyle(.menu)
+            .labelsHidden()
+#endif
+        }
+    }
+
+    private var selection: Binding<String?> {
+        Binding {
+            schedule.energySiteId
+        } set: { selectedId in
+            schedule.energySiteId = selectedId
+            schedule.energySiteName = availableSites.first { $0.id == selectedId }?.name
+            if selectedId == nil {
+                schedule.isEnabled = false
+            }
+        }
+    }
+
+    private var availableSites: [ScheduleSiteOption] {
+        guard let selectedId = schedule.energySiteId,
+              !sites.contains(where: { $0.id == selectedId }) else {
+            return sites
+        }
+
+        return sites + [ScheduleSiteOption(
+            id: selectedId,
+            name: schedule.energySiteName ?? "Energy Site \(selectedId)"
+        )]
+    }
+}
+
 private struct ScheduleModePicker: View {
     let title: String
     @Binding var mode: PowerwallOperationMode
@@ -356,7 +441,7 @@ private struct ScheduleModePicker: View {
             }
 #if os(tvOS)
             .pickerStyle(.navigationLink)
-#elseif os(iOS)
+#else
             .pickerStyle(.menu)
             .labelsHidden()
 #endif

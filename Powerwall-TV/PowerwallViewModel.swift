@@ -1281,10 +1281,17 @@ class PowerwallViewModel: ObservableObject {
 
     func setPowerwallOperationMode(
         _ mode: PowerwallOperationMode,
+        energySiteId targetEnergySiteId: String? = nil,
         retryCount: Int = 3,
         completion: @escaping (Result<Void, Error>) -> Void
     ) {
         if mode.islandModeValue != nil {
+            if let targetEnergySiteId, targetEnergySiteId != energySiteId {
+                completion(.failure(NSError(domain: "Powerwall Gateway", code: 0, userInfo: [
+                    NSLocalizedDescriptionKey: "Select Energy Site \(targetEnergySiteId) before running an Off-Grid or On-Grid schedule. Local Gateway commands cannot target a Fleet home ID directly."
+                ])))
+                return
+            }
             setPowerwallIslandMode(mode, retryCount: retryCount, completion: completion)
             return
         }
@@ -1296,7 +1303,7 @@ class PowerwallViewModel: ObservableObject {
             return
         }
 
-        guard let energySiteId = energySiteId,
+        guard let energySiteId = targetEnergySiteId ?? energySiteId,
               let url = URL(string: "\(fleetBaseURL)/api/1/energy_sites/\(energySiteId)/operation") else {
             completion(.failure(NSError(domain: "Fleet API", code: 0, userInfo: [
                 NSLocalizedDescriptionKey: "No energy site ID"
@@ -1334,6 +1341,7 @@ class PowerwallViewModel: ObservableObject {
             if let error = error {
                 self?.retrySetPowerwallOperationMode(
                     mode,
+                    energySiteId: energySiteId,
                     retryCount: retryCount,
                     error: error,
                     completion: completion
@@ -1348,6 +1356,7 @@ class PowerwallViewModel: ObservableObject {
                 ])
                 self?.retrySetPowerwallOperationMode(
                     mode,
+                    energySiteId: energySiteId,
                     retryCount: retryCount,
                     error: apiError,
                     completion: completion
@@ -1364,6 +1373,7 @@ class PowerwallViewModel: ObservableObject {
 
     private func retrySetPowerwallOperationMode(
         _ mode: PowerwallOperationMode,
+        energySiteId: String,
         retryCount: Int,
         error: Error,
         completion: @escaping (Result<Void, Error>) -> Void
@@ -1378,7 +1388,12 @@ class PowerwallViewModel: ObservableObject {
         let attempt = max(1, 4 - retryCount)
         let delay = min(pow(2.0, Double(attempt - 1)), 8.0)
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.setPowerwallOperationMode(mode, retryCount: retryCount - 1, completion: completion)
+            self?.setPowerwallOperationMode(
+                mode,
+                energySiteId: energySiteId,
+                retryCount: retryCount - 1,
+                completion: completion
+            )
         }
     }
 

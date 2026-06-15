@@ -53,6 +53,8 @@ struct PowerwallSchedule: Codable, Identifiable, Equatable {
     var id: UUID
     var name: String
     var isEnabled: Bool
+    var energySiteId: String?
+    var energySiteName: String?
     var startMinutes: Int
     var endMinutes: Int
     var startMode: PowerwallOperationMode
@@ -62,6 +64,8 @@ struct PowerwallSchedule: Codable, Identifiable, Equatable {
         id: UUID = UUID(),
         name: String = "Peak export",
         isEnabled: Bool = true,
+        energySiteId: String? = nil,
+        energySiteName: String? = nil,
         startMinutes: Int = 15 * 60,
         endMinutes: Int = 21 * 60,
         startMode: PowerwallOperationMode = .timeBasedControl,
@@ -70,6 +74,8 @@ struct PowerwallSchedule: Codable, Identifiable, Equatable {
         self.id = id
         self.name = name
         self.isEnabled = isEnabled
+        self.energySiteId = energySiteId
+        self.energySiteName = energySiteName
         self.startMinutes = startMinutes
         self.endMinutes = endMinutes
         self.startMode = startMode
@@ -123,7 +129,7 @@ enum PowerwallScheduleStore {
         userDefaults: UserDefaults = .standard
     ) -> [DuePowerwallSchedule] {
         schedules
-            .filter(\.isEnabled)
+            .filter { $0.isEnabled && $0.energySiteId != nil }
             .flatMap { schedule in
                 dueBoundaries(for: schedule, now: now, calendar: calendar, userDefaults: userDefaults)
             }
@@ -149,7 +155,7 @@ enum PowerwallScheduleStore {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> Date? {
-        let enabled = schedules.filter(\.isEnabled)
+        let enabled = schedules.filter { $0.isEnabled && $0.energySiteId != nil }
         guard !enabled.isEmpty else { return nil }
 
         return enabled

@@ -113,6 +113,47 @@ struct Powerwall_TVTests {
         #expect(decoded.energySiteDisplayName == "Queens")
     }
 
+    @Test func legacyScheduleDecodesWithoutAHomeAndCannotRun() throws {
+        let id = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "name": "Legacy",
+          "isEnabled": true,
+          "startMinutes": 900,
+          "endMinutes": 1260,
+          "startMode": "timeBasedControl",
+          "endMode": "selfPowered"
+        }
+        """
+        let schedule = try JSONDecoder().decode(PowerwallSchedule.self, from: Data(json.utf8))
+
+        #expect(schedule.energySiteId == nil)
+        #expect(PowerwallScheduleStore.dueSchedules(from: [schedule]).isEmpty)
+        #expect(PowerwallScheduleStore.nextDueDate(from: [schedule]) == nil)
+    }
+
+    @Test func targetedScheduleIsEligibleToRun() {
+        let schedule = PowerwallSchedule(
+            energySiteId: "123456",
+            energySiteName: "Queens"
+        )
+        let calendar = Calendar(identifier: .gregorian)
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 15, hour: 22))!
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+
+        let due = PowerwallScheduleStore.dueSchedules(
+            from: [schedule],
+            now: now,
+            calendar: calendar,
+            userDefaults: defaults
+        )
+
+        #expect(due.count == 2)
+        #expect(due.allSatisfy { $0.schedule.energySiteId == "123456" })
+    }
+
     @Test func wallConnectorVitalsPowerIsCalculated() {
         let vitals = WallConnectorVitals(
             contactorClosed: true,
