@@ -1669,12 +1669,46 @@ enum MenuBarLabelMetric: String, CaseIterable, Identifiable {
     }
 }
 
+struct MenuBarLabelSelection {
+    static func metrics(from rawValue: String) -> [MenuBarLabelMetric] {
+        let selectedRawValues = Set(
+            rawValue
+                .split(separator: ",")
+                .map(String.init)
+        )
+        let metrics = MenuBarLabelMetric.allCases.filter { selectedRawValues.contains($0.rawValue) }
+        return metrics.isEmpty ? [.solar] : metrics
+    }
+
+    static func rawValue(for metrics: some Sequence<MenuBarLabelMetric>) -> String {
+        let selectedMetrics = Set(metrics)
+        let orderedMetrics = MenuBarLabelMetric.allCases.filter(selectedMetrics.contains)
+        return (orderedMetrics.isEmpty ? [.solar] : orderedMetrics)
+            .map(\.rawValue)
+            .joined(separator: ",")
+    }
+
+    static func toggling(
+        _ metric: MenuBarLabelMetric,
+        in rawValue: String
+    ) -> String {
+        var selectedMetrics = Set(metrics(from: rawValue))
+        if selectedMetrics.contains(metric) {
+            guard selectedMetrics.count > 1 else { return Self.rawValue(for: selectedMetrics) }
+            selectedMetrics.remove(metric)
+        } else {
+            selectedMetrics.insert(metric)
+        }
+        return Self.rawValue(for: selectedMetrics)
+    }
+}
+
 private struct PowerwallMenuBarLabel: View {
     @ObservedObject var viewModel: PowerwallViewModel
-    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricRaw: String = MenuBarLabelMetric.solar.rawValue
+    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricsRaw: String = MenuBarLabelMetric.solar.rawValue
 
-    private var metric: MenuBarLabelMetric {
-        MenuBarLabelMetric(rawValue: menuBarLabelMetricRaw) ?? .solar
+    private var metrics: [MenuBarLabelMetric] {
+        MenuBarLabelSelection.metrics(from: menuBarLabelMetricsRaw)
     }
 
     private func batteryTrendGlyph(wiggleWatts: Double) -> String {
@@ -1696,10 +1730,11 @@ private struct PowerwallMenuBarLabel: View {
         let batteryKW  = (viewModel.data?.battery.instantPower ?? 0) / 1000
         let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
 
-        let left: String = {
-            func fmt(_ value: Double) -> String {
-                formatPowerValue(value, precision: precision, showLessPrecision: viewModel.showLessPrecision)
-            }
+        func fmt(_ value: Double) -> String {
+            formatPowerValue(value, precision: precision, showLessPrecision: viewModel.showLessPrecision)
+        }
+
+        let selectedValues = metrics.map { metric in
             switch metric {
             case .solar:
                 return "\(metric.shortPrefix) \(fmt(solarKW)) kW"
@@ -1710,20 +1745,41 @@ private struct PowerwallMenuBarLabel: View {
             case .battery:
                 return "\(metric.shortPrefix) \(fmt(batteryKW)) kW"
             }
-        }()
+        }
+        let batteryStatus = "\(String(format: "%.0f", batteryPercentage))% \(trend)"
+            .trimmingCharacters(in: .whitespaces)
+        let label = (selectedValues + [batteryStatus])
+            .joined(separator: " · ")
 
         return AnyView(
-            Text("\(left) · \(batteryPercentage, specifier: "%.0f")% \(trend)")
+            Text(label)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-                .numericUpdateAnimation(for: "\(left)-\(batteryPercentage)-\(trend)")
+                .numericUpdateAnimation(for: "\(label)-\(batteryPercentage)-\(trend)")
         )
     }
 }
 
 private struct PowerwallMenuBarPopover: View {
     @ObservedObject var viewModel: PowerwallViewModel
-    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricRaw: String = MenuBarLabelMetric.solar.rawValue
+    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricsRaw: String = MenuBarLabelMetric.solar.rawValue
+
+    private var selectedMetrics: [MenuBarLabelMetric] {
+        MenuBarLabelSelection.metrics(from: menuBarLabelMetricsRaw)
+    }
+
+    private func selectionBinding(for metric: MenuBarLabelMetric) -> Binding<Bool> {
+        Binding {
+            selectedMetrics.contains(metric)
+        } set: { isSelected in
+            let isCurrentlySelected = selectedMetrics.contains(metric)
+            guard isSelected != isCurrentlySelected else { return }
+            menuBarLabelMetricsRaw = MenuBarLabelSelection.toggling(
+                metric,
+                in: menuBarLabelMetricsRaw
+            )
+        }
+    }
 
     var body: some View {
         guard viewModel.showInMenuBar else { return AnyView(EmptyView()) }
@@ -1733,13 +1789,19 @@ private struct PowerwallMenuBarPopover: View {
         return AnyView(
             VStack(alignment: .center, spacing: 16) {
 
-                Picker("Menu bar label", selection: $menuBarLabelMetricRaw) {
+                Menu {
                     ForEach(MenuBarLabelMetric.allCases) { option in
-                        Label(option.title, systemImage: option.symbol)
-                            .tag(option.rawValue)
+                        Toggle(isOn: selectionBinding(for: option)) {
+                            Label(option.title, systemImage: option.symbol)
+                        }
+                        .disabled(selectedMetrics.count == 1 && selectedMetrics.contains(option))
                     }
+                } label: {
+                    Label(
+                        selectedMetrics.map(\.title).joined(separator: ", "),
+                        systemImage: "menubar.rectangle"
+                    )
                 }
-                .pickerStyle(.menu)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Divider()

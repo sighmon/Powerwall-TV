@@ -11,6 +11,20 @@ import Testing
 
 struct Powerwall_TVTests {
 
+#if os(macOS)
+    @Test func menuBarSelectionReadsLegacyAndMultipleValuesInDisplayOrder() {
+        #expect(MenuBarLabelSelection.metrics(from: "battery") == [.battery])
+        #expect(MenuBarLabelSelection.metrics(from: "battery,solar,site") == [.solar, .site, .battery])
+        #expect(MenuBarLabelSelection.metrics(from: "unknown") == [.solar])
+    }
+
+    @Test func menuBarSelectionTogglesMetricsAndKeepsAtLeastOne() {
+        #expect(MenuBarLabelSelection.toggling(.load, in: "solar") == "solar,load")
+        #expect(MenuBarLabelSelection.toggling(.solar, in: "solar,load") == "load")
+        #expect(MenuBarLabelSelection.toggling(.solar, in: "solar") == "solar")
+    }
+#endif
+
     @Test func isOffGridReflectsGridStatus() {
         let viewModel = PowerwallViewModel()
 
