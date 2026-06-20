@@ -23,6 +23,25 @@ struct Powerwall_TVTests {
         #expect(MenuBarLabelSelection.toggling(.solar, in: "solar,load") == "load")
         #expect(MenuBarLabelSelection.toggling(.solar, in: "solar") == "solar")
     }
+
+    @Test func automaticMenuBarSelectionUsesGreatestAbsoluteEnergyFlow() {
+        #expect(
+            automaticMenuBarLabelMetric(
+                solarWatts: 1_200,
+                loadWatts: 3_400,
+                siteWatts: 500,
+                batteryWatts: -5_900
+            ) == .battery
+        )
+        #expect(
+            automaticMenuBarLabelMetric(
+                solarWatts: 6_100,
+                loadWatts: 3_400,
+                siteWatts: -5_900,
+                batteryWatts: 200
+            ) == .solar
+        )
+    }
 #endif
 
     @Test func isOffGridReflectsGridStatus() {

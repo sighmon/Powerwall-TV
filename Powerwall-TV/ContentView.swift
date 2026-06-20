@@ -1638,11 +1638,12 @@ private extension View {
 
 #if os(macOS)
 enum MenuBarLabelMetric: String, CaseIterable, Identifiable {
-    case solar, load, site, battery
+    case auto, solar, load, site, battery
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .auto: return "Auto"
         case .solar: return "Solar"
         case .load: return "Home"
         case .site: return "Grid"
@@ -1652,6 +1653,7 @@ enum MenuBarLabelMetric: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
+        case .auto: return "wand.and.sparkles"
         case .solar: return "sun.max.fill"
         case .load: return "house.fill"
         case .site: return "bolt.horizontal.fill"
@@ -1661,12 +1663,28 @@ enum MenuBarLabelMetric: String, CaseIterable, Identifiable {
 
     var shortPrefix: String {
         switch self {
+        case .auto: return ""
         case .solar: return "☀︎"
         case .load: return "⌂"
         case .site: return "⇄"
         case .battery: return "⚡︎"
         }
     }
+}
+
+func automaticMenuBarLabelMetric(
+    solarWatts: Double,
+    loadWatts: Double,
+    siteWatts: Double,
+    batteryWatts: Double
+) -> MenuBarLabelMetric {
+    let flows: [(metric: MenuBarLabelMetric, watts: Double)] = [
+        (.solar, solarWatts),
+        (.load, loadWatts),
+        (.site, siteWatts),
+        (.battery, batteryWatts)
+    ]
+    return flows.max { abs($0.watts) < abs($1.watts) }?.metric ?? .solar
 }
 
 struct MenuBarLabelSelection {
@@ -1724,18 +1742,38 @@ private struct PowerwallMenuBarLabel: View {
         let precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
         let trend = batteryTrendGlyph(wiggleWatts: 175.0)
 
-        let solarKW = (viewModel.data?.solar.instantPower ?? 0) / 1000
-        let loadKW  = (viewModel.data?.load.instantPower ?? 0) / 1000
-        let siteKW  = (viewModel.data?.site.instantPower ?? 0) / 1000
-        let batteryKW  = (viewModel.data?.battery.instantPower ?? 0) / 1000
+        let solarWatts = viewModel.data?.solar.instantPower ?? 0
+        let loadWatts = viewModel.data?.load.instantPower ?? 0
+        let siteWatts = viewModel.data?.site.instantPower ?? 0
+        let batteryWatts = viewModel.data?.battery.instantPower ?? 0
+        let solarKW = solarWatts / 1000
+        let loadKW = loadWatts / 1000
+        let siteKW = siteWatts / 1000
+        let batteryKW = batteryWatts / 1000
         let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
 
         func fmt(_ value: Double) -> String {
             formatPowerValue(value, precision: precision, showLessPrecision: viewModel.showLessPrecision)
         }
 
-        let selectedValues = metrics.map { metric in
+        let automaticMetric = automaticMenuBarLabelMetric(
+            solarWatts: solarWatts,
+            loadWatts: loadWatts,
+            siteWatts: siteWatts,
+            batteryWatts: batteryWatts
+        )
+        var renderedMetrics = [MenuBarLabelMetric]()
+        for metric in metrics {
+            let resolvedMetric = metric == .auto ? automaticMetric : metric
+            if !renderedMetrics.contains(resolvedMetric) {
+                renderedMetrics.append(resolvedMetric)
+            }
+        }
+
+        let selectedValues = renderedMetrics.map { metric in
             switch metric {
+            case .auto:
+                return ""
             case .solar:
                 return "\(metric.shortPrefix) \(fmt(solarKW)) kW"
             case .load:
