@@ -1664,10 +1664,10 @@ enum MenuBarLabelMetric: String, CaseIterable, Identifiable {
     var shortPrefix: String {
         switch self {
         case .auto: return ""
-        case .solar: return "☀︎"
-        case .load: return "⌂"
-        case .site: return "⇄"
-        case .battery: return "⚡︎"
+        case .solar: return "􀆮"
+        case .load: return "􀎟"
+        case .site: return "􀡸"
+        case .battery: return "􀫭"
         }
     }
 }
@@ -1731,8 +1731,8 @@ private struct PowerwallMenuBarLabel: View {
 
     private func batteryTrendGlyph(wiggleWatts: Double) -> String {
         let battWatts = viewModel.data?.battery.instantPower ?? 0
-        if battWatts > wiggleWatts { return "↓" }
-        if battWatts < -wiggleWatts { return "↑" }
+        if battWatts > wiggleWatts { return "▼" }
+        if battWatts < -wiggleWatts { return "▲" }
         return ""
     }
 
@@ -1740,7 +1740,7 @@ private struct PowerwallMenuBarLabel: View {
         guard viewModel.showInMenuBar else { return AnyView(EmptyView()) }
 
         let precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
-        let trend = batteryTrendGlyph(wiggleWatts: 175.0)
+        let trend = batteryTrendGlyph(wiggleWatts: 40.0)
 
         let solarWatts = viewModel.data?.solar.instantPower ?? 0
         let loadWatts = viewModel.data?.load.instantPower ?? 0
