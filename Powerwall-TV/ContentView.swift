@@ -16,6 +16,37 @@ func formatPowerValue(_ value: Double, precision: String, showLessPrecision: Boo
     return String(format: precision, displayedValue)
 }
 
+enum PowerwallRuntimeEstimator {
+    private static let capacityWhPerBattery = 13_500.0
+
+    static func estimateString(
+        batteryWatts: Double,
+        batteryCount: Double,
+        batteryPercentage: Double?,
+        idleThresholdWatts: Double
+    ) -> String? {
+        guard batteryCount > 0,
+              let batteryPercentage = batteryPercentage,
+              batteryPercentage >= 0,
+              batteryPercentage <= 100,
+              abs(batteryWatts) > idleThresholdWatts else {
+            return nil
+        }
+
+        let totalCapacityWh = capacityWhPerBattery * batteryCount
+        let remainingPercentage = batteryWatts < 0 ? 100 - batteryPercentage : batteryPercentage
+        let remainingWh = totalCapacityWh * (remainingPercentage / 100)
+        guard remainingWh > 0 else { return nil }
+
+        let totalMinutes = Int((remainingWh / abs(batteryWatts) * 60).rounded())
+        guard totalMinutes > 0 else { return nil }
+
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        return "\(hours) hours \(minutes) minutes"
+    }
+}
+
 private extension View {
     @ViewBuilder
     func numericUpdateAnimation<Value: Equatable>(for value: Value) -> some View {
@@ -48,6 +79,10 @@ struct ContentView: View {
     @State private var hideControlsOverlay = false
     @State private var detachedSiteSummaryHideTask: DispatchWorkItem?
     @State private var controlsOverlayHideTask: DispatchWorkItem?
+    @State private var showPowerwallRuntimeEstimate = false
+    @State private var powerwallRuntimeEstimateTask: DispatchWorkItem?
+    @State private var powerwallRuntimeEstimateTimerCycle = 0
+    @State private var lastPowerwallRuntimeEstimateTimerCycle: Int?
     @FocusState private var hasKeyboardFocus: Bool
     private let naturalSceneWidth: CGFloat = 1280
     private let naturalSceneHeight: CGFloat = 720
@@ -56,7 +91,8 @@ struct ContentView: View {
 #else
     private let powerwallPercentageWidth: Double = 5
 #endif
-    private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
+    private static let timerUpdateInterval: TimeInterval = 10
+    private let timer = Timer.publish(every: Self.timerUpdateInterval, on: .main, in: .common).autoconnect()
     private let timerTodaysTotal = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     private let timerElectricityMaps = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
@@ -230,6 +266,7 @@ struct ContentView: View {
         }
 #endif
         .onReceive(timer) { _ in
+            powerwallRuntimeEstimateTimerCycle += 1
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
             if showingSettings {
                 return
@@ -274,6 +311,11 @@ struct ContentView: View {
                 configureDemoElectricityGridData()
             } else {
                 viewModel.fetchElectricityMapsData()
+            }
+        }
+        .onReceive(viewModel.$data) { _ in
+            DispatchQueue.main.async {
+                cyclePowerwallRuntimeEstimateIfAvailable(for: powerwallRuntimeEstimateTimerCycle)
             }
         }
         .onAppear {
@@ -716,12 +758,26 @@ struct ContentView: View {
             .font(valueFont)
             .numericUpdateAnimation(for: "\(data.battery.instantPower)-\(viewModel.batteryPercentage?.percentage ?? 0)")
 
-            powerwallLabel
+            powerwallStatusLabel(data: data)
                 .opacity(0.6)
                 .fontWeight(.bold)
                 .font(labelFont)
+                .animation(.easeInOut(duration: 0.4), value: showPowerwallRuntimeEstimate)
         }
         .multilineTextAlignment(.center)
+    }
+
+    private func powerwallStatusLabel(data: PowerwallData) -> some View {
+        let estimate = powerwallRuntimeEstimateString(data: data, batteryPercentage: viewModel.batteryPercentage?.percentage)
+
+        return ZStack {
+            powerwallLabel
+                .opacity(showPowerwallRuntimeEstimate && estimate != nil ? 0 : 1)
+            if let estimate = estimate {
+                Text(estimate)
+                    .opacity(showPowerwallRuntimeEstimate ? 1 : 0)
+            }
+        }
     }
 
     private var powerwallLabel: Text {
@@ -740,6 +796,47 @@ struct ContentView: View {
         }
 
         return label
+    }
+
+    private func cyclePowerwallRuntimeEstimateIfAvailable(for timerCycle: Int) {
+        guard timerCycle > 0 else { return }
+        guard timerCycle.isMultiple(of: 2) else { return }
+        guard lastPowerwallRuntimeEstimateTimerCycle != timerCycle else { return }
+
+        powerwallRuntimeEstimateTask?.cancel()
+        powerwallRuntimeEstimateTask = nil
+
+        guard let data = viewModel.data,
+              powerwallRuntimeEstimateString(data: data, batteryPercentage: viewModel.batteryPercentage?.percentage) != nil else {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                showPowerwallRuntimeEstimate = false
+            }
+            return
+        }
+
+        lastPowerwallRuntimeEstimateTimerCycle = timerCycle
+
+        withAnimation(.easeInOut(duration: 0.4)) {
+            showPowerwallRuntimeEstimate = true
+        }
+
+        let task = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                showPowerwallRuntimeEstimate = false
+            }
+        }
+        powerwallRuntimeEstimateTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + (Self.timerUpdateInterval / 2), execute: task)
+    }
+
+    private func powerwallRuntimeEstimateString(data: PowerwallData, batteryPercentage: Double?) -> String? {
+        let wiggleWatts = wiggleWatts
+        return PowerwallRuntimeEstimator.estimateString(
+            batteryWatts: data.battery.instantPower,
+            batteryCount: data.battery.count,
+            batteryPercentage: batteryPercentage,
+            idleThresholdWatts: wiggleWatts
+        )
     }
 
     private var isWithinEnabledScheduleWindow: Bool {

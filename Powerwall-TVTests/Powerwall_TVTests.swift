@@ -84,6 +84,34 @@ struct Powerwall_TVTests {
         #expect(viewModel.batteryCountString() == " · 2x")
     }
 
+    @Test func powerwallRuntimeEstimateFormatsTimeUntilEmptyWhenDischarging() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 2_000,
+                batteryCount: 2,
+                batteryPercentage: 50,
+                idleThresholdWatts: 40
+            ) == "6 hours 45 minutes"
+        )
+    }
+
+    @Test func powerwallRuntimeEstimateFormatsTimeUntilFullWhenCharging() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: -3_000,
+                batteryCount: 1,
+                batteryPercentage: 20,
+                idleThresholdWatts: 40
+            ) == "3 hours 36 minutes"
+        )
+    }
+
+    @Test func powerwallRuntimeEstimateRequiresBatteryCountPercentageAndPowerFlow() {
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 0, batteryPercentage: 50, idleThresholdWatts: 40) == nil)
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 1, batteryPercentage: nil, idleThresholdWatts: 40) == nil)
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 20, batteryCount: 1, batteryPercentage: 50, idleThresholdWatts: 40) == nil)
+    }
+
     @Test func currentDateLabelMatchesTodayYesterdayAndOther() {
         let viewModel = PowerwallViewModel()
         let calendar = Calendar.current
