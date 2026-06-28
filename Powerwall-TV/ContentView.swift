@@ -27,8 +27,8 @@ enum PowerwallRuntimeEstimator {
     ) -> String? {
         guard batteryCount > 0,
               let batteryPercentage = batteryPercentage,
-              batteryPercentage >= 0,
-              batteryPercentage <= 100,
+              batteryPercentage > 0,
+              batteryPercentage < 100,
               abs(batteryWatts) > idleThresholdWatts else {
             return nil
         }

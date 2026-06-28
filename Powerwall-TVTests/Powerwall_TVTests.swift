@@ -141,6 +141,13 @@ struct Powerwall_TVTests {
         #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 20, batteryCount: 1, batteryPercentage: 50, idleThresholdWatts: 40) == nil)
     }
 
+    @Test func powerwallRuntimeEstimateIgnoresFullAndEmptyBatteryPercentages() {
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 1, batteryPercentage: 100, idleThresholdWatts: 40) == nil)
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: -2_000, batteryCount: 1, batteryPercentage: 100, idleThresholdWatts: 40) == nil)
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 1, batteryPercentage: 0, idleThresholdWatts: 40) == nil)
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: -2_000, batteryCount: 1, batteryPercentage: 0, idleThresholdWatts: 40) == nil)
+    }
+
     @Test func currentDateLabelMatchesTodayYesterdayAndOther() {
         let viewModel = PowerwallViewModel()
         let calendar = Calendar.current
