@@ -43,6 +43,12 @@ enum PowerwallRuntimeEstimator {
 
         let hours = totalMinutes / 60
         let minutes = totalMinutes % 60
+        if hours == 0 {
+            return "\(minutes) minutes"
+        }
+        if minutes == 0 {
+            return "\(hours) hours"
+        }
         return "\(hours) hours \(minutes) minutes"
     }
 }

@@ -106,6 +106,35 @@ struct Powerwall_TVTests {
         )
     }
 
+    @Test func powerwallRuntimeEstimateOmitsZeroHourAndMinuteUnits() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 4_500,
+                batteryCount: 1,
+                batteryPercentage: 50,
+                idleThresholdWatts: 40
+            ) == "1 hours 30 minutes"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 6_750,
+                batteryCount: 1,
+                batteryPercentage: 50,
+                idleThresholdWatts: 40
+            ) == "1 hours"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 27_000,
+                batteryCount: 1,
+                batteryPercentage: 10,
+                idleThresholdWatts: 40
+            ) == "3 minutes"
+        )
+    }
+
     @Test func powerwallRuntimeEstimateRequiresBatteryCountPercentageAndPowerFlow() {
         #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 0, batteryPercentage: 50, idleThresholdWatts: 40) == nil)
         #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 1, batteryPercentage: nil, idleThresholdWatts: 40) == nil)
