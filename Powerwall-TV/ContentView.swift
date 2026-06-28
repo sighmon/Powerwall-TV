@@ -276,20 +276,17 @@ struct ContentView: View {
             }
             if viewModel.ipAddress == "demo" {
                 let homeLoad = Double(arc4random_uniform(4096)) + 256
-                viewModel.data = PowerwallData(
-                    battery: PowerwallData.Battery(instantPower: homeLoad * 0.2, count: 1),
-                    load: PowerwallData.Load(instantPower: homeLoad),
-                    solar: PowerwallData.Solar(
-                        instantPower: homeLoad * 0.7,
-                        energyExported: 409600
-                    ),
-                    site: PowerwallData.Site(instantPower: homeLoad * 0.1),
-                    wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: homeLoad * 0.05)]
+                queueDemoPowerwallData(
+                    batteryPower: homeLoad * 0.2,
+                    batteryPercentage: 80,
+                    loadPower: homeLoad,
+                    solarPower: homeLoad * 0.7,
+                    solarEnergyExported: 409600,
+                    sitePower: homeLoad * 0.1,
+                    gridStatus: "SystemGridConnected",
+                    wallConnectorPower: homeLoad * 0.05,
+                    vehicleBatteryLevel: 64
                 )
-                viewModel.batteryPercentage = BatteryPercentage(percentage: 80)
-                viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
-                configureDemoVehicleData(batteryLevel: 64)
-                configureDemoElectricityGridData()
             } else {
                 switch viewModel.loginMode {
                 case .local:
@@ -308,7 +305,7 @@ struct ContentView: View {
         }
         .onReceive(timerElectricityMaps) { _ in
             if viewModel.ipAddress == "demo" {
-                configureDemoElectricityGridData()
+                queueDemoElectricityGridData()
             } else {
                 viewModel.fetchElectricityMapsData()
             }
@@ -320,28 +317,28 @@ struct ContentView: View {
         }
         .onAppear {
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
+            let isDemoMode = demo || viewModel.ipAddress == "demo"
             if demo {
-                viewModel.ipAddress = "demo"
+                DispatchQueue.main.async {
+                    viewModel.ipAddress = "demo"
+                }
             }
             PowerwallScheduleManager.shared.scheduleBackgroundRefresh()
             if shouldAutoOpenSettingsOnLaunch {
                 showingSettings = true
-            } else if viewModel.ipAddress == "demo" {
-                viewModel.data = PowerwallData(
-                    battery: PowerwallData.Battery(instantPower: 256, count: 1),
-                    load: PowerwallData.Load(instantPower: 2304),
-                    solar: PowerwallData.Solar(
-                        instantPower: 2048,
-                        energyExported: 4096000
-                    ),
-                    site: PowerwallData.Site(instantPower: 1024),
-                    wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: 512)]
+            } else if isDemoMode {
+                queueDemoPowerwallData(
+                    batteryPower: 256,
+                    batteryPercentage: 100,
+                    loadPower: 2304,
+                    solarPower: 2048,
+                    solarEnergyExported: 4096000,
+                    sitePower: 1024,
+                    gridStatus: "SystemIslandedActive",
+                    wallConnectorPower: 512,
+                    vehicleBatteryLevel: 80,
+                    siteName: "Home sweet home"
                 )
-                viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
-                viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
-                viewModel.siteName = "Home sweet home"
-                configureDemoVehicleData(batteryLevel: 80)
-                configureDemoElectricityGridData()
                 // viewModel.errorMessage = "An error has occured"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     startAnimations = true
@@ -1132,6 +1129,45 @@ struct ContentView: View {
     private func configureDemoElectricityGridData() {
         viewModel.gridCarbonIntensity = 256
         viewModel.gridFossilFuelPercentage = 58
+    }
+
+    private func queueDemoPowerwallData(
+        batteryPower: Double,
+        batteryPercentage: Double,
+        loadPower: Double,
+        solarPower: Double,
+        solarEnergyExported: Double,
+        sitePower: Double,
+        gridStatus: String,
+        wallConnectorPower: Double,
+        vehicleBatteryLevel: Double,
+        siteName: String? = nil
+    ) {
+        DispatchQueue.main.async {
+            viewModel.data = PowerwallData(
+                battery: PowerwallData.Battery(instantPower: batteryPower, count: 1),
+                load: PowerwallData.Load(instantPower: loadPower),
+                solar: PowerwallData.Solar(
+                    instantPower: solarPower,
+                    energyExported: solarEnergyExported
+                ),
+                site: PowerwallData.Site(instantPower: sitePower),
+                wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: wallConnectorPower)]
+            )
+            viewModel.batteryPercentage = BatteryPercentage(percentage: batteryPercentage)
+            viewModel.gridStatus = GridStatus(status: gridStatus)
+            if let siteName {
+                viewModel.siteName = siteName
+            }
+            configureDemoVehicleData(batteryLevel: vehicleBatteryLevel)
+            configureDemoElectricityGridData()
+        }
+    }
+
+    private func queueDemoElectricityGridData() {
+        DispatchQueue.main.async {
+            configureDemoElectricityGridData()
+        }
     }
 
     private func vehicleFirstName(_ vehicle: FleetVehicle) -> String {
