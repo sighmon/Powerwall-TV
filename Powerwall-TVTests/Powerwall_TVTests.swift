@@ -135,6 +135,26 @@ struct Powerwall_TVTests {
         )
     }
 
+    @Test func powerwallRuntimeEstimateFormatsDaysAndDropsMinutes() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 500,
+                batteryCount: 1,
+                batteryPercentage: 90,
+                idleThresholdWatts: 40
+            ) == "1 days"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 400,
+                batteryCount: 1,
+                batteryPercentage: 90,
+                idleThresholdWatts: 40
+            ) == "1 days 6 hours"
+        )
+    }
+
     @Test func powerwallRuntimeEstimateRequiresBatteryCountPercentageAndPowerFlow() {
         #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 0, batteryPercentage: 50, idleThresholdWatts: 40) == nil)
         #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 1, batteryPercentage: nil, idleThresholdWatts: 40) == nil)
