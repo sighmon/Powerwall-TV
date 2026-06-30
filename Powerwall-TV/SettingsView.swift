@@ -20,6 +20,7 @@ struct SettingsView: View {
     @Binding var electricityMapsZone: String
     @Binding var preventScreenSaver: Bool
     @Binding var showLessPrecision: Bool
+    @Binding var alwaysShowPowerwallRuntimeEstimate: Bool
     @Binding var showVehicles: Bool
     @Binding var showSchedulerButton: Bool
     @Binding var showInMenuBar: Bool
@@ -105,6 +106,7 @@ struct SettingsView: View {
                 Toggle("Auto-hide buttons", isOn: $autoHideButtonsOnOverlap)
 #endif
                 Toggle("Limit data to one decimal place", isOn: $showLessPrecision)
+                Toggle("Always show Powerwall estimate", isOn: $alwaysShowPowerwallRuntimeEstimate)
                 Toggle("Show schedule (beta)", isOn: $showSchedulerButton)
                 // For debugging vehicles on accounts without a v3 wall connector
                 // Toggle("Show vehicles", isOn: $showVehicles)
@@ -211,6 +213,7 @@ struct SettingsView: View {
         UserDefaults.standard.set(electricityMapsZone, forKey: "electricityMaps_zone")
         UserDefaults.standard.set(preventScreenSaver, forKey: "preventScreenSaver")
         UserDefaults.standard.set(showLessPrecision, forKey: "showLessPrecision")
+        UserDefaults.standard.set(alwaysShowPowerwallRuntimeEstimate, forKey: "alwaysShowPowerwallRuntimeEstimate")
         UserDefaults.standard.set(showVehicles, forKey: "showVehicles")
         UserDefaults.standard.set(showSchedulerButton, forKey: "showSchedulerButton")
         UserDefaults.standard.set(showInMenuBar, forKey: "showInMenuBar")
@@ -238,6 +241,7 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "autoHideSummaryOnOverlap")
         UserDefaults.standard.removeObject(forKey: "autoHideButtonsOnOverlap")
         UserDefaults.standard.removeObject(forKey: "showVehicles")
+        UserDefaults.standard.removeObject(forKey: "alwaysShowPowerwallRuntimeEstimate")
         UserDefaults.standard.removeObject(forKey: "showSchedulerButton")
         UserDefaults.standard.removeObject(forKey: "sceneScale")
         UserDefaults.standard.removeObject(forKey: "sceneHorizontalOffset")
@@ -247,6 +251,7 @@ struct SettingsView: View {
         autoHideSummaryOnOverlap = true
         autoHideButtonsOnOverlap = true
         showVehicles = false
+        alwaysShowPowerwallRuntimeEstimate = false
         showSchedulerButton = false
         sceneScale = 1.0
         sceneHorizontalOffset = 0.0
@@ -276,6 +281,7 @@ struct SettingsView_Previews: PreviewProvider {
             electricityMapsZone: .constant(""),
             preventScreenSaver: .constant(false),
             showLessPrecision: .constant(false),
+            alwaysShowPowerwallRuntimeEstimate: .constant(false),
             showVehicles: .constant(true),
             showSchedulerButton: .constant(true),
             showInMenuBar: .constant(false),

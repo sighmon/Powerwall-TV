@@ -113,7 +113,7 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 50,
                 idleThresholdWatts: 40
-            ) == "1 hours 30 minutes"
+            ) == "1 hour 30 minutes"
         )
 
         #expect(
@@ -122,7 +122,7 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 50,
                 idleThresholdWatts: 40
-            ) == "1 hours"
+            ) == "1 hour"
         )
 
         #expect(
@@ -133,6 +133,15 @@ struct Powerwall_TVTests {
                 idleThresholdWatts: 40
             ) == "3 minutes"
         )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 81_000,
+                batteryCount: 1,
+                batteryPercentage: 10,
+                idleThresholdWatts: 40
+            ) == "1 minute"
+        )
     }
 
     @Test func powerwallRuntimeEstimateFormatsDaysAndDropsMinutes() {
@@ -142,7 +151,7 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 90,
                 idleThresholdWatts: 40
-            ) == "1 days"
+            ) == "1 day"
         )
 
         #expect(
@@ -151,7 +160,25 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 90,
                 idleThresholdWatts: 40
-            ) == "1 days 6 hours"
+            ) == "1 day 6 hours"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 250,
+                batteryCount: 1,
+                batteryPercentage: 90,
+                idleThresholdWatts: 40
+            ) == "2 days"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 248,
+                batteryCount: 1,
+                batteryPercentage: 90,
+                idleThresholdWatts: 40
+            ) == "2 days 1 hour"
         )
     }
 

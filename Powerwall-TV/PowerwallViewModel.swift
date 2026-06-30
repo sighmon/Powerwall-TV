@@ -50,6 +50,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var password: String = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
     @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
+    @Published var alwaysShowPowerwallRuntimeEstimate: Bool = UserDefaults.standard.bool(forKey: "alwaysShowPowerwallRuntimeEstimate")
     @Published var showVehicles: Bool = UserDefaults.standard.object(forKey: "showVehicles") as? Bool ?? false
     @Published var showSchedulerButton: Bool = UserDefaults.standard.object(forKey: "showSchedulerButton") as? Bool ?? false
     @Published var showInMenuBar: Bool = UserDefaults.standard.bool(forKey: "showInMenuBar")

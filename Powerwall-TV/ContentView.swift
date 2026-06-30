@@ -47,17 +47,21 @@ enum PowerwallRuntimeEstimator {
             let days = hours / 24
             let remainingHours = hours % 24
             if remainingHours == 0 {
-                return "\(days) days"
+                return formattedUnit(days, singular: "day")
             }
-            return "\(days) days \(remainingHours) hours"
+            return "\(formattedUnit(days, singular: "day")) \(formattedUnit(remainingHours, singular: "hour"))"
         }
         if hours == 0 {
-            return "\(minutes) minutes"
+            return formattedUnit(minutes, singular: "minute")
         }
         if minutes == 0 {
-            return "\(hours) hours"
+            return formattedUnit(hours, singular: "hour")
         }
-        return "\(hours) hours \(minutes) minutes"
+        return "\(formattedUnit(hours, singular: "hour")) \(formattedUnit(minutes, singular: "minute"))"
+    }
+
+    private static func formattedUnit(_ value: Int, singular: String) -> String {
+        value == 1 ? "1 \(singular)" : "\(value) \(singular)s"
     }
 }
 
@@ -194,6 +198,7 @@ struct ContentView: View {
                 electricityMapsZone: $viewModel.electricityMapsZone,
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
+                alwaysShowPowerwallRuntimeEstimate: $viewModel.alwaysShowPowerwallRuntimeEstimate,
                 showVehicles: $viewModel.showVehicles,
                 showSchedulerButton: $viewModel.showSchedulerButton,
                 showInMenuBar: $viewModel.showInMenuBar,
@@ -243,6 +248,7 @@ struct ContentView: View {
                 electricityMapsZone: $viewModel.electricityMapsZone,
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
+                alwaysShowPowerwallRuntimeEstimate: $viewModel.alwaysShowPowerwallRuntimeEstimate,
                 showVehicles: $viewModel.showVehicles,
                 showSchedulerButton: $viewModel.showSchedulerButton,
                 showInMenuBar: $viewModel.showInMenuBar,
@@ -780,13 +786,14 @@ struct ContentView: View {
 
     private func powerwallStatusLabel(data: PowerwallData) -> some View {
         let estimate = powerwallRuntimeEstimateString(data: data, batteryPercentage: viewModel.batteryPercentage?.percentage)
+        let shouldShowEstimate = estimate != nil && (viewModel.alwaysShowPowerwallRuntimeEstimate || showPowerwallRuntimeEstimate)
 
         return ZStack {
             powerwallLabel
-                .opacity(showPowerwallRuntimeEstimate && estimate != nil ? 0 : 1)
+                .opacity(shouldShowEstimate ? 0 : 1)
             if let estimate = estimate {
                 Text(estimate)
-                    .opacity(showPowerwallRuntimeEstimate ? 1 : 0)
+                    .opacity(shouldShowEstimate ? 1 : 0)
             }
         }
     }
