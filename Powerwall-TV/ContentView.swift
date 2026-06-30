@@ -864,9 +864,15 @@ struct ContentView: View {
 
     private func powerwallRuntimeEstimateString(data: PowerwallData, batteryPercentage: Double?) -> String? {
         let wiggleWatts = wiggleWatts
+        guard let batteryWatts = viewModel.averagedBatteryWattsForRuntimeEstimate(
+            currentWatts: data.battery.instantPower,
+            idleThresholdWatts: wiggleWatts
+        ) else {
+            return nil
+        }
         let backupReservePercent = viewModel.loginMode == .fleetAPI ? viewModel.backupReservePercent : nil
         return PowerwallRuntimeEstimator.estimateString(
-            batteryWatts: data.battery.instantPower,
+            batteryWatts: batteryWatts,
             batteryCount: data.battery.count,
             batteryPercentage: batteryPercentage,
             backupReservePercent: backupReservePercent,

@@ -150,6 +150,66 @@ struct Powerwall_TVTests {
         )
     }
 
+    @Test func runtimeEstimateBatteryWattsUsesRecentSameDirectionAverage() {
+        let viewModel = PowerwallViewModel()
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        viewModel.recordRuntimeEstimateBatteryPower(1_000, at: start)
+        viewModel.recordRuntimeEstimateBatteryPower(3_000, at: start.addingTimeInterval(60))
+        viewModel.recordRuntimeEstimateBatteryPower(5_000, at: start.addingTimeInterval(120))
+
+        #expect(
+            viewModel.averagedBatteryWattsForRuntimeEstimate(
+                currentWatts: 5_000,
+                idleThresholdWatts: 40,
+                now: start.addingTimeInterval(120)
+            ) == 3_000
+        )
+    }
+
+    @Test func runtimeEstimateBatteryWattsIgnoresIdleSamples() {
+        let viewModel = PowerwallViewModel()
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        viewModel.recordRuntimeEstimateBatteryPower(2_000, at: start)
+        viewModel.recordRuntimeEstimateBatteryPower(20, at: start.addingTimeInterval(60))
+        viewModel.recordRuntimeEstimateBatteryPower(4_000, at: start.addingTimeInterval(120))
+
+        #expect(
+            viewModel.averagedBatteryWattsForRuntimeEstimate(
+                currentWatts: 4_000,
+                idleThresholdWatts: 40,
+                now: start.addingTimeInterval(120)
+            ) == 3_000
+        )
+
+        #expect(
+            viewModel.averagedBatteryWattsForRuntimeEstimate(
+                currentWatts: 20,
+                idleThresholdWatts: 40,
+                now: start.addingTimeInterval(120)
+            ) == nil
+        )
+    }
+
+    @Test func runtimeEstimateBatteryWattsResetsWhenDirectionChanges() {
+        let viewModel = PowerwallViewModel()
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        viewModel.recordRuntimeEstimateBatteryPower(1_000, at: start)
+        viewModel.recordRuntimeEstimateBatteryPower(3_000, at: start.addingTimeInterval(60))
+        viewModel.recordRuntimeEstimateBatteryPower(-2_000, at: start.addingTimeInterval(120))
+        viewModel.recordRuntimeEstimateBatteryPower(-4_000, at: start.addingTimeInterval(180))
+
+        #expect(
+            viewModel.averagedBatteryWattsForRuntimeEstimate(
+                currentWatts: -4_000,
+                idleThresholdWatts: 40,
+                now: start.addingTimeInterval(180)
+            ) == -3_000
+        )
+    }
+
     @Test func powerwallRuntimeEstimateOmitsZeroHourAndMinuteUnits() {
         #expect(
             PowerwallRuntimeEstimator.estimateString(

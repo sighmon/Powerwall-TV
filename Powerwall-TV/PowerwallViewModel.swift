@@ -80,6 +80,8 @@ class PowerwallViewModel: ObservableObject {
     private let redirectURI = "powerwalltv://app/callback"
     private let scopes = "openid energy_device_data vehicle_device_data energy_cmds offline_access"
     private var wiggleWatts = 10.0
+    private let runtimeEstimateAverageWindow: TimeInterval = 5 * 60
+    private var runtimeEstimateBatteryPowerSamples: [BatteryPowerSample] = []
 
     // Fleet API-specific properties
     @Published var accessToken: String = KeychainWrapper.standard.string(forKey: "fleetAPI_accessToken") ?? ""
@@ -722,9 +724,60 @@ class PowerwallViewModel: ObservableObject {
         return String(format: " · %.0fx", batteryCount)
     }
 
+    func recordRuntimeEstimateBatteryPower(_ watts: Double, at date: Date = Date()) {
+        let direction = batteryPowerDirection(watts)
+        if let previousDirection = runtimeEstimateBatteryPowerSamples.last.map({ batteryPowerDirection($0.watts) }),
+           let direction,
+           let previousDirection,
+           direction != previousDirection {
+            runtimeEstimateBatteryPowerSamples.removeAll()
+        }
+
+        runtimeEstimateBatteryPowerSamples.append(BatteryPowerSample(date: date, watts: watts))
+        pruneRuntimeEstimateBatteryPowerSamples(now: date)
+    }
+
+    func averagedBatteryWattsForRuntimeEstimate(
+        currentWatts: Double,
+        idleThresholdWatts: Double,
+        now: Date = Date()
+    ) -> Double? {
+        guard abs(currentWatts) > idleThresholdWatts,
+              let direction = batteryPowerDirection(currentWatts) else {
+            return nil
+        }
+
+        pruneRuntimeEstimateBatteryPowerSamples(now: now)
+
+        let cutoff = now.addingTimeInterval(-runtimeEstimateAverageWindow)
+        let matchingSamples = runtimeEstimateBatteryPowerSamples.filter { sample in
+            sample.date >= cutoff
+                && batteryPowerDirection(sample.watts) == direction
+                && abs(sample.watts) > idleThresholdWatts
+        }
+
+        guard !matchingSamples.isEmpty else {
+            return currentWatts
+        }
+
+        return matchingSamples.reduce(0) { $0 + $1.watts } / Double(matchingSamples.count)
+    }
+
+    private func batteryPowerDirection(_ watts: Double) -> Int? {
+        if watts > 0 { return 1 }
+        if watts < 0 { return -1 }
+        return nil
+    }
+
+    private func pruneRuntimeEstimateBatteryPowerSamples(now: Date) {
+        let cutoff = now.addingTimeInterval(-runtimeEstimateAverageWindow)
+        runtimeEstimateBatteryPowerSamples.removeAll { $0.date < cutoff }
+    }
+
     private func fetchLocalWallConnectorVitalsAndMerge(into base: PowerwallData) {
         let wallConnectorIP = wallConnectorIPAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !wallConnectorIP.isEmpty else {
+            self.recordRuntimeEstimateBatteryPower(base.battery.instantPower)
             self.data = base
             return
         }
@@ -767,6 +820,7 @@ class PowerwallViewModel: ObservableObject {
                     wallConnectors: [wallConnector]
                 )
 
+                self.recordRuntimeEstimateBatteryPower(merged.battery.instantPower)
                 self.data = merged
             }
             .store(in: &cancellables)
@@ -858,6 +912,7 @@ class PowerwallViewModel: ObservableObject {
                     wallConnectors: data.response.wallConnectors
                 )
                 self.persistLastChargingWallConnectorVIN(from: data.response.wallConnectors)
+                self.recordRuntimeEstimateBatteryPower(powerwall.battery.instantPower)
                 self.data = powerwall
                 self.batteryPercentage = BatteryPercentage(percentage: data.response.batteryPercentage)
                 self.gridStatus = GridStatus(status: data.response.gridStatus)
@@ -1965,6 +2020,11 @@ struct HistoricalDataPoint {
     let from: PowerFrom?
     let to: PowerTo?
     let source: PowerSource?
+}
+
+struct BatteryPowerSample {
+    let date: Date
+    let watts: Double
 }
 
 struct RegionResponse: Codable {
