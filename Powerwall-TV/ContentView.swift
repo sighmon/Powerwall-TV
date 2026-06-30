@@ -23,6 +23,7 @@ enum PowerwallRuntimeEstimator {
         batteryWatts: Double,
         batteryCount: Double,
         batteryPercentage: Double?,
+        backupReservePercent: Double? = nil,
         idleThresholdWatts: Double
     ) -> String? {
         guard batteryCount > 0,
@@ -34,7 +35,11 @@ enum PowerwallRuntimeEstimator {
         }
 
         let totalCapacityWh = capacityWhPerBattery * batteryCount
-        let remainingPercentage = batteryWatts < 0 ? 100 - batteryPercentage : batteryPercentage
+        let backupReservePercent = max(0, min(100, backupReservePercent ?? 0))
+        let targetPercentage = batteryWatts < 0 ? 100 : Int(backupReservePercent.rounded())
+        let remainingPercentage = batteryWatts < 0
+            ? 100 - batteryPercentage
+            : batteryPercentage - backupReservePercent
         let remainingWh = totalCapacityWh * (remainingPercentage / 100)
         guard remainingWh > 0 else { return nil }
 
@@ -47,17 +52,27 @@ enum PowerwallRuntimeEstimator {
             let days = hours / 24
             let remainingHours = hours % 24
             if remainingHours == 0 {
-                return formattedUnit(days, singular: "day")
+                return estimateWithTarget(formattedUnit(days, singular: "day"), targetPercentage: targetPercentage)
             }
-            return "\(formattedUnit(days, singular: "day")) \(formattedUnit(remainingHours, singular: "hour"))"
+            return estimateWithTarget(
+                "\(formattedUnit(days, singular: "day")) \(formattedUnit(remainingHours, singular: "hour"))",
+                targetPercentage: targetPercentage
+            )
         }
         if hours == 0 {
-            return formattedUnit(minutes, singular: "minute")
+            return estimateWithTarget(formattedUnit(minutes, singular: "minute"), targetPercentage: targetPercentage)
         }
         if minutes == 0 {
-            return formattedUnit(hours, singular: "hour")
+            return estimateWithTarget(formattedUnit(hours, singular: "hour"), targetPercentage: targetPercentage)
         }
-        return "\(formattedUnit(hours, singular: "hour")) \(formattedUnit(minutes, singular: "minute"))"
+        return estimateWithTarget(
+            "\(formattedUnit(hours, singular: "hour")) \(formattedUnit(minutes, singular: "minute"))",
+            targetPercentage: targetPercentage
+        )
+    }
+
+    private static func estimateWithTarget(_ estimate: String, targetPercentage: Int) -> String {
+        "\(estimate) to \(targetPercentage)%"
     }
 
     private static func formattedUnit(_ value: Int, singular: String) -> String {
@@ -849,10 +864,12 @@ struct ContentView: View {
 
     private func powerwallRuntimeEstimateString(data: PowerwallData, batteryPercentage: Double?) -> String? {
         let wiggleWatts = wiggleWatts
+        let backupReservePercent = viewModel.loginMode == .fleetAPI ? viewModel.backupReservePercent : nil
         return PowerwallRuntimeEstimator.estimateString(
             batteryWatts: data.battery.instantPower,
             batteryCount: data.battery.count,
             batteryPercentage: batteryPercentage,
+            backupReservePercent: backupReservePercent,
             idleThresholdWatts: wiggleWatts
         )
     }

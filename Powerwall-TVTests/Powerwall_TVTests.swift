@@ -91,7 +91,7 @@ struct Powerwall_TVTests {
                 batteryCount: 2,
                 batteryPercentage: 50,
                 idleThresholdWatts: 40
-            ) == "6 hours 45 minutes"
+            ) == "6 hours 45 minutes to 0%"
         )
     }
 
@@ -102,7 +102,51 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 20,
                 idleThresholdWatts: 40
-            ) == "3 hours 36 minutes"
+            ) == "3 hours 36 minutes to 100%"
+        )
+    }
+
+    @Test func powerwallRuntimeEstimateUsesBackupReserveWhenDischarging() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 2_000,
+                batteryCount: 1,
+                batteryPercentage: 60,
+                backupReservePercent: 20,
+                idleThresholdWatts: 40
+            ) == "2 hours 42 minutes to 20%"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 2_000,
+                batteryCount: 1,
+                batteryPercentage: 20,
+                backupReservePercent: 20,
+                idleThresholdWatts: 40
+            ) == nil
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 2_000,
+                batteryCount: 1,
+                batteryPercentage: 15,
+                backupReservePercent: 20,
+                idleThresholdWatts: 40
+            ) == nil
+        )
+    }
+
+    @Test func powerwallRuntimeEstimateIgnoresBackupReserveWhenCharging() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: -3_000,
+                batteryCount: 1,
+                batteryPercentage: 20,
+                backupReservePercent: 50,
+                idleThresholdWatts: 40
+            ) == "3 hours 36 minutes to 100%"
         )
     }
 
@@ -113,7 +157,7 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 50,
                 idleThresholdWatts: 40
-            ) == "1 hour 30 minutes"
+            ) == "1 hour 30 minutes to 0%"
         )
 
         #expect(
@@ -122,7 +166,7 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 50,
                 idleThresholdWatts: 40
-            ) == "1 hour"
+            ) == "1 hour to 0%"
         )
 
         #expect(
@@ -131,7 +175,7 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 10,
                 idleThresholdWatts: 40
-            ) == "3 minutes"
+            ) == "3 minutes to 0%"
         )
 
         #expect(
@@ -140,7 +184,7 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 10,
                 idleThresholdWatts: 40
-            ) == "1 minute"
+            ) == "1 minute to 0%"
         )
     }
 
@@ -151,7 +195,7 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 90,
                 idleThresholdWatts: 40
-            ) == "1 day"
+            ) == "1 day to 0%"
         )
 
         #expect(
@@ -160,7 +204,7 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 90,
                 idleThresholdWatts: 40
-            ) == "1 day 6 hours"
+            ) == "1 day 6 hours to 0%"
         )
 
         #expect(
@@ -169,7 +213,7 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 90,
                 idleThresholdWatts: 40
-            ) == "2 days"
+            ) == "2 days to 0%"
         )
 
         #expect(
@@ -178,7 +222,7 @@ struct Powerwall_TVTests {
                 batteryCount: 1,
                 batteryPercentage: 90,
                 idleThresholdWatts: 40
-            ) == "2 days 1 hour"
+            ) == "2 days 1 hour to 0%"
         )
     }
 
@@ -213,6 +257,24 @@ struct Powerwall_TVTests {
         formatter.dateStyle = .medium
         viewModel.currentEndDate = fixedDate
         #expect(viewModel.currentDateLabel == formatter.string(from: fixedDate))
+    }
+
+    @Test func fleetSiteInfoDecodesBackupReservePercent() throws {
+        let json = """
+        {
+          "response": {
+            "id": "12345",
+            "site_name": "Home",
+            "battery_count": 2,
+            "backup_reserve_percent": 20,
+            "version": "24.44.0"
+          }
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(SiteInfoResponse.self, from: Data(json.utf8))
+        #expect(decoded.response.batteryCount == 2)
+        #expect(decoded.response.backupReservePercent == 20)
     }
 
     @Test func interpolateZeroCrossingFindsMidpoint() {

@@ -94,6 +94,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var currentEndDate: Date = Date()
     @Published var solarEnergyTodayWh: Double?
     @Published var batteryCount: Double?
+    @Published var backupReservePercent: Double?
     @Published var version: String?
     @Published var installationDate: Date?
     @Published var vehicles: [FleetVehicle] = []
@@ -630,6 +631,7 @@ class PowerwallViewModel: ObservableObject {
                 }
             } receiveValue: { [weak self] data in
                 guard let self = self else { return }
+                self.backupReservePercent = nil
                 self.fetchLocalWallConnectorVitalsAndMerge(into: data)
             }
             .store(in: &cancellables)
@@ -1260,6 +1262,7 @@ class PowerwallViewModel: ObservableObject {
                 guard let self, self.energySiteId == requestedEnergySiteId else { return }
 
                 self.batteryCount = payload.response.batteryCount
+                self.backupReservePercent = payload.response.backupReservePercent
                 self.version = payload.response.version
                 self.installationDate = payload.response.installationDate
                 if let siteName = payload.response.energySiteDisplayName {
@@ -1845,6 +1848,7 @@ struct SiteInfo: Codable {
     let siteDisplayName: String?
     let version: String?
     let batteryCount: Double?
+    let backupReservePercent: Double?
     let installationDate: Date?
 
     enum CodingKeys: String, CodingKey {
@@ -1856,6 +1860,7 @@ struct SiteInfo: Codable {
         case siteDisplayName = "site_display_name"
         case version
         case batteryCount = "battery_count"
+        case backupReservePercent = "backup_reserve_percent"
         case installationDate = "installation_date"
     }
 
