@@ -11,6 +11,39 @@ import Testing
 
 struct Powerwall_TVTests {
 
+#if os(macOS)
+    @Test func menuBarSelectionReadsLegacyAndMultipleValuesInDisplayOrder() {
+        #expect(MenuBarLabelSelection.metrics(from: "battery") == [.battery])
+        #expect(MenuBarLabelSelection.metrics(from: "battery,solar,site") == [.solar, .site, .battery])
+        #expect(MenuBarLabelSelection.metrics(from: "unknown") == [.solar])
+    }
+
+    @Test func menuBarSelectionTogglesMetricsAndKeepsAtLeastOne() {
+        #expect(MenuBarLabelSelection.toggling(.load, in: "solar") == "solar,load")
+        #expect(MenuBarLabelSelection.toggling(.solar, in: "solar,load") == "load")
+        #expect(MenuBarLabelSelection.toggling(.solar, in: "solar") == "solar")
+    }
+
+    @Test func automaticMenuBarSelectionUsesGreatestAbsoluteEnergyFlow() {
+        #expect(
+            automaticMenuBarLabelMetric(
+                solarWatts: 1_200,
+                loadWatts: 3_400,
+                siteWatts: 500,
+                batteryWatts: -5_900
+            ) == .battery
+        )
+        #expect(
+            automaticMenuBarLabelMetric(
+                solarWatts: 6_100,
+                loadWatts: 3_400,
+                siteWatts: -5_900,
+                batteryWatts: 200
+            ) == .solar
+        )
+    }
+#endif
+
     @Test func isOffGridReflectsGridStatus() {
         let viewModel = PowerwallViewModel()
 
@@ -51,6 +84,221 @@ struct Powerwall_TVTests {
         #expect(viewModel.batteryCountString() == " · 2x")
     }
 
+    @Test func powerwallRuntimeEstimateFormatsTimeUntilEmptyWhenDischarging() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 2_000,
+                batteryCount: 2,
+                batteryPercentage: 50,
+                idleThresholdWatts: 40
+            ) == "6 hours 45 minutes to 0%"
+        )
+    }
+
+    @Test func powerwallRuntimeEstimateFormatsTimeUntilFullWhenCharging() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: -3_000,
+                batteryCount: 1,
+                batteryPercentage: 20,
+                idleThresholdWatts: 40
+            ) == "3 hours 36 minutes to 100%"
+        )
+    }
+
+    @Test func powerwallRuntimeEstimateUsesBackupReserveWhenDischarging() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 2_000,
+                batteryCount: 1,
+                batteryPercentage: 60,
+                backupReservePercent: 20,
+                idleThresholdWatts: 40
+            ) == "2 hours 42 minutes to 20%"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 2_000,
+                batteryCount: 1,
+                batteryPercentage: 20,
+                backupReservePercent: 20,
+                idleThresholdWatts: 40
+            ) == nil
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 2_000,
+                batteryCount: 1,
+                batteryPercentage: 15,
+                backupReservePercent: 20,
+                idleThresholdWatts: 40
+            ) == nil
+        )
+    }
+
+    @Test func powerwallRuntimeEstimateIgnoresBackupReserveWhenCharging() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: -3_000,
+                batteryCount: 1,
+                batteryPercentage: 20,
+                backupReservePercent: 50,
+                idleThresholdWatts: 40
+            ) == "3 hours 36 minutes to 100%"
+        )
+    }
+
+    @Test func runtimeEstimateBatteryWattsUsesRecentSameDirectionAverage() {
+        let viewModel = PowerwallViewModel()
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        viewModel.recordRuntimeEstimateBatteryPower(1_000, at: start)
+        viewModel.recordRuntimeEstimateBatteryPower(3_000, at: start.addingTimeInterval(60))
+        viewModel.recordRuntimeEstimateBatteryPower(5_000, at: start.addingTimeInterval(120))
+
+        #expect(
+            viewModel.averagedBatteryWattsForRuntimeEstimate(
+                currentWatts: 5_000,
+                idleThresholdWatts: 40,
+                now: start.addingTimeInterval(120)
+            ) == 3_000
+        )
+    }
+
+    @Test func runtimeEstimateBatteryWattsIgnoresIdleSamples() {
+        let viewModel = PowerwallViewModel()
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        viewModel.recordRuntimeEstimateBatteryPower(2_000, at: start)
+        viewModel.recordRuntimeEstimateBatteryPower(20, at: start.addingTimeInterval(60))
+        viewModel.recordRuntimeEstimateBatteryPower(4_000, at: start.addingTimeInterval(120))
+
+        #expect(
+            viewModel.averagedBatteryWattsForRuntimeEstimate(
+                currentWatts: 4_000,
+                idleThresholdWatts: 40,
+                now: start.addingTimeInterval(120)
+            ) == 3_000
+        )
+
+        #expect(
+            viewModel.averagedBatteryWattsForRuntimeEstimate(
+                currentWatts: 20,
+                idleThresholdWatts: 40,
+                now: start.addingTimeInterval(120)
+            ) == nil
+        )
+    }
+
+    @Test func runtimeEstimateBatteryWattsResetsWhenDirectionChanges() {
+        let viewModel = PowerwallViewModel()
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        viewModel.recordRuntimeEstimateBatteryPower(1_000, at: start)
+        viewModel.recordRuntimeEstimateBatteryPower(3_000, at: start.addingTimeInterval(60))
+        viewModel.recordRuntimeEstimateBatteryPower(-2_000, at: start.addingTimeInterval(120))
+        viewModel.recordRuntimeEstimateBatteryPower(-4_000, at: start.addingTimeInterval(180))
+
+        #expect(
+            viewModel.averagedBatteryWattsForRuntimeEstimate(
+                currentWatts: -4_000,
+                idleThresholdWatts: 40,
+                now: start.addingTimeInterval(180)
+            ) == -3_000
+        )
+    }
+
+    @Test func powerwallRuntimeEstimateOmitsZeroHourAndMinuteUnits() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 4_500,
+                batteryCount: 1,
+                batteryPercentage: 50,
+                idleThresholdWatts: 40
+            ) == "1 hour 30 minutes to 0%"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 6_750,
+                batteryCount: 1,
+                batteryPercentage: 50,
+                idleThresholdWatts: 40
+            ) == "1 hour to 0%"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 27_000,
+                batteryCount: 1,
+                batteryPercentage: 10,
+                idleThresholdWatts: 40
+            ) == "3 minutes to 0%"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 81_000,
+                batteryCount: 1,
+                batteryPercentage: 10,
+                idleThresholdWatts: 40
+            ) == "1 minute to 0%"
+        )
+    }
+
+    @Test func powerwallRuntimeEstimateFormatsDaysAndDropsMinutes() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 500,
+                batteryCount: 1,
+                batteryPercentage: 90,
+                idleThresholdWatts: 40
+            ) == "1 day to 0%"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 400,
+                batteryCount: 1,
+                batteryPercentage: 90,
+                idleThresholdWatts: 40
+            ) == "1 day 6 hours to 0%"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 250,
+                batteryCount: 1,
+                batteryPercentage: 90,
+                idleThresholdWatts: 40
+            ) == "2 days to 0%"
+        )
+
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 248,
+                batteryCount: 1,
+                batteryPercentage: 90,
+                idleThresholdWatts: 40
+            ) == "2 days 1 hour to 0%"
+        )
+    }
+
+    @Test func powerwallRuntimeEstimateRequiresBatteryCountPercentageAndPowerFlow() {
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 0, batteryPercentage: 50, idleThresholdWatts: 40) == nil)
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 1, batteryPercentage: nil, idleThresholdWatts: 40) == nil)
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 20, batteryCount: 1, batteryPercentage: 50, idleThresholdWatts: 40) == nil)
+    }
+
+    @Test func powerwallRuntimeEstimateIgnoresFullAndEmptyBatteryPercentages() {
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 1, batteryPercentage: 100, idleThresholdWatts: 40) == nil)
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: -2_000, batteryCount: 1, batteryPercentage: 100, idleThresholdWatts: 40) == nil)
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 1, batteryPercentage: 0, idleThresholdWatts: 40) == nil)
+        #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: -2_000, batteryCount: 1, batteryPercentage: 0, idleThresholdWatts: 40) == nil)
+    }
+
     @Test func currentDateLabelMatchesTodayYesterdayAndOther() {
         let viewModel = PowerwallViewModel()
         let calendar = Calendar.current
@@ -69,6 +317,24 @@ struct Powerwall_TVTests {
         formatter.dateStyle = .medium
         viewModel.currentEndDate = fixedDate
         #expect(viewModel.currentDateLabel == formatter.string(from: fixedDate))
+    }
+
+    @Test func fleetSiteInfoDecodesBackupReservePercent() throws {
+        let json = """
+        {
+          "response": {
+            "id": "12345",
+            "site_name": "Home",
+            "battery_count": 2,
+            "backup_reserve_percent": 20,
+            "version": "24.44.0"
+          }
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(SiteInfoResponse.self, from: Data(json.utf8))
+        #expect(decoded.response.batteryCount == 2)
+        #expect(decoded.response.backupReservePercent == 20)
     }
 
     @Test func interpolateZeroCrossingFindsMidpoint() {

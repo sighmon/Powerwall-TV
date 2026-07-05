@@ -50,6 +50,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var password: String = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
     @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
+    @Published var alwaysShowPowerwallRuntimeEstimate: Bool = UserDefaults.standard.bool(forKey: "alwaysShowPowerwallRuntimeEstimate")
     @Published var showVehicles: Bool = UserDefaults.standard.object(forKey: "showVehicles") as? Bool ?? false
     @Published var showSchedulerButton: Bool = UserDefaults.standard.object(forKey: "showSchedulerButton") as? Bool ?? false
     @Published var showInMenuBar: Bool = UserDefaults.standard.bool(forKey: "showInMenuBar")
@@ -79,6 +80,8 @@ class PowerwallViewModel: ObservableObject {
     private let redirectURI = "powerwalltv://app/callback"
     private let scopes = "openid energy_device_data vehicle_device_data energy_cmds offline_access"
     private var wiggleWatts = 10.0
+    private let runtimeEstimateAverageWindow: TimeInterval = 5 * 60
+    private var runtimeEstimateBatteryPowerSamples: [BatteryPowerSample] = []
 
     // Fleet API-specific properties
     @Published var accessToken: String = KeychainWrapper.standard.string(forKey: "fleetAPI_accessToken") ?? ""
@@ -93,6 +96,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var currentEndDate: Date = Date()
     @Published var solarEnergyTodayWh: Double?
     @Published var batteryCount: Double?
+    @Published var backupReservePercent: Double?
     @Published var version: String?
     @Published var installationDate: Date?
     @Published var vehicles: [FleetVehicle] = []
@@ -629,6 +633,7 @@ class PowerwallViewModel: ObservableObject {
                 }
             } receiveValue: { [weak self] data in
                 guard let self = self else { return }
+                self.backupReservePercent = nil
                 self.fetchLocalWallConnectorVitalsAndMerge(into: data)
             }
             .store(in: &cancellables)
@@ -719,9 +724,60 @@ class PowerwallViewModel: ObservableObject {
         return String(format: " · %.0fx", batteryCount)
     }
 
+    func recordRuntimeEstimateBatteryPower(_ watts: Double, at date: Date = Date()) {
+        let direction = batteryPowerDirection(watts)
+        if let previousDirection = runtimeEstimateBatteryPowerSamples.last.map({ batteryPowerDirection($0.watts) }),
+           let direction,
+           let previousDirection,
+           direction != previousDirection {
+            runtimeEstimateBatteryPowerSamples.removeAll()
+        }
+
+        runtimeEstimateBatteryPowerSamples.append(BatteryPowerSample(date: date, watts: watts))
+        pruneRuntimeEstimateBatteryPowerSamples(now: date)
+    }
+
+    func averagedBatteryWattsForRuntimeEstimate(
+        currentWatts: Double,
+        idleThresholdWatts: Double,
+        now: Date = Date()
+    ) -> Double? {
+        guard abs(currentWatts) > idleThresholdWatts,
+              let direction = batteryPowerDirection(currentWatts) else {
+            return nil
+        }
+
+        pruneRuntimeEstimateBatteryPowerSamples(now: now)
+
+        let cutoff = now.addingTimeInterval(-runtimeEstimateAverageWindow)
+        let matchingSamples = runtimeEstimateBatteryPowerSamples.filter { sample in
+            sample.date >= cutoff
+                && batteryPowerDirection(sample.watts) == direction
+                && abs(sample.watts) > idleThresholdWatts
+        }
+
+        guard !matchingSamples.isEmpty else {
+            return currentWatts
+        }
+
+        return matchingSamples.reduce(0) { $0 + $1.watts } / Double(matchingSamples.count)
+    }
+
+    private func batteryPowerDirection(_ watts: Double) -> Int? {
+        if watts > 0 { return 1 }
+        if watts < 0 { return -1 }
+        return nil
+    }
+
+    private func pruneRuntimeEstimateBatteryPowerSamples(now: Date) {
+        let cutoff = now.addingTimeInterval(-runtimeEstimateAverageWindow)
+        runtimeEstimateBatteryPowerSamples.removeAll { $0.date < cutoff }
+    }
+
     private func fetchLocalWallConnectorVitalsAndMerge(into base: PowerwallData) {
         let wallConnectorIP = wallConnectorIPAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !wallConnectorIP.isEmpty else {
+            self.recordRuntimeEstimateBatteryPower(base.battery.instantPower)
             self.data = base
             return
         }
@@ -764,6 +820,7 @@ class PowerwallViewModel: ObservableObject {
                     wallConnectors: [wallConnector]
                 )
 
+                self.recordRuntimeEstimateBatteryPower(merged.battery.instantPower)
                 self.data = merged
             }
             .store(in: &cancellables)
@@ -855,6 +912,7 @@ class PowerwallViewModel: ObservableObject {
                     wallConnectors: data.response.wallConnectors
                 )
                 self.persistLastChargingWallConnectorVIN(from: data.response.wallConnectors)
+                self.recordRuntimeEstimateBatteryPower(powerwall.battery.instantPower)
                 self.data = powerwall
                 self.batteryPercentage = BatteryPercentage(percentage: data.response.batteryPercentage)
                 self.gridStatus = GridStatus(status: data.response.gridStatus)
@@ -1259,6 +1317,7 @@ class PowerwallViewModel: ObservableObject {
                 guard let self, self.energySiteId == requestedEnergySiteId else { return }
 
                 self.batteryCount = payload.response.batteryCount
+                self.backupReservePercent = payload.response.backupReservePercent
                 self.version = payload.response.version
                 self.installationDate = payload.response.installationDate
                 if let siteName = payload.response.energySiteDisplayName {
@@ -1844,6 +1903,7 @@ struct SiteInfo: Codable {
     let siteDisplayName: String?
     let version: String?
     let batteryCount: Double?
+    let backupReservePercent: Double?
     let installationDate: Date?
 
     enum CodingKeys: String, CodingKey {
@@ -1855,6 +1915,7 @@ struct SiteInfo: Codable {
         case siteDisplayName = "site_display_name"
         case version
         case batteryCount = "battery_count"
+        case backupReservePercent = "backup_reserve_percent"
         case installationDate = "installation_date"
     }
 
@@ -1959,6 +2020,11 @@ struct HistoricalDataPoint {
     let from: PowerFrom?
     let to: PowerTo?
     let source: PowerSource?
+}
+
+struct BatteryPowerSample {
+    let date: Date
+    let watts: Double
 }
 
 struct RegionResponse: Codable {

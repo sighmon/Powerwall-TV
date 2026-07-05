@@ -16,6 +16,70 @@ func formatPowerValue(_ value: Double, precision: String, showLessPrecision: Boo
     return String(format: precision, displayedValue)
 }
 
+enum PowerwallRuntimeEstimator {
+    private static let capacityWhPerBattery = 13_500.0
+
+    static func estimateString(
+        batteryWatts: Double,
+        batteryCount: Double,
+        batteryPercentage: Double?,
+        backupReservePercent: Double? = nil,
+        idleThresholdWatts: Double
+    ) -> String? {
+        guard batteryCount > 0,
+              let batteryPercentage = batteryPercentage,
+              batteryPercentage > 0,
+              batteryPercentage < 100,
+              abs(batteryWatts) > idleThresholdWatts else {
+            return nil
+        }
+
+        let totalCapacityWh = capacityWhPerBattery * batteryCount
+        let backupReservePercent = max(0, min(100, backupReservePercent ?? 0))
+        let targetPercentage = batteryWatts < 0 ? 100 : Int(backupReservePercent.rounded())
+        let remainingPercentage = batteryWatts < 0
+            ? 100 - batteryPercentage
+            : batteryPercentage - backupReservePercent
+        let remainingWh = totalCapacityWh * (remainingPercentage / 100)
+        guard remainingWh > 0 else { return nil }
+
+        let totalMinutes = Int((remainingWh / abs(batteryWatts) * 60).rounded())
+        guard totalMinutes > 0 else { return nil }
+
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours >= 24 {
+            let days = hours / 24
+            let remainingHours = hours % 24
+            if remainingHours == 0 {
+                return estimateWithTarget(formattedUnit(days, singular: "day"), targetPercentage: targetPercentage)
+            }
+            return estimateWithTarget(
+                "\(formattedUnit(days, singular: "day")) \(formattedUnit(remainingHours, singular: "hour"))",
+                targetPercentage: targetPercentage
+            )
+        }
+        if hours == 0 {
+            return estimateWithTarget(formattedUnit(minutes, singular: "minute"), targetPercentage: targetPercentage)
+        }
+        if minutes == 0 {
+            return estimateWithTarget(formattedUnit(hours, singular: "hour"), targetPercentage: targetPercentage)
+        }
+        return estimateWithTarget(
+            "\(formattedUnit(hours, singular: "hour")) \(formattedUnit(minutes, singular: "minute"))",
+            targetPercentage: targetPercentage
+        )
+    }
+
+    private static func estimateWithTarget(_ estimate: String, targetPercentage: Int) -> String {
+        "\(estimate) to \(targetPercentage)%"
+    }
+
+    private static func formattedUnit(_ value: Int, singular: String) -> String {
+        value == 1 ? "1 \(singular)" : "\(value) \(singular)s"
+    }
+}
+
 private extension View {
     @ViewBuilder
     func numericUpdateAnimation<Value: Equatable>(for value: Value) -> some View {
@@ -48,6 +112,10 @@ struct ContentView: View {
     @State private var hideControlsOverlay = false
     @State private var detachedSiteSummaryHideTask: DispatchWorkItem?
     @State private var controlsOverlayHideTask: DispatchWorkItem?
+    @State private var showPowerwallRuntimeEstimate = false
+    @State private var powerwallRuntimeEstimateTask: DispatchWorkItem?
+    @State private var powerwallRuntimeEstimateTimerCycle = 0
+    @State private var lastPowerwallRuntimeEstimateTimerCycle: Int?
     @FocusState private var hasKeyboardFocus: Bool
     private let naturalSceneWidth: CGFloat = 1280
     private let naturalSceneHeight: CGFloat = 720
@@ -56,7 +124,8 @@ struct ContentView: View {
 #else
     private let powerwallPercentageWidth: Double = 5
 #endif
-    private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
+    private static let timerUpdateInterval: TimeInterval = 10
+    private let timer = Timer.publish(every: Self.timerUpdateInterval, on: .main, in: .common).autoconnect()
     private let timerTodaysTotal = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     private let timerElectricityMaps = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
@@ -144,6 +213,7 @@ struct ContentView: View {
                 electricityMapsZone: $viewModel.electricityMapsZone,
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
+                alwaysShowPowerwallRuntimeEstimate: $viewModel.alwaysShowPowerwallRuntimeEstimate,
                 showVehicles: $viewModel.showVehicles,
                 showSchedulerButton: $viewModel.showSchedulerButton,
                 showInMenuBar: $viewModel.showInMenuBar,
@@ -193,6 +263,7 @@ struct ContentView: View {
                 electricityMapsZone: $viewModel.electricityMapsZone,
                 preventScreenSaver: $viewModel.preventScreenSaver,
                 showLessPrecision: $viewModel.showLessPrecision,
+                alwaysShowPowerwallRuntimeEstimate: $viewModel.alwaysShowPowerwallRuntimeEstimate,
                 showVehicles: $viewModel.showVehicles,
                 showSchedulerButton: $viewModel.showSchedulerButton,
                 showInMenuBar: $viewModel.showInMenuBar,
@@ -230,6 +301,7 @@ struct ContentView: View {
         }
 #endif
         .onReceive(timer) { _ in
+            powerwallRuntimeEstimateTimerCycle += 1
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
             if showingSettings {
                 return
@@ -239,20 +311,17 @@ struct ContentView: View {
             }
             if viewModel.ipAddress == "demo" {
                 let homeLoad = Double(arc4random_uniform(4096)) + 256
-                viewModel.data = PowerwallData(
-                    battery: PowerwallData.Battery(instantPower: homeLoad * 0.2, count: 1),
-                    load: PowerwallData.Load(instantPower: homeLoad),
-                    solar: PowerwallData.Solar(
-                        instantPower: homeLoad * 0.7,
-                        energyExported: 409600
-                    ),
-                    site: PowerwallData.Site(instantPower: homeLoad * 0.1),
-                    wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: homeLoad * 0.05)]
+                queueDemoPowerwallData(
+                    batteryPower: homeLoad * 0.2,
+                    batteryPercentage: 80,
+                    loadPower: homeLoad,
+                    solarPower: homeLoad * 0.7,
+                    solarEnergyExported: 409600,
+                    sitePower: homeLoad * 0.1,
+                    gridStatus: "SystemGridConnected",
+                    wallConnectorPower: homeLoad * 0.05,
+                    vehicleBatteryLevel: 64
                 )
-                viewModel.batteryPercentage = BatteryPercentage(percentage: 80)
-                viewModel.gridStatus = GridStatus(status: "SystemGridConnected")
-                configureDemoVehicleData(batteryLevel: 64)
-                configureDemoElectricityGridData()
             } else {
                 switch viewModel.loginMode {
                 case .local:
@@ -271,35 +340,40 @@ struct ContentView: View {
         }
         .onReceive(timerElectricityMaps) { _ in
             if viewModel.ipAddress == "demo" {
-                configureDemoElectricityGridData()
+                queueDemoElectricityGridData()
             } else {
                 viewModel.fetchElectricityMapsData()
             }
         }
+        .onReceive(viewModel.$data) { _ in
+            DispatchQueue.main.async {
+                cyclePowerwallRuntimeEstimateIfAvailable(for: powerwallRuntimeEstimateTimerCycle)
+            }
+        }
         .onAppear {
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
+            let isDemoMode = demo || viewModel.ipAddress == "demo"
             if demo {
-                viewModel.ipAddress = "demo"
+                DispatchQueue.main.async {
+                    viewModel.ipAddress = "demo"
+                }
             }
             PowerwallScheduleManager.shared.scheduleBackgroundRefresh()
             if shouldAutoOpenSettingsOnLaunch {
                 showingSettings = true
-            } else if viewModel.ipAddress == "demo" {
-                viewModel.data = PowerwallData(
-                    battery: PowerwallData.Battery(instantPower: 256, count: 1),
-                    load: PowerwallData.Load(instantPower: 2304),
-                    solar: PowerwallData.Solar(
-                        instantPower: 2048,
-                        energyExported: 4096000
-                    ),
-                    site: PowerwallData.Site(instantPower: 1024),
-                    wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: 512)]
+            } else if isDemoMode {
+                queueDemoPowerwallData(
+                    batteryPower: 256,
+                    batteryPercentage: 100,
+                    loadPower: 2304,
+                    solarPower: 2048,
+                    solarEnergyExported: 4096000,
+                    sitePower: 1024,
+                    gridStatus: "SystemIslandedActive",
+                    wallConnectorPower: 512,
+                    vehicleBatteryLevel: 80,
+                    siteName: "Home sweet home"
                 )
-                viewModel.batteryPercentage = BatteryPercentage(percentage: 100)
-                viewModel.gridStatus = GridStatus(status: "SystemIslandedActive")
-                viewModel.siteName = "Home sweet home"
-                configureDemoVehicleData(batteryLevel: 80)
-                configureDemoElectricityGridData()
                 // viewModel.errorMessage = "An error has occured"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     startAnimations = true
@@ -716,12 +790,27 @@ struct ContentView: View {
             .font(valueFont)
             .numericUpdateAnimation(for: "\(data.battery.instantPower)-\(viewModel.batteryPercentage?.percentage ?? 0)")
 
-            powerwallLabel
+            powerwallStatusLabel(data: data)
                 .opacity(0.6)
                 .fontWeight(.bold)
                 .font(labelFont)
+                .animation(.easeInOut(duration: 0.4), value: showPowerwallRuntimeEstimate)
         }
         .multilineTextAlignment(.center)
+    }
+
+    private func powerwallStatusLabel(data: PowerwallData) -> some View {
+        let estimate = powerwallRuntimeEstimateString(data: data, batteryPercentage: viewModel.batteryPercentage?.percentage)
+        let shouldShowEstimate = estimate != nil && (viewModel.alwaysShowPowerwallRuntimeEstimate || showPowerwallRuntimeEstimate)
+
+        return ZStack {
+            powerwallLabel
+                .opacity(shouldShowEstimate ? 0 : 1)
+            if let estimate = estimate {
+                Text(estimate)
+                    .opacity(shouldShowEstimate ? 1 : 0)
+            }
+        }
     }
 
     private var powerwallLabel: Text {
@@ -740,6 +829,55 @@ struct ContentView: View {
         }
 
         return label
+    }
+
+    private func cyclePowerwallRuntimeEstimateIfAvailable(for timerCycle: Int) {
+        guard timerCycle > 0 else { return }
+        guard timerCycle.isMultiple(of: 2) else { return }
+        guard lastPowerwallRuntimeEstimateTimerCycle != timerCycle else { return }
+
+        powerwallRuntimeEstimateTask?.cancel()
+        powerwallRuntimeEstimateTask = nil
+
+        guard let data = viewModel.data,
+              powerwallRuntimeEstimateString(data: data, batteryPercentage: viewModel.batteryPercentage?.percentage) != nil else {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                showPowerwallRuntimeEstimate = false
+            }
+            return
+        }
+
+        lastPowerwallRuntimeEstimateTimerCycle = timerCycle
+
+        withAnimation(.easeInOut(duration: 0.4)) {
+            showPowerwallRuntimeEstimate = true
+        }
+
+        let task = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                showPowerwallRuntimeEstimate = false
+            }
+        }
+        powerwallRuntimeEstimateTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + (Self.timerUpdateInterval / 2), execute: task)
+    }
+
+    private func powerwallRuntimeEstimateString(data: PowerwallData, batteryPercentage: Double?) -> String? {
+        let wiggleWatts = wiggleWatts
+        guard let batteryWatts = viewModel.averagedBatteryWattsForRuntimeEstimate(
+            currentWatts: data.battery.instantPower,
+            idleThresholdWatts: wiggleWatts
+        ) else {
+            return nil
+        }
+        let backupReservePercent = viewModel.loginMode == .fleetAPI ? viewModel.backupReservePercent : nil
+        return PowerwallRuntimeEstimator.estimateString(
+            batteryWatts: batteryWatts,
+            batteryCount: data.battery.count,
+            batteryPercentage: batteryPercentage,
+            backupReservePercent: backupReservePercent,
+            idleThresholdWatts: wiggleWatts
+        )
     }
 
     private var isWithinEnabledScheduleWindow: Bool {
@@ -1035,6 +1173,45 @@ struct ContentView: View {
     private func configureDemoElectricityGridData() {
         viewModel.gridCarbonIntensity = 256
         viewModel.gridFossilFuelPercentage = 58
+    }
+
+    private func queueDemoPowerwallData(
+        batteryPower: Double,
+        batteryPercentage: Double,
+        loadPower: Double,
+        solarPower: Double,
+        solarEnergyExported: Double,
+        sitePower: Double,
+        gridStatus: String,
+        wallConnectorPower: Double,
+        vehicleBatteryLevel: Double,
+        siteName: String? = nil
+    ) {
+        DispatchQueue.main.async {
+            viewModel.data = PowerwallData(
+                battery: PowerwallData.Battery(instantPower: batteryPower, count: 1),
+                load: PowerwallData.Load(instantPower: loadPower),
+                solar: PowerwallData.Solar(
+                    instantPower: solarPower,
+                    energyExported: solarEnergyExported
+                ),
+                site: PowerwallData.Site(instantPower: sitePower),
+                wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: wallConnectorPower)]
+            )
+            viewModel.batteryPercentage = BatteryPercentage(percentage: batteryPercentage)
+            viewModel.gridStatus = GridStatus(status: gridStatus)
+            if let siteName {
+                viewModel.siteName = siteName
+            }
+            configureDemoVehicleData(batteryLevel: vehicleBatteryLevel)
+            configureDemoElectricityGridData()
+        }
+    }
+
+    private func queueDemoElectricityGridData() {
+        DispatchQueue.main.async {
+            configureDemoElectricityGridData()
+        }
     }
 
     private func vehicleFirstName(_ vehicle: FleetVehicle) -> String {
@@ -1638,11 +1815,12 @@ private extension View {
 
 #if os(macOS)
 enum MenuBarLabelMetric: String, CaseIterable, Identifiable {
-    case solar, load, site, battery
+    case auto, solar, load, site, battery
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .auto: return "Auto"
         case .solar: return "Solar"
         case .load: return "Home"
         case .site: return "Grid"
@@ -1652,6 +1830,7 @@ enum MenuBarLabelMetric: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
+        case .auto: return "wand.and.sparkles"
         case .solar: return "sun.max.fill"
         case .load: return "house.fill"
         case .site: return "bolt.horizontal.fill"
@@ -1661,26 +1840,76 @@ enum MenuBarLabelMetric: String, CaseIterable, Identifiable {
 
     var shortPrefix: String {
         switch self {
-        case .solar: return "☀︎"
-        case .load: return "⌂"
-        case .site: return "⇄"
-        case .battery: return "⚡︎"
+        case .auto: return ""
+        case .solar: return "􀆮"
+        case .load: return "􀎟"
+        case .site: return "􀡸"
+        case .battery: return "􀫭"
         }
+    }
+}
+
+func automaticMenuBarLabelMetric(
+    solarWatts: Double,
+    loadWatts: Double,
+    siteWatts: Double,
+    batteryWatts: Double
+) -> MenuBarLabelMetric {
+    let flows: [(metric: MenuBarLabelMetric, watts: Double)] = [
+        (.solar, solarWatts),
+        (.load, loadWatts),
+        (.site, siteWatts),
+        (.battery, batteryWatts)
+    ]
+    return flows.max { abs($0.watts) < abs($1.watts) }?.metric ?? .solar
+}
+
+struct MenuBarLabelSelection {
+    static func metrics(from rawValue: String) -> [MenuBarLabelMetric] {
+        let selectedRawValues = Set(
+            rawValue
+                .split(separator: ",")
+                .map(String.init)
+        )
+        let metrics = MenuBarLabelMetric.allCases.filter { selectedRawValues.contains($0.rawValue) }
+        return metrics.isEmpty ? [.solar] : metrics
+    }
+
+    static func rawValue(for metrics: some Sequence<MenuBarLabelMetric>) -> String {
+        let selectedMetrics = Set(metrics)
+        let orderedMetrics = MenuBarLabelMetric.allCases.filter(selectedMetrics.contains)
+        return (orderedMetrics.isEmpty ? [.solar] : orderedMetrics)
+            .map(\.rawValue)
+            .joined(separator: ",")
+    }
+
+    static func toggling(
+        _ metric: MenuBarLabelMetric,
+        in rawValue: String
+    ) -> String {
+        var selectedMetrics = Set(metrics(from: rawValue))
+        if selectedMetrics.contains(metric) {
+            guard selectedMetrics.count > 1 else { return Self.rawValue(for: selectedMetrics) }
+            selectedMetrics.remove(metric)
+        } else {
+            selectedMetrics.insert(metric)
+        }
+        return Self.rawValue(for: selectedMetrics)
     }
 }
 
 private struct PowerwallMenuBarLabel: View {
     @ObservedObject var viewModel: PowerwallViewModel
-    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricRaw: String = MenuBarLabelMetric.solar.rawValue
+    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricsRaw: String = MenuBarLabelMetric.solar.rawValue
 
-    private var metric: MenuBarLabelMetric {
-        MenuBarLabelMetric(rawValue: menuBarLabelMetricRaw) ?? .solar
+    private var metrics: [MenuBarLabelMetric] {
+        MenuBarLabelSelection.metrics(from: menuBarLabelMetricsRaw)
     }
 
     private func batteryTrendGlyph(wiggleWatts: Double) -> String {
         let battWatts = viewModel.data?.battery.instantPower ?? 0
-        if battWatts > wiggleWatts { return "↓" }
-        if battWatts < -wiggleWatts { return "↑" }
+        if battWatts > wiggleWatts { return "▼" }
+        if battWatts < -wiggleWatts { return "▲" }
         return ""
     }
 
@@ -1688,19 +1917,40 @@ private struct PowerwallMenuBarLabel: View {
         guard viewModel.showInMenuBar else { return AnyView(EmptyView()) }
 
         let precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
-        let trend = batteryTrendGlyph(wiggleWatts: 175.0)
+        let trend = batteryTrendGlyph(wiggleWatts: 40.0)
 
-        let solarKW = (viewModel.data?.solar.instantPower ?? 0) / 1000
-        let loadKW  = (viewModel.data?.load.instantPower ?? 0) / 1000
-        let siteKW  = (viewModel.data?.site.instantPower ?? 0) / 1000
-        let batteryKW  = (viewModel.data?.battery.instantPower ?? 0) / 1000
+        let solarWatts = viewModel.data?.solar.instantPower ?? 0
+        let loadWatts = viewModel.data?.load.instantPower ?? 0
+        let siteWatts = viewModel.data?.site.instantPower ?? 0
+        let batteryWatts = viewModel.data?.battery.instantPower ?? 0
+        let solarKW = solarWatts / 1000
+        let loadKW = loadWatts / 1000
+        let siteKW = siteWatts / 1000
+        let batteryKW = batteryWatts / 1000
         let batteryPercentage = viewModel.batteryPercentage?.percentage ?? 0
 
-        let left: String = {
-            func fmt(_ value: Double) -> String {
-                formatPowerValue(value, precision: precision, showLessPrecision: viewModel.showLessPrecision)
+        func fmt(_ value: Double) -> String {
+            formatPowerValue(value, precision: precision, showLessPrecision: viewModel.showLessPrecision)
+        }
+
+        let automaticMetric = automaticMenuBarLabelMetric(
+            solarWatts: solarWatts,
+            loadWatts: loadWatts,
+            siteWatts: siteWatts,
+            batteryWatts: batteryWatts
+        )
+        var renderedMetrics = [MenuBarLabelMetric]()
+        for metric in metrics {
+            let resolvedMetric = metric == .auto ? automaticMetric : metric
+            if !renderedMetrics.contains(resolvedMetric) {
+                renderedMetrics.append(resolvedMetric)
             }
+        }
+
+        let selectedValues = renderedMetrics.map { metric in
             switch metric {
+            case .auto:
+                return ""
             case .solar:
                 return "\(metric.shortPrefix) \(fmt(solarKW)) kW"
             case .load:
@@ -1710,20 +1960,41 @@ private struct PowerwallMenuBarLabel: View {
             case .battery:
                 return "\(metric.shortPrefix) \(fmt(batteryKW)) kW"
             }
-        }()
+        }
+        let batteryStatus = "\(String(format: "%.0f", batteryPercentage))% \(trend)"
+            .trimmingCharacters(in: .whitespaces)
+        let label = (selectedValues + [batteryStatus])
+            .joined(separator: " · ")
 
         return AnyView(
-            Text("\(left) · \(batteryPercentage, specifier: "%.0f")% \(trend)")
+            Text(label)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-                .numericUpdateAnimation(for: "\(left)-\(batteryPercentage)-\(trend)")
+                .numericUpdateAnimation(for: "\(label)-\(batteryPercentage)-\(trend)")
         )
     }
 }
 
 private struct PowerwallMenuBarPopover: View {
     @ObservedObject var viewModel: PowerwallViewModel
-    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricRaw: String = MenuBarLabelMetric.solar.rawValue
+    @AppStorage("menuBarLabelMetric") private var menuBarLabelMetricsRaw: String = MenuBarLabelMetric.solar.rawValue
+
+    private var selectedMetrics: [MenuBarLabelMetric] {
+        MenuBarLabelSelection.metrics(from: menuBarLabelMetricsRaw)
+    }
+
+    private func selectionBinding(for metric: MenuBarLabelMetric) -> Binding<Bool> {
+        Binding {
+            selectedMetrics.contains(metric)
+        } set: { isSelected in
+            let isCurrentlySelected = selectedMetrics.contains(metric)
+            guard isSelected != isCurrentlySelected else { return }
+            menuBarLabelMetricsRaw = MenuBarLabelSelection.toggling(
+                metric,
+                in: menuBarLabelMetricsRaw
+            )
+        }
+    }
 
     var body: some View {
         guard viewModel.showInMenuBar else { return AnyView(EmptyView()) }
@@ -1733,13 +2004,19 @@ private struct PowerwallMenuBarPopover: View {
         return AnyView(
             VStack(alignment: .center, spacing: 16) {
 
-                Picker("Menu bar label", selection: $menuBarLabelMetricRaw) {
+                Menu {
                     ForEach(MenuBarLabelMetric.allCases) { option in
-                        Label(option.title, systemImage: option.symbol)
-                            .tag(option.rawValue)
+                        Toggle(isOn: selectionBinding(for: option)) {
+                            Label(option.title, systemImage: option.symbol)
+                        }
+                        .disabled(selectedMetrics.count == 1 && selectedMetrics.contains(option))
                     }
+                } label: {
+                    Label(
+                        selectedMetrics.map(\.title).joined(separator: ", "),
+                        systemImage: "menubar.rectangle"
+                    )
                 }
-                .pickerStyle(.menu)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Divider()
