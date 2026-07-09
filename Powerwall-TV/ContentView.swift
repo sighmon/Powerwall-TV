@@ -1841,10 +1841,10 @@ enum MenuBarLabelMetric: String, CaseIterable, Identifiable {
     var shortPrefix: String {
         switch self {
         case .auto: return ""
-        case .solar: return "􀆮"
-        case .load: return "􀎟"
-        case .site: return "􀡸"
-        case .battery: return "􀫭"
+        case .solar: return "☀︎"
+        case .load: return "⌂"
+        case .site: return "⇄"
+        case .battery: return "⚡︎"
         }
     }
 }
