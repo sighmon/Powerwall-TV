@@ -103,6 +103,9 @@ struct ContentView: View {
     @State private var showingScheduler = false
     @State private var wiggleWatts = 40.0
     @State private var startAnimations = false
+    @State private var showBackground = false
+    @State private var showMetrics = false
+    @State private var introAnimationTask: DispatchWorkItem?
     @State private var precision = "%.3f"
     @State private var detachedSiteSummaryFrame: CGRect = .zero
     @State private var controlsOverlayFrame: CGRect = .zero
@@ -148,12 +151,15 @@ struct ContentView: View {
                 ZStack {
                     homeBackgroundImage
                         .frame(width: sceneSize.width, height: sceneSize.height)
+                        .opacity(showBackground ? 1 : 0)
+                        .scaleEffect(showBackground ? 1 : 1.04)
 
                     sceneOverlay(
                         in: sceneSize,
                         showSiteSummaryInScene: !detachSiteSummary
                     )
                         .frame(width: sceneSize.width, height: sceneSize.height)
+                        .opacity(showMetrics ? 1 : 0)
                 }
                 .frame(width: sceneSize.width, height: sceneSize.height)
                 .position(x: sceneFrame.midX, y: sceneFrame.midY)
@@ -166,10 +172,12 @@ struct ContentView: View {
                     useBlurredBackground: siteSummarySceneOverlap && viewModel.autoHideSummaryOnOverlap,
                     hidden: hideDetachedSiteSummary
                 )
+                .opacity(showMetrics ? 1 : 0)
 
                 controlsOverlay(sceneSize: sceneSize)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding()
+                    .opacity(showMetrics ? 1 : 0)
             }
             .coordinateSpace(name: "contentView")
             .onPreferenceChange(OverlayFramePreferenceKey.self) { frames in
@@ -375,23 +383,17 @@ struct ContentView: View {
                     siteName: "Home sweet home"
                 )
                 // viewModel.errorMessage = "An error has occured"
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    startAnimations = true
-                }
             } else {
                 viewModel.fetchElectricityMapsData()
                 viewModel.fetchData()
-                // Trigger animations after a slight delay
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    startAnimations = true
-                }
             }
+            beginFirstLoadIntro()
 #if !os(macOS)
             UIApplication.shared.isIdleTimerDisabled = viewModel.preventScreenSaver
 #endif
         }
         .onDisappear {
-            startAnimations = false
+            resetFirstLoadIntro()
             cancelOverlayHideTask(.detachedSiteSummary)
             cancelOverlayHideTask(.controlsOverlay)
         }
@@ -1212,6 +1214,29 @@ struct ContentView: View {
         DispatchQueue.main.async {
             configureDemoElectricityGridData()
         }
+    }
+
+    private func beginFirstLoadIntro() {
+        introAnimationTask?.cancel()
+        withAnimation(.easeOut(duration: 1.4)) {
+            showBackground = true
+        }
+        let task = DispatchWorkItem {
+            withAnimation(.easeOut(duration: 0.7)) {
+                showMetrics = true
+            }
+            startAnimations = true
+        }
+        introAnimationTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: task)
+    }
+
+    private func resetFirstLoadIntro() {
+        introAnimationTask?.cancel()
+        introAnimationTask = nil
+        showBackground = false
+        showMetrics = false
+        startAnimations = false
     }
 
     private func vehicleFirstName(_ vehicle: FleetVehicle) -> String {
