@@ -18,6 +18,21 @@ func formatPowerValue(_ value: Double, precision: String, showLessPrecision: Boo
 
 enum PowerwallRuntimeEstimator {
     private static let capacityWhPerBattery = 13_500.0
+    /// Tesla reports "Optimised charging" near ~80% when charge power into the Powerwall is low.
+    private static let optimisedChargingMinPercent = 79.0
+    private static let optimisedChargingMaxPercent = 81.0
+    private static let optimisedChargingMaxPowerIntoWatts = 250.0
+
+    /// True when SOC is ~80% and less than 250W is flowing into the Powerwall (charging or idle).
+    /// Negative `batteryWatts` means charging (power into the battery).
+    static func isOptimisedCharging(batteryWatts: Double, batteryPercentage: Double?) -> Bool {
+        guard let batteryPercentage else { return false }
+        // Power into Powerwall is -batteryWatts when charging; idle (0) also counts as < 250W into.
+        let powerIntoWatts = batteryWatts <= 0 ? -batteryWatts : Double.infinity
+        return batteryPercentage >= optimisedChargingMinPercent
+            && batteryPercentage <= optimisedChargingMaxPercent
+            && powerIntoWatts < optimisedChargingMaxPowerIntoWatts
+    }
 
     static func estimateString(
         batteryWatts: Double,
@@ -26,6 +41,10 @@ enum PowerwallRuntimeEstimator {
         backupReservePercent: Double? = nil,
         idleThresholdWatts: Double
     ) -> String? {
+        if isOptimisedCharging(batteryWatts: batteryWatts, batteryPercentage: batteryPercentage) {
+            return "Optimised charging"
+        }
+
         guard batteryCount > 0,
               let batteryPercentage = batteryPercentage,
               batteryPercentage > 0,
@@ -865,6 +884,14 @@ struct ContentView: View {
     }
 
     private func powerwallRuntimeEstimateString(data: PowerwallData, batteryPercentage: Double?) -> String? {
+        // Use live instant power so optimised charging still shows under the idle/average thresholds.
+        if PowerwallRuntimeEstimator.isOptimisedCharging(
+            batteryWatts: data.battery.instantPower,
+            batteryPercentage: batteryPercentage
+        ) {
+            return "Optimised charging"
+        }
+
         let wiggleWatts = wiggleWatts
         guard let batteryWatts = viewModel.averagedBatteryWattsForRuntimeEstimate(
             currentWatts: data.battery.instantPower,

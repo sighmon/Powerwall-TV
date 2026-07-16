@@ -292,6 +292,62 @@ struct Powerwall_TVTests {
         #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 20, batteryCount: 1, batteryPercentage: 50, idleThresholdWatts: 40) == nil)
     }
 
+    @Test func powerwallRuntimeEstimateShowsOptimisedChargingNearEightyPercentWithLowChargePower() {
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: -100,
+                batteryCount: 1,
+                batteryPercentage: 80,
+                idleThresholdWatts: 40
+            ) == "Optimised charging"
+        )
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: -249,
+                batteryCount: 1,
+                batteryPercentage: 79,
+                idleThresholdWatts: 40
+            ) == "Optimised charging"
+        )
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 0,
+                batteryCount: 1,
+                batteryPercentage: 81,
+                idleThresholdWatts: 40
+            ) == "Optimised charging"
+        )
+        #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: -50, batteryPercentage: 80) == true)
+    }
+
+    @Test func powerwallRuntimeEstimateDoesNotShowOptimisedChargingOutsideTeslaConditions() {
+        // Charge power at or above 250W into the Powerwall → normal time estimate
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: -250,
+                batteryCount: 1,
+                batteryPercentage: 80,
+                idleThresholdWatts: 40
+            ) != "Optimised charging"
+        )
+        #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: -250, batteryPercentage: 80) == false)
+
+        // Outside 79–81% SOC
+        #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: -100, batteryPercentage: 78) == false)
+        #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: -100, batteryPercentage: 82) == false)
+
+        // Discharging (power out of the Powerwall), even at ~80%
+        #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: 100, batteryPercentage: 80) == false)
+        #expect(
+            PowerwallRuntimeEstimator.estimateString(
+                batteryWatts: 100,
+                batteryCount: 1,
+                batteryPercentage: 80,
+                idleThresholdWatts: 40
+            ) != "Optimised charging"
+        )
+    }
+
     @Test func powerwallRuntimeEstimateIgnoresFullAndEmptyBatteryPercentages() {
         #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 2_000, batteryCount: 1, batteryPercentage: 100, idleThresholdWatts: 40) == nil)
         #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: -2_000, batteryCount: 1, batteryPercentage: 100, idleThresholdWatts: 40) == nil)
