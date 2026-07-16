@@ -1236,6 +1236,9 @@ struct ContentView: View {
             )
             viewModel.batteryPercentage = BatteryPercentage(percentage: batteryPercentage)
             viewModel.gridStatus = GridStatus(status: gridStatus)
+            // Preview Storm Watch icon / menu ☂︎ and GRID DOWN label / menu ⛔︎.
+            viewModel.stormModeActive = true
+            viewModel.islandStatus = "off_grid_unintentional"
             if let siteName {
                 viewModel.siteName = siteName
             }
@@ -2022,8 +2025,16 @@ private struct PowerwallMenuBarLabel: View {
         }
         let batteryStatus = "\(String(format: "%.0f", batteryPercentage))% \(trend)"
             .trimmingCharacters(in: .whitespaces)
-        let label = (selectedValues + [batteryStatus])
+        var label = (selectedValues + [batteryStatus])
             .joined(separator: " · ")
+
+        // Status symbols sit far right of the menu text, after the battery trend arrow.
+        if viewModel.isStormWatchActive() {
+            label += " ☂︎"
+        }
+        if viewModel.isGridDown() {
+            label += " ⛔︎"
+        }
 
         return AnyView(
             Text(label)
