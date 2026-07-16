@@ -849,6 +849,13 @@ struct ContentView: View {
             }
         }
 
+        if viewModel.isStormWatchActive() {
+            label = label
+                + Text(" · ")
+                + Text(Image(systemName: "cloud.bolt.fill"))
+                    .foregroundColor(.cyan)
+        }
+
         return label
     }
 
@@ -964,12 +971,12 @@ struct ContentView: View {
                     .numericUpdateAnimation(for: data.site.instantPower)
             }
 
-            Text("\(viewModel.isOffGrid() ? "OFF-" : "")GRID\(viewModel.gridCarbonIntensity.map { " · \($0) gCO2" } ?? "")")
+            Text("\(viewModel.gridLabelText())\(viewModel.gridCarbonIntensity.map { " · \($0) gCO2" } ?? "")")
                 .opacity(viewModel.isOffGrid() ? 1.0 : 0.6)
                 .fontWeight(.bold)
                 .font(labelFont)
                 .foregroundColor(viewModel.isOffGrid() ? .orange : .white)
-                .numericUpdateAnimation(for: viewModel.gridCarbonIntensity)
+                .numericUpdateAnimation(for: "\(viewModel.gridLabelText())-\(viewModel.gridCarbonIntensity.map(String.init) ?? "")")
         }
         .multilineTextAlignment(.center)
     }
@@ -2130,10 +2137,11 @@ private struct PowerwallMenuBarPopover: View {
                             .fontWeight(.bold)
                             .font(.title2)
                             .numericUpdateAnimation(for: viewModel.data?.site.instantPower ?? 0)
-                        Text("GRID")
-                            .opacity(0.6)
+                        Text(viewModel.gridLabelText())
+                            .opacity(viewModel.isOffGrid() ? 1.0 : 0.6)
                             .fontWeight(.bold)
                             .font(.subheadline)
+                            .foregroundColor(viewModel.isOffGrid() ? .orange : .primary)
                     }
                     .frame(width: 100)
                 }

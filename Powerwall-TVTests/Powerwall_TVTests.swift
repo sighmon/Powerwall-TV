@@ -60,6 +60,79 @@ struct Powerwall_TVTests {
         #expect(viewModel.isOffGrid() == false)
     }
 
+    @Test func islandStatusDistinguishesGridDownFromIntentionalOffGrid() {
+        let viewModel = PowerwallViewModel()
+        viewModel.gridStatus = GridStatus(status: "Inactive")
+
+        viewModel.islandStatus = "off_grid_intentional"
+        #expect(viewModel.isOffGrid() == true)
+        #expect(viewModel.isGridDown() == false)
+        #expect(viewModel.gridLabelText() == "OFF-GRID")
+
+        viewModel.islandStatus = "off_grid_unintentional"
+        #expect(viewModel.isOffGrid() == true)
+        #expect(viewModel.isGridDown() == true)
+        #expect(viewModel.gridLabelText() == "GRID DOWN")
+
+        viewModel.islandStatus = "off_grid"
+        #expect(viewModel.isOffGrid() == true)
+        #expect(viewModel.isGridDown() == true)
+        #expect(viewModel.gridLabelText() == "GRID DOWN")
+
+        viewModel.islandStatus = "on_grid"
+        viewModel.gridStatus = GridStatus(status: "Active")
+        #expect(viewModel.isOffGrid() == false)
+        #expect(viewModel.isGridDown() == false)
+        #expect(viewModel.gridLabelText() == "GRID")
+    }
+
+    @Test func stormWatchReflectsStormModeActive() {
+        let viewModel = PowerwallViewModel()
+        #expect(viewModel.isStormWatchActive() == false)
+
+        viewModel.stormModeActive = true
+        #expect(viewModel.isStormWatchActive() == true)
+    }
+
+    @Test func fleetLiveStatusDecodesIslandStatusAndStormMode() throws {
+        let json = """
+        {
+          "battery_power": 100,
+          "percentage_charged": 80,
+          "solar_power": 0,
+          "load_power": 500,
+          "grid_power": 400,
+          "grid_status": "Inactive",
+          "island_status": "off_grid_unintentional",
+          "storm_mode_active": true,
+          "wall_connectors": []
+        }
+        """.data(using: .utf8)!
+
+        let status = try JSONDecoder().decode(FleetLiveStatus.self, from: json)
+        #expect(status.islandStatus == "off_grid_unintentional")
+        #expect(status.stormModeActive == true)
+        #expect(status.gridStatus == "Inactive")
+    }
+
+    @Test func fleetLiveStatusDecodesWithoutOptionalIslandAndStormFields() throws {
+        let json = """
+        {
+          "battery_power": 0,
+          "percentage_charged": 50,
+          "solar_power": 0,
+          "load_power": 0,
+          "grid_power": 0,
+          "grid_status": "Active",
+          "wall_connectors": []
+        }
+        """.data(using: .utf8)!
+
+        let status = try JSONDecoder().decode(FleetLiveStatus.self, from: json)
+        #expect(status.islandStatus == nil)
+        #expect(status.stormModeActive == nil)
+    }
+
     @Test func batteryCountStringHandlesMissingAndZero() {
         let viewModel = PowerwallViewModel()
         #expect(viewModel.batteryCountString() == "")

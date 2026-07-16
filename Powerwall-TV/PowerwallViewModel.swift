@@ -70,6 +70,10 @@ class PowerwallViewModel: ObservableObject {
     @Published var data: PowerwallData?
     @Published var batteryPercentage: BatteryPercentage?
     @Published var gridStatus: GridStatus?
+    /// Fleet API `live_status.island_status` (e.g. on_grid, off_grid_intentional, off_grid_unintentional).
+    @Published var islandStatus: String?
+    /// Fleet API `live_status.storm_mode_active` — Storm Watch is currently active.
+    @Published var stormModeActive: Bool = false
     @Published var errorMessage: String?
     @Published var infoMessage: String?
     @Published var fleetCommandPermissionWarning: String?
@@ -680,7 +684,10 @@ class PowerwallViewModel: ObservableObject {
                     self?.errorMessage = "Failed to fetch grid status: \(error.localizedDescription)"
                 }
             } receiveValue: { [weak self] status in
+                // Local gateway does not report island_status / storm_mode_active.
                 self?.gridStatus = status
+                self?.islandStatus = nil
+                self?.stormModeActive = false
             }
             .store(in: &cancellables)
     }
@@ -710,8 +717,45 @@ class PowerwallViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// True when the site is islanded for any reason (outage or intentional off-grid).
     func isOffGrid() -> Bool {
-        return gridStatus?.status ?? "" == "SystemIslandedActive" || gridStatus?.status ?? "" == "Inactive"
+        if let islandStatus {
+            switch islandStatus {
+            case "off_grid", "off_grid_intentional", "off_grid_unintentional":
+                return true
+            case "on_grid":
+                return false
+            default:
+                break
+            }
+        }
+        let status = gridStatus?.status ?? ""
+        return status == "SystemIslandedActive" || status == "Inactive"
+    }
+
+    /// True when islanded due to a utility outage (not user-initiated Go Off-Grid).
+    func isGridDown() -> Bool {
+        switch islandStatus {
+        case "off_grid_unintentional", "off_grid":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Label for the grid metric: GRID, OFF-GRID (intentional), or GRID DOWN (outage).
+    func gridLabelText() -> String {
+        if isGridDown() {
+            return "GRID DOWN"
+        }
+        if isOffGrid() {
+            return "OFF-GRID"
+        }
+        return "GRID"
+    }
+
+    func isStormWatchActive() -> Bool {
+        stormModeActive
     }
 
     func batteryCountString() -> String {
@@ -916,6 +960,8 @@ class PowerwallViewModel: ObservableObject {
                 self.data = powerwall
                 self.batteryPercentage = BatteryPercentage(percentage: data.response.batteryPercentage)
                 self.gridStatus = GridStatus(status: data.response.gridStatus)
+                self.islandStatus = data.response.islandStatus
+                self.stormModeActive = data.response.stormModeActive ?? false
 
                 let connectedVINs = self.connectedVehicleVINs(from: data.response.wallConnectors)
                 self.fetchFleetVehiclesIfNeeded(for: connectedVINs)
@@ -1775,6 +1821,8 @@ struct FleetLiveStatus: Codable {
     let loadPower: Double
     let gridPower: Double
     let gridStatus: String
+    let islandStatus: String?
+    let stormModeActive: Bool?
     let wallConnectors: [WallConnector]
 
     enum CodingKeys: String, CodingKey {
@@ -1784,6 +1832,8 @@ struct FleetLiveStatus: Codable {
         case loadPower = "load_power"
         case gridPower = "grid_power"
         case gridStatus = "grid_status"
+        case islandStatus = "island_status"
+        case stormModeActive = "storm_mode_active"
         case wallConnectors = "wall_connectors"
     }
 }
