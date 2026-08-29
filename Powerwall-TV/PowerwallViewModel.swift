@@ -109,8 +109,8 @@ class PowerwallViewModel: ObservableObject {
     @Published var fleetBaseURL: String = UserDefaults.standard.string(forKey: "fleetBaseURL") ?? "https://fleet-api.prd.na.vn.cloud.tesla.com"
     @Published var electricityMapsAPIKey: String = KeychainWrapper.standard.string(forKey: "electricityMaps_apiKey") ?? ""
     private let vehicleListRefreshInterval: TimeInterval = 15 * 60
-    private let vehicleChargingRefreshInterval: TimeInterval = 60
-    private let vehicleConnectedRefreshInterval: TimeInterval = 60 * 60
+    private let vehicleChargingRefreshInterval: TimeInterval = 3 * 60
+    private let pluggedVehicleCacheInterval: TimeInterval = 60 * 60
     private let listedVehicleRefreshInterval: TimeInterval = 60 * 60
     private let vehicleDataRetryInterval: TimeInterval = 5 * 60
     private let listedVehicleRequestSpacing: TimeInterval = 2
@@ -119,7 +119,10 @@ class PowerwallViewModel: ObservableObject {
     private var lastVehicleDataAttemptAt: [String: Date] = [:]
     private var isFetchingVehicleList = false
     private var vehicleDataFetchesInFlight = Set<String>()
+    private var vehicleDataHandledForCurrentConnection = Set<String>()
+    private var vehicleDataForbiddenForCurrentConnection = Set<String>()
     private var hasShownVehicleScopeWarning = false
+    private static let vehicleChargeCacheKey = "fleetVehicleChargeCache"
 
     private func redactedVIN(_ vin: String) -> String {
         let suffix = vin.suffix(6)
@@ -184,6 +187,46 @@ class PowerwallViewModel: ObservableObject {
     init() {
         let delegate = InsecureURLSessionDelegate() // Custom delegate for local SSL bypass
         self.localURLSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+
+        if !Self.isRunningTests,
+           let cacheData = UserDefaults.standard.data(forKey: Self.vehicleChargeCacheKey),
+           let cache = try? JSONDecoder().decode([String: CachedVehicleChargeSnapshot].self, from: cacheData) {
+            let cutoff = Date().addingTimeInterval(-pluggedVehicleCacheInterval)
+            let currentCache = cache.filter { $0.value.fetchedAt >= cutoff }
+            self.vehicleChargeStates = currentCache.compactMapValues { $0.snapshot }
+            self.lastVehicleDataFetchAt = currentCache.mapValues(\.fetchedAt)
+        }
+    }
+
+    private func persistVehicleChargeCache() {
+        let cache = lastVehicleDataFetchAt.reduce(into: [String: CachedVehicleChargeSnapshot]()) { result, entry in
+            result[entry.key] = CachedVehicleChargeSnapshot(
+                snapshot: vehicleChargeStates[entry.key],
+                fetchedAt: entry.value
+            )
+        }
+
+        if let cacheData = try? JSONEncoder().encode(cache) {
+            UserDefaults.standard.set(cacheData, forKey: Self.vehicleChargeCacheKey)
+        }
+    }
+
+    private func clearVehicleScopeForbiddenConnections() {
+        vehicleDataHandledForCurrentConnection.subtract(vehicleDataForbiddenForCurrentConnection)
+        vehicleDataForbiddenForCurrentConnection.removeAll()
+    }
+
+    private func removeExpiredVehicleChargeCache(at now: Date) {
+        let expiredVINs = lastVehicleDataFetchAt.compactMap { vin, fetchedAt in
+            now.timeIntervalSince(fetchedAt) >= pluggedVehicleCacheInterval ? vin : nil
+        }
+        guard !expiredVINs.isEmpty else { return }
+
+        for vin in expiredVINs where !vehicleDataFetchesInFlight.contains(vin) {
+            vehicleChargeStates.removeValue(forKey: vin)
+            lastVehicleDataFetchAt.removeValue(forKey: vin)
+        }
+        persistVehicleChargeCache()
     }
 
     private func persistLastChargingWallConnectorVIN(from wallConnectors: [WallConnector]) {
@@ -394,6 +437,7 @@ class PowerwallViewModel: ObservableObject {
                     UserDefaults.standard.removeObject(forKey: "fleetAPI_tokenExpiration")
                     self.loginWithTeslaFleetAPI()
                 } else {
+                    self.clearVehicleScopeForbiddenConnections()
                     self.fetchEnergyProducts()
                 }
             }
@@ -1084,9 +1128,19 @@ class PowerwallViewModel: ObservableObject {
     }
 
     private func fetchVehicleDataIfNeeded(for wallConnectors: [WallConnector]) {
+        let now = Date()
+        removeExpiredVehicleChargeCache(at: now)
+
+        let connectedVINs = Set(wallConnectors.compactMap { wallConnector -> String? in
+            guard wallConnector.isVehicleConnected else { return nil }
+            let vin = wallConnector.vin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return vin.isEmpty ? nil : vin
+        })
+        vehicleDataHandledForCurrentConnection.formIntersection(connectedVINs)
+        vehicleDataForbiddenForCurrentConnection.formIntersection(connectedVINs)
+
         guard !wallConnectors.isEmpty, !accessToken.isEmpty else { return }
 
-        let now = Date()
         let knownVINs = Set(vehicles.map(\.vin))
 
         for wallConnector in wallConnectors {
@@ -1102,15 +1156,27 @@ class PowerwallViewModel: ObservableObject {
             }
 
             let lastFetch = lastVehicleDataFetchAt[vin]
-            let refreshInterval = wallConnector.isVehicleCharging
-                ? vehicleChargingRefreshInterval
-                : vehicleConnectedRefreshInterval
-            let isStale = lastFetch.map { now.timeIntervalSince($0) >= refreshInterval } ?? true
+            if !wallConnector.isVehicleCharging {
+                guard !vehicleDataHandledForCurrentConnection.contains(vin) else { continue }
+
+                let hasCurrentCache = lastFetch.map {
+                    now.timeIntervalSince($0) < pluggedVehicleCacheInterval
+                } ?? false
+                if hasCurrentCache {
+                    vehicleDataHandledForCurrentConnection.insert(vin)
+                    continue
+                }
+            }
+
+            let isStale = lastFetch.map { now.timeIntervalSince($0) >= vehicleChargingRefreshInterval } ?? true
             let lastAttempt = lastVehicleDataAttemptAt[vin]
             let canRetry = lastAttempt.map { now.timeIntervalSince($0) >= vehicleDataRetryInterval } ?? true
             guard isStale && canRetry else { continue }
 
-            fetchVehicleData(vin: vin)
+            fetchVehicleData(
+                vin: vin,
+                isOneTimePluggedVehicleFetch: !wallConnector.isVehicleCharging
+            )
         }
     }
 
@@ -1126,7 +1192,7 @@ class PowerwallViewModel: ObservableObject {
         return (force || isStale) && canRetry
     }
 
-    private func fetchVehicleData(vin: String) {
+    private func fetchVehicleData(vin: String, isOneTimePluggedVehicleFetch: Bool = false) {
         guard !vehicleDataFetchesInFlight.contains(vin) else { return }
         guard let url = URL(string: "\(fleetBaseURL)/api/1/vehicles/\(vin)/vehicle_data") else { return }
 
@@ -1162,8 +1228,18 @@ class PowerwallViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self.vehicleChargeStates.removeValue(forKey: vin)
                     self.lastVehicleDataFetchAt[vin] = Date()
+                    if isOneTimePluggedVehicleFetch {
+                        self.vehicleDataHandledForCurrentConnection.insert(vin)
+                    }
+                    self.persistVehicleChargeCache()
                 }
                 return
+            }
+            if http.statusCode == 403, isOneTimePluggedVehicleFetch {
+                DispatchQueue.main.async {
+                    self.vehicleDataHandledForCurrentConnection.insert(vin)
+                    self.vehicleDataForbiddenForCurrentConnection.insert(vin)
+                }
             }
             guard self.handleVehicleEndpointStatus(http.statusCode) else { return }
             let vehicleData: VehicleDataResponse
@@ -1190,6 +1266,10 @@ class PowerwallViewModel: ObservableObject {
             DispatchQueue.main.async {
                 self.vehicleChargeStates[vin] = snapshot
                 self.lastVehicleDataFetchAt[vin] = Date()
+                if isOneTimePluggedVehicleFetch {
+                    self.vehicleDataHandledForCurrentConnection.insert(vin)
+                }
+                self.persistVehicleChargeCache()
             }
         }.resume()
     }
@@ -2113,10 +2193,15 @@ struct VehicleChargeState: Codable {
     }
 }
 
-struct VehicleChargeSnapshot {
+struct VehicleChargeSnapshot: Codable {
     let batteryLevel: Double?
     let chargingState: String?
     let minutesToFullCharge: Double?
+}
+
+struct CachedVehicleChargeSnapshot: Codable {
+    let snapshot: VehicleChargeSnapshot?
+    let fetchedAt: Date
 }
 
 struct ElectricityMapsData: Codable {

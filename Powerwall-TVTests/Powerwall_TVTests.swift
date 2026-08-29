@@ -606,6 +606,46 @@ struct Powerwall_TVTests {
         #expect(vitals.fleetWallConnectorState == nil)
     }
 
+    @Test func vehicleChargeDataRecognizesChargingAndPluggedInStates() {
+        let charging = WallConnector(
+            vin: "charging-vin",
+            din: nil,
+            wallConnectorState: 1.0,
+            wallConnectorPower: 7_200
+        )
+        let pluggedIn = WallConnector(
+            vin: "plugged-in-vin",
+            din: nil,
+            wallConnectorState: 4.0,
+            wallConnectorPower: 0
+        )
+        let disconnected = WallConnector(
+            vin: "disconnected-vin",
+            din: nil,
+            wallConnectorState: nil,
+            wallConnectorPower: 0
+        )
+
+        #expect(charging.isVehicleCharging)
+        #expect(charging.isVehicleConnected)
+        #expect(!pluggedIn.isVehicleCharging)
+        #expect(pluggedIn.isVehicleConnected)
+        #expect(!disconnected.isVehicleConnected)
+    }
+
+    @Test func vehicleChargeCachePersistsCooldownWithoutSnapshot() throws {
+        let fetchedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let cache = [
+            "offline-vin": CachedVehicleChargeSnapshot(snapshot: nil, fetchedAt: fetchedAt)
+        ]
+
+        let encoded = try JSONEncoder().encode(cache)
+        let decoded = try JSONDecoder().decode([String: CachedVehicleChargeSnapshot].self, from: encoded)
+
+        #expect(decoded["offline-vin"]?.snapshot == nil)
+        #expect(decoded["offline-vin"]?.fetchedAt == fetchedAt)
+    }
+
     @Test func formatPowerValueKeepsNegativeSignWithFullPrecision() {
         #expect(formatPowerValue(-1.234, precision: "%.3f", showLessPrecision: false) == "-1.234")
     }
