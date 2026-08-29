@@ -1058,6 +1058,7 @@ class PowerwallViewModel: ObservableObject {
         guard let url = URL(string: "\(fleetBaseURL)/api/1/vehicles") else { return }
 
         isFetchingVehicleList = true
+        let requestCacheGeneration = vehicleChargeCacheGeneration
         logVehicleDebug("GET /vehicles start candidateVINs=\(candidateVINs.map(redactedVIN)) knownVehicles=\(vehicles.count)")
 
         var request = URLRequest(url: url)
@@ -1072,6 +1073,8 @@ class PowerwallViewModel: ObservableObject {
                 }
             }
 
+            guard requestCacheGeneration == self.vehicleChargeCacheGeneration else { return }
+
             guard error == nil,
                   let http = response as? HTTPURLResponse,
                   let data = data else {
@@ -1083,10 +1086,14 @@ class PowerwallViewModel: ObservableObject {
             if http.statusCode != 200 {
                 self.logVehicleDebug("GET /vehicles non-200 body=\(self.vehicleResponsePreview(from: data))")
             }
-            guard self.handleVehicleEndpointStatus(http.statusCode) else { return }
+            guard self.handleVehicleEndpointStatus(
+                http.statusCode,
+                cacheGeneration: requestCacheGeneration
+            ) else { return }
             do {
                 let vehiclesResponse = try JSONDecoder().decode(FleetVehiclesResponse.self, from: data)
                 DispatchQueue.main.async {
+                    guard requestCacheGeneration == self.vehicleChargeCacheGeneration else { return }
                     self.logVehicleDebug("GET /vehicles decoded count=\(vehiclesResponse.response.count) vins=\(vehiclesResponse.response.map { self.redactedVIN($0.vin) }) states=\(vehiclesResponse.response.map { $0.state ?? "nil" })")
                     self.mergeVehicles(vehiclesResponse.response)
                     self.lastVehicleListFetchAt = now
@@ -1261,7 +1268,10 @@ class PowerwallViewModel: ObservableObject {
                     self.vehicleDataForbiddenForCurrentConnection.insert(vin)
                 }
             }
-            guard self.handleVehicleEndpointStatus(http.statusCode) else { return }
+            guard self.handleVehicleEndpointStatus(
+                http.statusCode,
+                cacheGeneration: requestCacheGeneration
+            ) else { return }
             let vehicleData: VehicleDataResponse
             do {
                 vehicleData = try JSONDecoder().decode(VehicleDataResponse.self, from: data)
@@ -1295,17 +1305,19 @@ class PowerwallViewModel: ObservableObject {
         }.resume()
     }
 
-    private func handleVehicleEndpointStatus(_ statusCode: Int) -> Bool {
+    private func handleVehicleEndpointStatus(_ statusCode: Int, cacheGeneration: UInt) -> Bool {
         switch statusCode {
         case 200:
             return true
         case 401:
             DispatchQueue.main.async {
+                guard cacheGeneration == self.vehicleChargeCacheGeneration else { return }
                 self.refreshAccessToken()
             }
             return false
         case 403:
             DispatchQueue.main.async {
+                guard cacheGeneration == self.vehicleChargeCacheGeneration else { return }
                 guard !self.hasShownVehicleScopeWarning else { return }
                 self.infoMessage = "Re-login to grant vehicle charge data access."
                 self.hasShownVehicleScopeWarning = true
