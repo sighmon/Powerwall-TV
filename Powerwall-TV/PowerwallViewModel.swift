@@ -121,6 +121,7 @@ class PowerwallViewModel: ObservableObject {
     private var vehicleDataFetchesInFlight = Set<String>()
     private var vehicleDataHandledForCurrentConnection = Set<String>()
     private var vehicleDataForbiddenForCurrentConnection = Set<String>()
+    private var vehicleChargeCacheGeneration: UInt = 0
     private var hasShownVehicleScopeWarning = false
     private static let vehicleChargeCacheKey = "fleetVehicleChargeCache"
 
@@ -212,8 +213,22 @@ class PowerwallViewModel: ObservableObject {
     }
 
     private func clearVehicleScopeForbiddenConnections() {
-        vehicleDataHandledForCurrentConnection.subtract(vehicleDataForbiddenForCurrentConnection)
+        let forbiddenVINs = vehicleDataForbiddenForCurrentConnection
+        vehicleDataHandledForCurrentConnection.subtract(forbiddenVINs)
+        for vin in forbiddenVINs {
+            lastVehicleDataAttemptAt.removeValue(forKey: vin)
+        }
         vehicleDataForbiddenForCurrentConnection.removeAll()
+    }
+
+    func clearVehicleChargeCache() {
+        vehicleChargeCacheGeneration &+= 1
+        vehicleChargeStates.removeAll()
+        lastVehicleDataFetchAt.removeAll()
+        lastVehicleDataAttemptAt.removeAll()
+        vehicleDataHandledForCurrentConnection.removeAll()
+        vehicleDataForbiddenForCurrentConnection.removeAll()
+        UserDefaults.standard.removeObject(forKey: Self.vehicleChargeCacheKey)
     }
 
     private func removeExpiredVehicleChargeCache(at now: Date) {
@@ -1198,6 +1213,7 @@ class PowerwallViewModel: ObservableObject {
 
         vehicleDataFetchesInFlight.insert(vin)
         lastVehicleDataAttemptAt[vin] = Date()
+        let requestCacheGeneration = vehicleChargeCacheGeneration
         logVehicleDebug("GET /vehicles/\(redactedVIN(vin))/vehicle_data start")
 
         var request = URLRequest(url: url)
@@ -1211,6 +1227,8 @@ class PowerwallViewModel: ObservableObject {
                     self.vehicleDataFetchesInFlight.remove(vin)
                 }
             }
+
+            guard requestCacheGeneration == self.vehicleChargeCacheGeneration else { return }
 
             guard error == nil,
                   let http = response as? HTTPURLResponse,
@@ -1226,6 +1244,7 @@ class PowerwallViewModel: ObservableObject {
             if self.vehicleDataResponseIsAsleepOrOffline(statusCode: http.statusCode, data: data) {
                 self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data unavailable because vehicle is asleep/offline")
                 DispatchQueue.main.async {
+                    guard requestCacheGeneration == self.vehicleChargeCacheGeneration else { return }
                     self.vehicleChargeStates.removeValue(forKey: vin)
                     self.lastVehicleDataFetchAt[vin] = Date()
                     if isOneTimePluggedVehicleFetch {
@@ -1237,6 +1256,7 @@ class PowerwallViewModel: ObservableObject {
             }
             if http.statusCode == 403, isOneTimePluggedVehicleFetch {
                 DispatchQueue.main.async {
+                    guard requestCacheGeneration == self.vehicleChargeCacheGeneration else { return }
                     self.vehicleDataHandledForCurrentConnection.insert(vin)
                     self.vehicleDataForbiddenForCurrentConnection.insert(vin)
                 }
@@ -1264,6 +1284,7 @@ class PowerwallViewModel: ObservableObject {
             )
 
             DispatchQueue.main.async {
+                guard requestCacheGeneration == self.vehicleChargeCacheGeneration else { return }
                 self.vehicleChargeStates[vin] = snapshot
                 self.lastVehicleDataFetchAt[vin] = Date()
                 if isOneTimePluggedVehicleFetch {
