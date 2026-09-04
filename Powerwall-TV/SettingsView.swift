@@ -247,6 +247,7 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "sceneHorizontalOffset")
         UserDefaults.standard.removeObject(forKey: "sceneVerticalOffset")
         UserDefaults.standard.removeObject(forKey: "lastChargingWallConnectorVIN")
+        viewModel.clearVehicleChargeCache()
         keepWindowInFront = false
         autoHideSummaryOnOverlap = true
         autoHideButtonsOnOverlap = true
