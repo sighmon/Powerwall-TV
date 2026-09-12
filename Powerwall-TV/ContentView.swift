@@ -118,6 +118,8 @@ struct ContentView: View {
     @State private var demo = false
     @State private var animations = true
     @State private var showingSettings = false
+    @State private var showingExportAdvisor = false
+    @StateObject private var exportAdvisor = ExportAdvisor()
     @State private var showingGraph = false
     @State private var showingScheduler = false
     @State private var wiggleWatts = 40.0
@@ -260,6 +262,9 @@ struct ContentView: View {
                     .ignoresSafeArea()
             )
         }
+        .sheet(isPresented: $showingExportAdvisor) {
+            ExportAdvisorView(advisor: exportAdvisor, viewModel: viewModel)
+        }
         .sheet(isPresented: $showingGraph) {
             GraphView(viewModel: viewModel)
                 .background(
@@ -310,6 +315,9 @@ struct ContentView: View {
                     .ignoresSafeArea()
             )
         }
+        .fullScreenCover(isPresented: $showingExportAdvisor) {
+            ExportAdvisorView(advisor: exportAdvisor, viewModel: viewModel)
+        }
         .fullScreenCover(isPresented: $showingGraph) {
             GraphView(viewModel: viewModel)
                 .background(
@@ -327,6 +335,11 @@ struct ContentView: View {
                 )
         }
 #endif
+        .onChange(of: viewModel.energySiteId) { _ in
+            exportAdvisor.cancel()
+            exportAdvisor.context = nil
+            exportAdvisor.messages = []
+        }
         .onReceive(timer) { _ in
             powerwallRuntimeEstimateTimerCycle += 1
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
@@ -1086,6 +1099,17 @@ struct ContentView: View {
                     .controlSize(.large)
                     .accessibilityLabel("Chart")
                     .environment(\.colorScheme, .dark)
+                    Button {
+                        revealAutoHiddenOverlays()
+                        showingExportAdvisor = true
+                    } label: {
+                        Image(systemName: "sparkles")
+                            .font(.title2)
+                            .frame(width: 40, height: 40)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .accessibilityLabel("Export advisor; press again to ask follow-up questions")
                 }
             }
             .overlayChromeBackground(

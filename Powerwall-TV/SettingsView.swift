@@ -35,12 +35,25 @@ struct SettingsView: View {
     @Environment(\.presentationMode) var presentationMode
     @ObservedObject var viewModel: PowerwallViewModel
 
+    @State private var exportWeatherLocation = ""
+    @State private var keychainError: String?
+    @State private var xaiAPIKey = KeychainWrapper.standard.string(forKey: "xai_apiKey") ?? ""
+    @AppStorage("exportAdvisor_peakEnd") private var exportPeakEnd = 10
+    @AppStorage("exportAdvisor_voice") private var exportVoice = true
+
     var body: some View {
+        Group {
 #if os(macOS)
         macOSBody
 #else
         tvOSBody
 #endif
+        }
+        .onAppear {
+            if let siteID = viewModel.energySiteId {
+                exportWeatherLocation = UserDefaults.standard.string(forKey: "exportAdvisor_weatherLocation_" + siteID) ?? ""
+            }
+        }
     }
 
     @ViewBuilder
@@ -94,6 +107,24 @@ struct SettingsView: View {
                 SecureField("API key", text: $electricityMapsAPIKey)
                     .textContentType(.password)
                 TextField("Zone (e.g. AU-SA)", text: $electricityMapsZone)
+            }
+
+            Section(header: Text("Export advisor")) {
+                if let keychainError { Text(keychainError).foregroundStyle(.red) }
+                SecureField("xAI API key", text: $xaiAPIKey)
+                    .textContentType(.password)
+                    .accessibilityLabel("xAI API key")
+                    .accessibilityIdentifier("exportAdvisorAPIKey")
+                TextField("Weather location (suburb, country)", text: $exportWeatherLocation)
+                    .accessibilityLabel("Weather location")
+                Text("Used for the selected site when Tesla does not supply coordinates.")
+                    .font(.footnote)
+                Picker("Morning peak ends (site time)", selection: $exportPeakEnd) {
+                    ForEach(0...12, id: \.self) { hour in Text("\(hour):00").tag(hour) }
+                }
+                Toggle("Speak answers with Grok Voice", isOn: $exportVoice)
+                Text("Adding a key enables the advisor. When requested, your battery status, recent usage, local forecast and questions are sent to xAI. Your key is stored in Keychain. Requires Fleet API and WeatherKit access. Estimates do not export energy automatically.")
+                    .font(.footnote)
             }
 
             Section(header: Text("Display Settings")) {
@@ -197,6 +228,14 @@ struct SettingsView: View {
 #endif
     // MARK: – Actions
     private func saveAndDismiss() {
+        guard KeychainWrapper.standard.set(xaiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "xai_apiKey") else {
+            keychainError = "Could not save the xAI key to Keychain. Unlock Keychain and try again."
+            return
+        }
+        keychainError = nil
+        if let siteID = viewModel.energySiteId {
+            UserDefaults.standard.set(exportWeatherLocation.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "exportAdvisor_weatherLocation_" + siteID)
+        }
         sceneScale = clampSceneScale(sceneScale)
         sceneHorizontalOffset = clampSceneHorizontalOffset(sceneHorizontalOffset)
         sceneVerticalOffset = clampSceneVerticalOffset(sceneVerticalOffset)
@@ -228,6 +267,8 @@ struct SettingsView: View {
     }
 
     private func clearAllSettings() {
+        xaiAPIKey = ""
+        KeychainWrapper.standard.set("", forKey: "xai_apiKey")
         accessToken = ""
         KeychainWrapper.standard.set("", forKey: "fleetAPI_accessToken")
         KeychainWrapper.standard.set("", forKey: "fleetAPI_refreshToken")

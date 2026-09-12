@@ -11,16 +11,23 @@ import Security
 class KeychainWrapper {
     static let standard = KeychainWrapper()
 
-    func set(_ value: String, forKey key: String) {
-        if let data = value.data(using: .utf8) {
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrAccount as String: key,
-                kSecValueData as String: data
-            ]
-            SecItemDelete(query as CFDictionary)
-            SecItemAdd(query as CFDictionary, nil)
+    @discardableResult
+    func set(_ value: String, forKey key: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key
+        ]
+        if value.isEmpty {
+            let status = SecItemDelete(query as CFDictionary)
+            return status == errSecSuccess || status == errSecItemNotFound
         }
+        guard let data = value.data(using: .utf8) else { return false }
+        let attributes = [kSecValueData as String: data]
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            return SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil) == errSecSuccess
+        }
+        return status == errSecSuccess
     }
 
     func string(forKey key: String) -> String? {
