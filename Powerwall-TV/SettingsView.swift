@@ -43,14 +43,48 @@ struct SettingsView: View {
     @AppStorage("homeEnergyAdvisor_showButton") private var showHomeEnergyAdvisorButton = true
     @AppStorage("homeEnergyAdvisor_defaultPrompt") private var advisorDefaultPrompt = HomeEnergyAdvisorPreferences.defaultPrompt
 
+    private enum SettingsTab: String, CaseIterable {
+        case connection = "Connect", display = "Display", advisor = "Advisor", about = "About"
+    }
+    @State private var selectedTab: SettingsTab = .connection
+
     var body: some View {
-        Group {
-#if os(macOS)
-        macOSBody
-#else
-        tvOSBody
+        ZStack {
+            Rectangle().fill(.background)
+            LinearGradient(colors: [.blue.opacity(0.12), .cyan.opacity(0.06), .purple.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
+            VStack(spacing: 20) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Settings").font(.title2.weight(.semibold))
+                        Text("Make yourself at home.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Save") { saveAndDismiss() }
+                        .buttonStyle(.borderedProminent)
+#if !os(tvOS)
+                        .keyboardShortcut(.defaultAction)
 #endif
+                }
+                .padding(.horizontal, 24)
+                Picker("Settings category", selection: $selectedTab) {
+                    ForEach(SettingsTab.allCases, id: \.self) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 24)
+                if let keychainError {
+                    Text(keychainError).font(.callout).foregroundStyle(.red).padding(.horizontal, 24)
+                }
+                formContent
+            }
+            .padding(.top, 24)
         }
+#if os(macOS)
+        .frame(minWidth: 580, idealWidth: 660, minHeight: 580, idealHeight: 740)
+#endif
         .onAppear {
             if let siteID = viewModel.energySiteId {
                 exportWeatherLocation = UserDefaults.standard.string(forKey: "exportAdvisor_weatherLocation_" + siteID) ?? ""
@@ -58,11 +92,23 @@ struct SettingsView: View {
         }
     }
 
+    private func settingsCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(title).font(.headline)
+            VStack(alignment: .leading, spacing: 16, content: content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(22)
+        .modifier(AdvisorGlassCard(cornerRadius: 24))
+    }
+
     @ViewBuilder
     private var formContent: some View {
-        Form {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 20) {
+            if selectedTab == .connection {
             // Section for selecting login mode
-            Section(header: Text("Login Mode")) {
+            settingsCard("Login Mode") {
                 Picker("Mode", selection: $loginMode) {
                     Text("Local").tag(LoginMode.local)
                     Text("Fleet API").tag(LoginMode.fleetAPI)
@@ -72,20 +118,25 @@ struct SettingsView: View {
 
             // Gateway settings section, shown only for local mode
             if loginMode == .local {
-                Section(header: Text("Gateway Settings")) {
+                settingsCard("Gateway Settings") {
+                    Text("IP Address").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     TextField("IP Address", text: $ipAddress)
                         .textContentType(.URL)
+                    Text("Username").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     TextField("Username", text: $username)
                         .textContentType(.username)
+                    Text("Password").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     SecureField("Password", text: $password)
                         .textContentType(.password)
                 }
-                Section(header: Text("Wall Connector Settings")) {
+                settingsCard("Wall Connector Settings") {
+                    Text("IP Address").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     TextField("IP Address", text: $wallConnectorIPAddress)
                         .textContentType(.URL)
                 }
             } else {
-                Section(header: Text("Fleet API Settings")) {
+                settingsCard("Fleet API Settings") {
+                    Text("Access token").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     SecureField("Access token", text: $accessToken)
                         .textContentType(.password)
                     Button("Login with your Tesla account") {
@@ -97,6 +148,7 @@ struct SettingsView: View {
                 }
             }
 
+            settingsCard("Wall Connector") {
             LabeledContent("Last charging VIN") {
                 Text(lastChargingWallConnectorVIN.isEmpty ? "-" : lastChargingWallConnectorVIN)
 #if os(macOS)
@@ -104,14 +156,20 @@ struct SettingsView: View {
 #endif
             }
 
-            // New section for screen saver prevention
-            Section(header: Text("Electricity Maps Settings")) {
+            }
+
+            // Electricity Maps connection
+            settingsCard("Electricity Maps Settings") {
+                Text("API key").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 SecureField("API key", text: $electricityMapsAPIKey)
                     .textContentType(.password)
+                Text("Zone (e.g. AU-SA)").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 TextField("Zone (e.g. AU-SA)", text: $electricityMapsZone)
             }
 
-            Section(header: Text("Home Energy Advisor")) {
+            }
+            if selectedTab == .advisor {
+            settingsCard("Home Energy Advisor") {
                 Toggle("Show magic button on Home", isOn: $showHomeEnergyAdvisorButton)
                     .accessibilityIdentifier("homeEnergyAdvisorVisibility")
                 Text("Default prompt").font(.subheadline.weight(.semibold))
@@ -120,7 +178,10 @@ struct SettingsView: View {
                     .accessibilityIdentifier("homeEnergyAdvisorPrompt")
 #else
                 TextEditor(text: $advisorDefaultPrompt)
-                    .frame(minHeight: 100)
+                    .frame(height: 110)
+                    .scrollContentBackground(.hidden)
+                    .padding(10)
+                    .background(.background.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
                     .accessibilityLabel("Default prompt")
                     .accessibilityIdentifier("homeEnergyAdvisorPrompt")
 #endif
@@ -128,11 +189,12 @@ struct SettingsView: View {
                 Text("The first question asked when you refresh the advisor. Live energy and weather data are added automatically. An empty prompt uses the default.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                if let keychainError { Text(keychainError).foregroundStyle(.red) }
+                Text("xAI API key").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 SecureField("xAI API key", text: $xaiAPIKey)
                     .textContentType(.password)
                     .accessibilityLabel("xAI API key")
                     .accessibilityIdentifier("exportAdvisorAPIKey")
+                Text("Weather location (suburb, country)").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 TextField("Weather location (suburb, country)", text: $exportWeatherLocation)
                     .accessibilityLabel("Weather location")
                 Text("Used for the selected site when Tesla does not supply coordinates.")
@@ -145,7 +207,9 @@ struct SettingsView: View {
                     .font(.footnote)
             }
 
-            Section(header: Text("Display Settings")) {
+            }
+            if selectedTab == .display {
+            settingsCard("Display Settings") {
 #if os(macOS)
                 Toggle("Show in menu bar", isOn: $showInMenuBar)
                 Toggle("Keep window in front", isOn: $keepWindowInFront)
@@ -168,7 +232,7 @@ struct SettingsView: View {
             }
 
 #if !os(tvOS)
-            Section(header: Text("Scene Layout")) {
+            settingsCard("Scene Layout") {
                 Stepper("Scene scale: \(Int((clampSceneScale(sceneScale) * 100).rounded()))%", value: $sceneScale, in: sceneScaleRange, step: sceneScaleStep)
                 Stepper("Horizontal offset: \(String(format: "%+.0f%%", clampSceneHorizontalOffset(sceneHorizontalOffset) * 100))", value: $sceneHorizontalOffset, in: sceneHorizontalOffsetRange, step: sceneHorizontalOffsetStep)
                 Stepper("Vertical offset: \(String(format: "%+.0f%%", clampSceneVerticalOffset(sceneVerticalOffset) * 100))", value: $sceneVerticalOffset, in: sceneVerticalOffsetRange, step: sceneVerticalOffsetStep)
@@ -180,8 +244,10 @@ struct SettingsView: View {
             }
 #endif
 
+            }
+            if selectedTab == .about {
             if loginMode == .fleetAPI {
-                Section(header: Text("Delete all settings")) {
+                settingsCard("Delete all settings") {
                     Button("Delete") {
                             showingConfirmation = true
                         }
@@ -198,7 +264,7 @@ struct SettingsView: View {
                 }
             }
 
-            Section(header: Text("Information")) {
+            settingsCard("Information") {
                 Group {
                     Text("Version: \(appVersionAndBuild())")
                     Text("Firmware: \(viewModel.version ?? "-")")
@@ -206,9 +272,6 @@ struct SettingsView: View {
                     Text("Base: \(fleetBaseURL)")
                         .padding(.bottom, 8)
                     Text("This is an unofficial app – not affiliated with Tesla, Inc. Tesla, Powerwall, and related marks are trademarks of Tesla, Inc.")
-#if os(tvOS)
-                    Button("Save") { saveAndDismiss() }
-#endif
                 }
                 .font(.footnote)
                 .opacity(0.6)
@@ -216,34 +279,18 @@ struct SettingsView: View {
                 .textSelection(.enabled)
 #endif
             }
-        }
-    }
-#if os(macOS)
-    // MARK: – macOS
-    private var macOSBody: some View {
-        formContent
-            .padding()
-            .toolbar {
-                ToolbarItem(placement: .automatic) {
-                    Button("Save") { saveAndDismiss() }
-                }
             }
-    }
-#else
-    // MARK: – tvOS / iOS
-    private var tvOSBody: some View {
-        NavigationView {
-            formContent
-                .navigationTitle("Settings")
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Save") { saveAndDismiss() }
-                    }
-                }
-                .padding()
-        }
-    }
+          }
+#if !os(tvOS)
+          .textFieldStyle(.roundedBorder)
 #endif
+          .padding(.horizontal, 24)
+          .padding(.bottom, 24)
+          .frame(maxWidth: 800)
+          .frame(maxWidth: .infinity)
+        }
+        .id(selectedTab)
+    }
     // MARK: – Actions
     private func saveAndDismiss() {
         guard KeychainWrapper.standard.set(xaiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "xai_apiKey") else {

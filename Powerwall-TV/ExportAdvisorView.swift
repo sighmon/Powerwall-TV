@@ -299,7 +299,7 @@ struct ExportAdvisorView: View {
     }
 }
 
-private struct AdvisorGlassCard: ViewModifier {
+struct AdvisorGlassCard: ViewModifier {
     var cornerRadius: CGFloat
     var enabled = true
 

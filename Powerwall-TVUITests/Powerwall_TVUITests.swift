@@ -58,6 +58,13 @@ final class Powerwall_TVUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
         openSettingsIfNeeded(app)
+        app.radioButtons["Display"].click()
+        XCTAssertTrue(app.checkBoxes["Limit data to one decimal place"].waitForExistence(timeout: 3))
+        app.radioButtons["About"].click()
+        XCTAssertTrue(app.staticTexts["Information"].waitForExistence(timeout: 3))
+        app.radioButtons["Connect"].click()
+        XCTAssertTrue(app.staticTexts["Login Mode"].waitForExistence(timeout: 3))
+        app.radioButtons["Advisor"].click()
         XCTAssertTrue(app.secureTextFields["exportAdvisorAPIKey"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Home Energy Advisor"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["homeEnergyAdvisorPrompt"].exists)
@@ -101,6 +108,7 @@ final class Powerwall_TVUITests: XCTestCase {
         app.launch()
 
         openSettingsIfNeeded(app)
+        app.radioButtons["Display"].click()
         let precisionToggle = app.checkBoxes["Limit data to one decimal place"]
         XCTAssertTrue(precisionToggle.waitForExistence(timeout: 3))
 
@@ -113,6 +121,7 @@ final class Powerwall_TVUITests: XCTestCase {
         app.launch()
 
         openSettingsIfNeeded(app)
+        app.radioButtons["Display"].click()
         XCTAssertEqual(app.checkBoxes["Limit data to one decimal place"].value as? String, "1")
     }
 
