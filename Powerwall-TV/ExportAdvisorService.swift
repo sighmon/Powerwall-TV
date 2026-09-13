@@ -5,6 +5,7 @@ import WeatherKit
 struct ExportAdvisorContext {
     let generatedAt: Date
     let siteID: String
+    let settings: AdvisorEstimateSettings
     let prompt: String
     let budget: ExportBatteryBudget
     let averageUsageKWh: Double
@@ -16,6 +17,8 @@ struct ExportAdvisorContext {
     let weatherSymbol: String
     let weatherSummary: String
     let attribution: WeatherAttribution
+
+    var matchesCurrentSettings: Bool { settings == .current(siteID: siteID) }
 
     func isFresh(at now: Date = Date()) -> Bool {
         AdvisorEstimateFreshness.isFresh(generatedAt: generatedAt, end: end, timeZone: timeZone, now: now)
@@ -60,6 +63,7 @@ struct ExportAdvisorService {
     }
 
     func context(morningEndHour: Int) async throws -> ExportAdvisorContext {
+        let settings = AdvisorEstimateSettings.current(siteID: siteID, morningEndHour: morningEndHour)
         struct LivePayload: Decodable {
             struct Live: Decodable {
                 let percentage_charged: Double
@@ -74,7 +78,7 @@ struct ExportAdvisorService {
               let count = site.battery_count, count.isFinite, count > 0,
               let reserve = site.backup_reserve_percent else { throw ExportEstimateError.missingSiteMetadata }
         let now = Date()
-        async let weatherSnapshot = weather(site: site, zone: zone, now: now)
+        async let weatherSnapshot = weather(site: site, zone: zone, now: now, address: settings.weatherLocation)
         let window = try ExportUsageWindow(now: now, timeZone: zone, morningEndHour: morningEndHour)
         let formatter = ISO8601DateFormatter()
         struct History: Decodable {
@@ -158,7 +162,7 @@ struct ExportAdvisorService {
         let firstHour = hours.first!
         let mood: AdvisorWeatherMood = !firstHour.isDaylight ? .night : firstHour.precipitationChance >= 0.35 ? .rain : firstHour.cloudCover >= 0.6 ? .cloudy : .clear
         let summary = "\(firstHour.condition.description) · \(Int(firstHour.temperature.converted(to: .celsius).value.rounded()))°C"
-        return ExportAdvisorContext(generatedAt: now, siteID: siteID, prompt: prompt, budget: budget, averageUsageKWh: average, sampleCount: usage.count, end: window.interval.end, timeZone: zone, weatherLocationName: locationName, weatherMood: mood, weatherSymbol: firstHour.symbolName, weatherSummary: summary, attribution: attribution)
+        return ExportAdvisorContext(generatedAt: now, siteID: siteID, settings: settings, prompt: prompt, budget: budget, averageUsageKWh: average, sampleCount: usage.count, end: window.interval.end, timeZone: zone, weatherLocationName: locationName, weatherMood: mood, weatherSymbol: firstHour.symbolName, weatherSummary: summary, attribution: attribution)
     }
 
     private struct WeatherSnapshot {
@@ -176,14 +180,13 @@ struct ExportAdvisorService {
         guard let name = site.timeZoneIdentifier, let zone = TimeZone(identifier: name) else {
             throw ExportEstimateError.missingSiteMetadata
         }
-        _ = try await weather(site: site, zone: zone, now: Date())
+        _ = try await weather(site: site, zone: zone, now: Date(), address: AdvisorEstimateSettings.current(siteID: siteID).weatherLocation)
     }
 
-    private func weather(site: SitePayload.Site, zone: TimeZone, now: Date) async throws -> WeatherSnapshot {
+    private func weather(site: SitePayload.Site, zone: TimeZone, now: Date, address: String) async throws -> WeatherSnapshot {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = zone
         let forecastEnd = calendar.date(byAdding: .day, value: 2, to: calendar.startOfDay(for: now))!
-        let address = (UserDefaults.standard.string(forKey: "exportAdvisor_weatherLocation_" + siteID) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         // Hour/day boundaries and location changes must never reuse an incomplete forecast.
         let key = "\(baseURL)|\(siteID)|\(zone.identifier)|\(String(describing: site.latitude))|\(String(describing: site.longitude))|\(address)|\(floor(now.timeIntervalSince1970 / 3600))|\(forecastEnd.timeIntervalSince1970)"
         return try await Self.weatherCache.value(for: key, now: now) {

@@ -42,6 +42,10 @@ final class ExportAdvisor: ObservableObject {
             do {
                 let result = try await service.context(morningEndHour: hour)
                 try Task.checkCancellation()
+                guard result.matchesCurrentSettings else {
+                    error = "Advisor settings changed while loading. Refresh to use the new settings."
+                    return
+                }
                 context = result
                 conversation = [["role": "system", "content": result.prompt]]
                 try await answer(HomeEnergyAdvisorPreferences.initialPrompt())
@@ -53,6 +57,10 @@ final class ExportAdvisor: ObservableObject {
 
     func followUp(_ question: String) {
         guard !busy, let context else { return }
+        guard context.matchesCurrentSettings else {
+            error = "Advisor settings have changed. Refresh before asking another question."
+            return
+        }
         guard context.isFresh() else {
             error = "This estimate is no longer current. Refresh before asking another question."
             return
@@ -254,7 +262,7 @@ struct ExportAdvisorView: View {
 #endif
         .onAppear {
             guard !advisor.busy else { return }
-            if advisor.context?.isFresh() != true || advisor.context?.siteID != viewModel.energySiteId {
+            if advisor.context?.isFresh() != true || advisor.context?.matchesCurrentSettings != true || advisor.context?.siteID != viewModel.energySiteId {
                 // start() clears the old figures and conversation before fetching new data.
                 advisor.start(viewModel: viewModel, hour: peakEnd)
             } else {
