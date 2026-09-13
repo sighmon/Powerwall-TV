@@ -27,14 +27,14 @@ final class Powerwall_TVUITests: XCTestCase {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["POWERWALL_LIVE_ADVISOR"] == "1", "Opt-in live service test")
         let app = XCUIApplication()
         app.launch()
-        let advisor = app.buttons["Export advisor; press again to ask follow-up questions"]
+        let advisor = app.buttons["homeEnergyAdvisorButton"]
         XCTAssertTrue(advisor.waitForExistence(timeout: 20))
         advisor.click()
-        let refresh = app.buttons["Refresh estimate"]
+        let refresh = app.buttons["Refresh advice"]
         XCTAssertTrue(refresh.waitForExistence(timeout: 10))
-        let finished = NSPredicate { _, _ in !app.descendants(matching: .any)["advisorBusy"].exists && (app.staticTexts["advisorError"].exists || app.staticTexts["advisorMessage1"].exists) }
+        let finished = NSPredicate { _, _ in !app.descendants(matching: .any)["advisorBusy"].exists && (app.descendants(matching: .any)["advisorError"].exists || app.staticTexts["advisorMessage1"].exists) }
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: finished, evaluatedWith: nil)], timeout: 420), .completed)
-        XCTAssertFalse(app.staticTexts["advisorError"].exists, app.staticTexts["advisorError"].exists ? (app.staticTexts["advisorError"].value as? String ?? app.staticTexts["advisorError"].label) : "Live estimate failed")
+        XCTAssertFalse(app.descendants(matching: .any)["advisorError"].exists, app.descendants(matching: .any)["advisorError"].exists ? (app.descendants(matching: .any)["advisorError"].value as? String ?? app.descendants(matching: .any)["advisorError"].label) : "Live estimate failed")
         XCTAssertTrue(app.staticTexts["advisorMessage1"].exists)
         app.buttons["Done"].click()
         advisor.click()
@@ -43,9 +43,9 @@ final class Powerwall_TVUITests: XCTestCase {
         question.click()
         question.typeText("How much battery reserve does this estimate retain?")
         app.buttons["Ask follow-up"].click()
-        let followUpFinished = NSPredicate { _, _ in !app.descendants(matching: .any)["advisorBusy"].exists && (app.staticTexts["advisorError"].exists || app.staticTexts["advisorMessage3"].exists) }
+        let followUpFinished = NSPredicate { _, _ in !app.descendants(matching: .any)["advisorBusy"].exists && (app.descendants(matching: .any)["advisorError"].exists || app.staticTexts["advisorMessage3"].exists) }
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: followUpFinished, evaluatedWith: nil)], timeout: 180), .completed)
-        XCTAssertFalse(app.staticTexts["advisorError"].exists, app.staticTexts["advisorError"].exists ? (app.staticTexts["advisorError"].value as? String ?? app.staticTexts["advisorError"].label) : "Live follow-up or voice failed")
+        XCTAssertFalse(app.descendants(matching: .any)["advisorError"].exists, app.descendants(matching: .any)["advisorError"].exists ? (app.descendants(matching: .any)["advisorError"].value as? String ?? app.descendants(matching: .any)["advisorError"].label) : "Live follow-up or voice failed")
         XCTAssertTrue(app.staticTexts["advisorMessage3"].exists)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Live export advisor follow-up"
@@ -59,12 +59,27 @@ final class Powerwall_TVUITests: XCTestCase {
         app.launch()
         openSettingsIfNeeded(app)
         XCTAssertTrue(app.secureTextFields["exportAdvisorAPIKey"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Export advisor"].exists)
+        XCTAssertTrue(app.staticTexts["Home Energy Advisor"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["homeEnergyAdvisorPrompt"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["homeEnergyAdvisorVisibility"].exists)
         // Inspect only: do not save Settings or replace installed credentials.
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Export advisor settings"
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    @MainActor
+    func testHomeEnergyAdvisorButtonVisibility() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-homeEnergyAdvisor_showButton", "NO"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["homeEnergyAdvisorButton"].exists)
+        app.terminate()
+        app.launchArguments = ["-homeEnergyAdvisor_showButton", "YES"]
+        app.launch()
+        XCTAssertTrue(app.buttons["homeEnergyAdvisorButton"].waitForExistence(timeout: 20))
     }
 
     @MainActor

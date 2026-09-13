@@ -40,7 +40,7 @@ enum ExportEstimateError: LocalizedError {
 #endif
         case .invalidConfiguration: return "Check the Fleet region and morning peak end hour in Settings."
         case .weatherAuthorization: return "Apple Weather could not authorize this app. Please try again later or contact the app developer to check WeatherKit service activation."
-        case .missingWeatherLocation: return "Set the Powerwall site’s suburb and country in Settings → Export advisor → Weather location. Choose a location in the site’s time zone."
+        case .missingWeatherLocation: return "Set the Powerwall site’s suburb and country in Settings → Home Energy Advisor → Weather location. Choose a location in the site’s time zone."
         case .missingSiteMetadata: return "Tesla did not return the site location, time zone, battery count or backup reserve required for this estimate."
         case .incompleteHistory: return "Fleet history does not contain three complete recent usage windows. Try again when more data is available."
         case .invalidBattery: return "Fresh battery capacity, charge and backup reserve are required."

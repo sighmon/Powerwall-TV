@@ -120,6 +120,7 @@ struct ContentView: View {
     @State private var showingSettings = false
     @State private var showingExportAdvisor = false
     @StateObject private var exportAdvisor = ExportAdvisor()
+    @AppStorage("homeEnergyAdvisor_showButton") private var showHomeEnergyAdvisorButton = true
     @State private var showingGraph = false
     @State private var showingScheduler = false
     @State private var wiggleWatts = 40.0
@@ -1099,17 +1100,21 @@ struct ContentView: View {
                     .controlSize(.large)
                     .accessibilityLabel("Chart")
                     .environment(\.colorScheme, .dark)
-                    Button {
-                        revealAutoHiddenOverlays()
-                        showingExportAdvisor = true
-                    } label: {
-                        Image(systemName: "sparkles")
-                            .font(.title2)
-                            .frame(width: 40, height: 40)
+                    if showHomeEnergyAdvisorButton {
+                        Button {
+                            revealAutoHiddenOverlays()
+                            showingExportAdvisor = true
+                        } label: {
+                            Image(systemName: "sparkles")
+                                .font(.title2)
+                                .frame(width: 40, height: 40)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .accessibilityLabel("Home Energy Advisor")
+                        .accessibilityHint("Open again to ask follow-up questions")
+                        .accessibilityIdentifier("homeEnergyAdvisorButton")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .accessibilityLabel("Export advisor; press again to ask follow-up questions")
                 }
             }
             .overlayChromeBackground(

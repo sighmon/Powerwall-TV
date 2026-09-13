@@ -36,7 +36,7 @@ private final class AdvisorURLProtocol: URLProtocol, @unchecked Sendable {
                 let content = messages.last?["content"] == "follow-up" ? "The reserve remains protected." : "Estimate: 2.7 kWh, 10% of 27 kWh."
                 let finish = messages.last?["content"] == "truncate" ? "length" : "stop"
                 response = try! JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": content], "finish_reason": finish]]])
-            } else if request.url?.path == "/v1/tts", body?["voice_id"] as? String == "eve",
+            } else if request.url?.path == "/v1/tts", body?["voice_id"] as? String == "luna",
                       body?["language"] as? String == "en", body?["text"] as? String == "Speak this answer" {
                 status = 200
                 response = Data([1, 2, 3, 4])

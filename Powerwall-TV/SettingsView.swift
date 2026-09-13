@@ -40,6 +40,8 @@ struct SettingsView: View {
     @State private var xaiAPIKey = KeychainWrapper.standard.string(forKey: "xai_apiKey") ?? ""
     @AppStorage("exportAdvisor_peakEnd") private var exportPeakEnd = 10
     @AppStorage("exportAdvisor_voice") private var exportVoice = true
+    @AppStorage("homeEnergyAdvisor_showButton") private var showHomeEnergyAdvisorButton = true
+    @AppStorage("homeEnergyAdvisor_defaultPrompt") private var advisorDefaultPrompt = HomeEnergyAdvisorPreferences.defaultPrompt
 
     var body: some View {
         Group {
@@ -109,7 +111,23 @@ struct SettingsView: View {
                 TextField("Zone (e.g. AU-SA)", text: $electricityMapsZone)
             }
 
-            Section(header: Text("Export advisor")) {
+            Section(header: Text("Home Energy Advisor")) {
+                Toggle("Show magic button on Home", isOn: $showHomeEnergyAdvisorButton)
+                    .accessibilityIdentifier("homeEnergyAdvisorVisibility")
+                Text("Default prompt").font(.subheadline.weight(.semibold))
+#if os(tvOS)
+                TextField("Default prompt", text: $advisorDefaultPrompt)
+                    .accessibilityIdentifier("homeEnergyAdvisorPrompt")
+#else
+                TextEditor(text: $advisorDefaultPrompt)
+                    .frame(minHeight: 100)
+                    .accessibilityLabel("Default prompt")
+                    .accessibilityIdentifier("homeEnergyAdvisorPrompt")
+#endif
+                Button("Reset default prompt") { advisorDefaultPrompt = HomeEnergyAdvisorPreferences.defaultPrompt }
+                Text("The first question asked when you refresh the advisor. Live energy and weather data are added automatically. An empty prompt uses the default.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 if let keychainError { Text(keychainError).foregroundStyle(.red) }
                 SecureField("xAI API key", text: $xaiAPIKey)
                     .textContentType(.password)
