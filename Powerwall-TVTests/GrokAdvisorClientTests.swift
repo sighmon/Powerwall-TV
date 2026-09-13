@@ -27,6 +27,9 @@ private final class AdvisorURLProtocol: URLProtocol, @unchecked Sendable {
         if authorization == "Bearer invalid-test-key" {
             status = 401
             response = Data("secret server detail should not be displayed".utf8)
+        } else if authorization == "Bearer isolated-test-key", request.httpMethod == "GET", request.url?.path == "/v1/tts/voices", data == nil {
+            status = 200
+            response = Data(#"{"voices":[{"voice_id":"luna","name":"Luna"},{"voice_id":"ara","name":"Ara"}]}"#.utf8)
         } else if authorization == "Bearer isolated-test-key", request.httpMethod == "POST",
                   request.value(forHTTPHeaderField: "Content-Type") == "application/json" {
             if request.url?.path == "/v1/chat/completions", body?["model"] as? String == "grok-4.6",
@@ -36,10 +39,10 @@ private final class AdvisorURLProtocol: URLProtocol, @unchecked Sendable {
                 let content = messages.last?["content"] == "follow-up" ? "The reserve remains protected." : "Estimate: 2.7 kWh, 10% of 27 kWh."
                 let finish = messages.last?["content"] == "truncate" ? "length" : "stop"
                 response = try! JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": content], "finish_reason": finish]]])
-            } else if request.url?.path == "/v1/tts", body?["voice_id"] as? String == "luna",
+            } else if request.url?.path == "/v1/tts", ["luna", "ara"].contains(body?["voice_id"] as? String ?? ""),
                       body?["language"] as? String == "en", body?["text"] as? String == "Speak this answer" {
                 status = 200
-                response = Data([1, 2, 3, 4])
+                response = body?["voice_id"] as? String == "ara" ? Data([5, 6]) : Data([1, 2, 3, 4])
             }
         }
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
@@ -84,6 +87,16 @@ struct GrokAdvisorClientTests {
             ["role": "user", "content": "follow-up"]
         ])
         #expect(result == "The reserve remains protected.")
+    }
+
+    @Test func loadsAvailableVoices() async throws {
+        let voices = try await client().voices()
+        #expect(voices.map(\.id) == ["ara", "luna"])
+        #expect(voices.map(\.name) == ["Ara", "Luna"])
+    }
+
+    @Test func usesSelectedVoiceForSpeech() async throws {
+        #expect(try await client().speech(text: "Speak this answer", voiceID: "ara") == Data([5, 6]))
     }
 
     @Test func requestsGrokVoiceForAnswer() async throws {

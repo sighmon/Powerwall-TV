@@ -69,27 +69,8 @@ struct ExportAdvisorService {
               let zone = TimeZone(identifier: zoneName),
               let count = site.battery_count, count.isFinite, count > 0,
               let reserve = site.backup_reserve_percent else { throw ExportEstimateError.missingSiteMetadata }
-        let location: CLLocation
-        let locationName: String
-        if let latitude = site.latitude, let longitude = site.longitude,
-           latitude.isFinite, longitude.isFinite, (-90...90).contains(latitude), (-180...180).contains(longitude) {
-            location = CLLocation(latitude: latitude, longitude: longitude)
-            locationName = "Tesla site location"
-        } else {
-            let address = UserDefaults.standard.string(forKey: "exportAdvisor_weatherLocation_" + siteID) ?? ""
-            guard !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw ExportEstimateError.missingWeatherLocation
-            }
-            let places = try await CLGeocoder().geocodeAddressString(address)
-            guard let place = places.first, let coordinate = place.location,
-                  let placeZone = place.timeZone,
-                  placeZone.secondsFromGMT() == zone.secondsFromGMT() else {
-                throw ExportEstimateError.missingWeatherLocation
-            }
-            location = coordinate
-            locationName = [place.locality, place.administrativeArea, place.country].compactMap { $0 }.joined(separator: ", ")
-        }
         let now = Date()
+        async let weatherSnapshot = weather(site: site, zone: zone, now: now)
         let window = try ExportUsageWindow(now: now, timeZone: zone, morningEndHour: morningEndHour)
         let formatter = ISO8601DateFormatter()
         struct History: Decodable {
@@ -133,23 +114,11 @@ struct ExportAdvisorService {
         }
         guard usage.count >= 3 else { throw ExportEstimateError.incompleteHistory }
         let average = usage.reduce(0, +) / Double(usage.count)
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))!
-        let forecastEnd = calendar.date(byAdding: .day, value: 1, to: tomorrow)!
-        let weather: Forecast<HourWeather>
-        let attribution: WeatherAttribution
-        do {
-            // WeatherKit may round an arbitrary start time up to the next hour.
-            // Include the preceding hour because the service can exclude the start boundary.
-            let forecastStart = Date(timeIntervalSince1970: floor(now.timeIntervalSince1970 / 3600) * 3600 - 3600)
-            weather = try await WeatherService.shared.weather(for: location, including: .hourly(startDate: forecastStart, endDate: forecastEnd))
-            attribution = try await WeatherService.shared.attribution
-        } catch {
-            let failure = error as NSError
-            if failure.domain.contains("WDSJWTAuthenticator") && failure.code == 2 {
-                throw ExportEstimateError.weatherAuthorization
-            }
-            throw error
-        }
+        let cachedWeather = try await weatherSnapshot
+        let weather = cachedWeather.forecast
+        let attribution = cachedWeather.attribution
+        let locationName = cachedWeather.locationName
+        let forecastEnd = cachedWeather.end
         let hours = weather.forecast.filter { $0.date >= now.addingTimeInterval(-3600) && $0.date < forecastEnd }
         guard ExportForecastCoverage.isComplete(dates: hours.map(\.date), from: now, through: forecastEnd) else {
             throw ExportEstimateError.incompleteForecast("requested \(now) through \(forecastEnd); received \(hours.count) hours, first \(String(describing: hours.first?.date)), last \(String(describing: hours.last?.date))")
@@ -186,5 +155,73 @@ struct ExportAdvisorService {
         let mood: AdvisorWeatherMood = !firstHour.isDaylight ? .night : firstHour.precipitationChance >= 0.35 ? .rain : firstHour.cloudCover >= 0.6 ? .cloudy : .clear
         let summary = "\(firstHour.condition.description) · \(Int(firstHour.temperature.converted(to: .celsius).value.rounded()))°C"
         return ExportAdvisorContext(generatedAt: now, siteID: siteID, prompt: prompt, budget: budget, averageUsageKWh: average, sampleCount: usage.count, end: window.interval.end, timeZone: zone, weatherLocationName: locationName, weatherMood: mood, weatherSymbol: firstHour.symbolName, weatherSummary: summary, attribution: attribution)
+    }
+
+    private struct WeatherSnapshot {
+        let forecast: Forecast<HourWeather>
+        let attribution: WeatherAttribution
+        let locationName: String
+        let end: Date
+    }
+
+    private static let weatherCache = AdvisorRequestCache<String, WeatherSnapshot>()
+
+    /// Warm the same cache used by context(), without loading history or contacting xAI.
+    func prefetchWeather() async throws {
+        let site = try JSONDecoder().decode(SitePayload.self, from: await fleet("site_info")).response
+        guard let name = site.timeZoneIdentifier, let zone = TimeZone(identifier: name) else {
+            throw ExportEstimateError.missingSiteMetadata
+        }
+        _ = try await weather(site: site, zone: zone, now: Date())
+    }
+
+    private func weather(site: SitePayload.Site, zone: TimeZone, now: Date) async throws -> WeatherSnapshot {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let forecastEnd = calendar.date(byAdding: .day, value: 2, to: calendar.startOfDay(for: now))!
+        let address = (UserDefaults.standard.string(forKey: "exportAdvisor_weatherLocation_" + siteID) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // Hour/day boundaries and location changes must never reuse an incomplete forecast.
+        let key = "\(baseURL)|\(siteID)|\(zone.identifier)|\(String(describing: site.latitude))|\(String(describing: site.longitude))|\(address)|\(floor(now.timeIntervalSince1970 / 3600))|\(forecastEnd.timeIntervalSince1970)"
+        return try await Self.weatherCache.value(for: key, now: now) {
+            let location: CLLocation
+            let locationName: String
+            if let latitude = site.latitude, let longitude = site.longitude,
+               latitude.isFinite, longitude.isFinite, (-90...90).contains(latitude), (-180...180).contains(longitude) {
+                location = CLLocation(latitude: latitude, longitude: longitude)
+                locationName = "Tesla site location"
+            } else {
+                guard !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw ExportEstimateError.missingWeatherLocation
+                }
+                let places = try await CLGeocoder().geocodeAddressString(address)
+                guard let place = places.first, let coordinate = place.location,
+                      let placeZone = place.timeZone,
+                      placeZone.secondsFromGMT() == zone.secondsFromGMT() else {
+                    throw ExportEstimateError.missingWeatherLocation
+                }
+                location = coordinate
+                locationName = [place.locality, place.administrativeArea, place.country].compactMap { $0 }.joined(separator: ", ")
+            }
+            let weather: Forecast<HourWeather>
+            let attribution: WeatherAttribution
+            do {
+                // WeatherKit may round an arbitrary start time up to the next hour.
+                // Include the preceding hour because the service can exclude the start boundary.
+                let forecastStart = Date(timeIntervalSince1970: floor(now.timeIntervalSince1970 / 3600) * 3600 - 3600)
+                weather = try await WeatherService.shared.weather(for: location, including: .hourly(startDate: forecastStart, endDate: forecastEnd))
+                attribution = try await WeatherService.shared.attribution
+            } catch {
+                let failure = error as NSError
+                if failure.domain.contains("WDSJWTAuthenticator") && failure.code == 2 {
+                    throw ExportEstimateError.weatherAuthorization
+                }
+                throw error
+            }
+
+            guard ExportForecastCoverage.isComplete(dates: weather.forecast.map(\.date), from: now, through: forecastEnd) else {
+                throw ExportEstimateError.incompleteForecast("WeatherKit did not return the full forecast window")
+            }
+            return WeatherSnapshot(forecast: weather, attribution: attribution, locationName: locationName, end: forecastEnd)
+        }
     }
 }

@@ -28,20 +28,34 @@ struct GrokAdvisorClient {
         return choice.message.content
     }
 
-    func speech(text: String) async throws -> Data {
-        try await request("tts", body: ["text": text, "voice_id": "luna", "language": "en"])
+    struct Voice: Decodable, Identifiable {
+        let voice_id: String
+        let name: String
+        var id: String { voice_id }
     }
 
-    private func request(_ endpoint: String, body: [String: Any]) async throws -> Data {
+    func voices() async throws -> [Voice] {
+        struct Response: Decodable { let voices: [Voice] }
+        let data = try await request("tts/voices", method: "GET")
+        let voices = try JSONDecoder().decode(Response.self, from: data).voices
+        guard !voices.isEmpty else { throw ExportEstimateError.service("No Grok voices are available", 0) }
+        return voices.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func speech(text: String, voiceID: String = "luna") async throws -> Data {
+        try await request("tts", body: ["text": text, "voice_id": voiceID, "language": "en"])
+    }
+
+    private func request(_ endpoint: String, method: String = "POST", body: [String: Any]? = nil) async throws -> Data {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ExportEstimateError.service("xAI: add an API key in Settings", 401)
         }
         var request = URLRequest(url: URL(string: "https://api.x.ai/v1/\(endpoint)")!)
-        request.httpMethod = "POST"
+        request.httpMethod = method
         request.timeoutInterval = 90
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         let (data, response) = try await session.data(for: request)
         try Task.checkCancellation()
         guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {

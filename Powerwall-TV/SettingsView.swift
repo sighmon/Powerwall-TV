@@ -40,12 +40,17 @@ struct SettingsView: View {
     @State private var xaiAPIKey = KeychainWrapper.standard.string(forKey: "xai_apiKey") ?? ""
     @AppStorage("exportAdvisor_peakEnd") private var exportPeakEnd = 10
     @AppStorage("exportAdvisor_voice") private var exportVoice = true
-    @AppStorage("homeEnergyAdvisor_showButton") private var showHomeEnergyAdvisorButton = true
+    @AppStorage("homeEnergyAdvisor_showButton") private var showHomeEnergyAdvisorButton = false
     @AppStorage("homeEnergyAdvisor_defaultPrompt") private var advisorDefaultPrompt = HomeEnergyAdvisorPreferences.defaultPrompt
 
     private enum SettingsTab: String, CaseIterable {
         case connection = "Connect", display = "Display", advisor = "Advisor", about = "About"
     }
+    @AppStorage("homeEnergyAdvisor_voiceID") private var advisorVoiceID = "luna"
+    @State private var grokVoices: [GrokAdvisorClient.Voice] = []
+    @State private var loadingVoices = false
+    @State private var voiceError: String?
+    @State private var voiceReload = 0
     @State private var selectedTab: SettingsTab = .connection
 
     var body: some View {
@@ -85,6 +90,30 @@ struct SettingsView: View {
 #if os(macOS)
         .frame(minWidth: 580, idealWidth: 660, minHeight: 580, idealHeight: 740)
 #endif
+        .task(id: [selectedTab.rawValue, xaiAPIKey, String(voiceReload)]) {
+            guard selectedTab == .advisor else { return }
+            loadingVoices = true
+            voiceError = nil
+            grokVoices = []
+            do {
+                // Debounce API-key edits and cancel requests when leaving the tab.
+                try await Task.sleep(for: .milliseconds(350))
+                let key = xaiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty else {
+                    voiceError = "Add an xAI API key to load available voices."
+                    loadingVoices = false
+                    return
+                }
+                let voices = try await GrokAdvisorClient(apiKey: key).voices()
+                try Task.checkCancellation()
+                grokVoices = voices
+                loadingVoices = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                voiceError = "Could not load Grok voices. \(error.localizedDescription)"
+                loadingVoices = false
+            }
+        }
         .onAppear {
             if let siteID = viewModel.energySiteId {
                 exportWeatherLocation = UserDefaults.standard.string(forKey: "exportAdvisor_weatherLocation_" + siteID) ?? ""
@@ -203,6 +232,27 @@ struct SettingsView: View {
                     ForEach(0...12, id: \.self) { hour in Text("\(hour):00").tag(hour) }
                 }
                 Toggle("Speak answers with Grok Voice", isOn: $exportVoice)
+                Picker("Grok voice", selection: $advisorVoiceID) {
+                    if !grokVoices.contains(where: { $0.id == advisorVoiceID }) {
+                        Text(advisorVoiceID.capitalized + " (saved)").tag(advisorVoiceID)
+                    }
+                    ForEach(grokVoices) { voice in
+                        Text(voice.name).tag(voice.id)
+                    }
+                }
+#if !os(tvOS)
+                .pickerStyle(.menu)
+#endif
+                .accessibilityIdentifier("advisorVoicePicker")
+                .disabled(loadingVoices || grokVoices.isEmpty)
+                if loadingVoices {
+                    ProgressView("Loading Grok voices…").font(.caption)
+                        .accessibilityIdentifier("advisorVoicesLoading")
+                }
+                if let voiceError {
+                    Text(voiceError).font(.caption).foregroundStyle(.secondary)
+                    Button("Retry loading voices") { voiceReload += 1 }
+                }
                 Text("Adding a key enables the advisor. When requested, your battery status, recent usage, local forecast and questions are sent to xAI. Your key is stored in Keychain. Requires Fleet API and WeatherKit access. Estimates do not export energy automatically.")
                     .font(.footnote)
             }

@@ -69,6 +69,10 @@ final class Powerwall_TVUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Home Energy Advisor"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["homeEnergyAdvisorPrompt"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["homeEnergyAdvisorVisibility"].exists)
+        let voicePicker = app.popUpButtons["advisorVoicePicker"]
+        XCTAssertTrue(voicePicker.waitForExistence(timeout: 5))
+        let voicesLoaded = NSPredicate { _, _ in voicePicker.isEnabled }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: voicesLoaded, evaluatedWith: nil)], timeout: 30), .completed)
         // Inspect only: do not save Settings or replace installed credentials.
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Export advisor settings"

@@ -117,10 +117,16 @@ struct ContentView: View {
     @ObservedObject private var scheduleManager = PowerwallScheduleManager.shared
     @State private var demo = false
     @State private var animations = true
+    private var weatherPrefetchIdentity: [String] {
+        [viewModel.loginMode.rawValue, viewModel.energySiteId ?? "", viewModel.fleetBaseURL,
+         viewModel.accessToken, String(showingSettings),
+         UserDefaults.standard.string(forKey: "exportAdvisor_weatherLocation_" + (viewModel.energySiteId ?? "")) ?? ""]
+    }
+
     @State private var showingSettings = false
     @State private var showingExportAdvisor = false
     @StateObject private var exportAdvisor = ExportAdvisor()
-    @AppStorage("homeEnergyAdvisor_showButton") private var showHomeEnergyAdvisorButton = true
+    @AppStorage("homeEnergyAdvisor_showButton") private var showHomeEnergyAdvisorButton = false
     @State private var showingGraph = false
     @State private var showingScheduler = false
     @State private var wiggleWatts = 40.0
@@ -336,6 +342,13 @@ struct ContentView: View {
                 )
         }
 #endif
+        .task(id: weatherPrefetchIdentity) {
+            guard !showingSettings, viewModel.loginMode == .fleetAPI,
+                  let siteID = viewModel.energySiteId, !viewModel.accessToken.isEmpty else { return }
+            let service = ExportAdvisorService(baseURL: viewModel.fleetBaseURL, token: viewModel.accessToken, siteID: siteID)
+            // Opportunistic: opening the advisor retries and presents any service error.
+            try? await service.prefetchWeather()
+        }
         .onChange(of: viewModel.energySiteId) { _ in
             exportAdvisor.cancel()
             exportAdvisor.context = nil

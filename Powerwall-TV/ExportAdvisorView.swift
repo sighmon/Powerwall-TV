@@ -80,7 +80,7 @@ final class ExportAdvisor: ObservableObject {
         messages.append(reply)
         if UserDefaults.standard.object(forKey: "exportAdvisor_voice") as? Bool ?? true {
             do {
-                let audio = try await client.speech(text: reply)
+                let audio = try await client.speech(text: reply, voiceID: UserDefaults.standard.string(forKey: "homeEnergyAdvisor_voiceID") ?? "luna")
 #if !os(macOS)
                 try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
                 try AVAudioSession.sharedInstance().setActive(true)
@@ -138,77 +138,77 @@ struct ExportAdvisorView: View {
     var body: some View {
         ZStack {
             weatherBackground
-            VStack(spacing: 0) {
-                HStack {
-                    Spacer()
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .symbolRenderingMode(.hierarchical)
-                            .font(.title2)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if let context = advisor.context {
+                        overview(context)
+                        ForEach(Array(advisor.messages.enumerated()), id: \.offset) { index, message in
+                            messageView(message, index: index)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Image(systemName: "sparkles").font(.largeTitle).foregroundStyle(.tint)
+                            Text("Home energy insights")
+                                .font(.title2.weight(.semibold))
+                            Text("Considering your energy use and local weather forecast")
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 24)
+                    }
+                    if advisor.busy {
+                        ProgressView("Thinking…")
+                            .font(.callout)
+                            .accessibilityIdentifier("advisorBusy")
+                    }
+                    if let error = advisor.error {
+                        Label(error, systemImage: "exclamationmark.circle")
+                            .font(.callout)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("advisorError")
+                    }
+                    if advisor.context != nil { composer }
+                    HStack {
+                        Button { advisor.start(viewModel: viewModel, hour: peakEnd) } label: {
+                            Label("Refresh advice", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(advisor.busy)
+                        Spacer()
+                    }
+                    if let context = advisor.context {
+                        VStack(spacing: 14) {
+                            AsyncImage(url: colorScheme == .dark ? context.attribution.combinedMarkDarkURL : context.attribution.combinedMarkLightURL) { image in
+                                image.resizable().scaledToFit()
+                            } placeholder: { Text("Apple Weather") }
+                            .frame(width: 90, height: 24)
+                            Link("Weather data sources", destination: context.attribution.legalPageURL)
+                                .font(.caption)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.top, 8)
+                        Text("Percentages of total battery capacity, considering usage until \(context.end.formatted(Date.FormatStyle(date: .omitted, time: .shortened, timeZone: context.timeZone))) tomorrow · Updated \(context.generatedAt.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Done")
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 20)
-                .padding(.bottom, 8)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        if let context = advisor.context {
-                            overview(context)
-                            ForEach(Array(advisor.messages.enumerated()), id: \.offset) { index, message in
-                                messageView(message, index: index)
-                            }
-                        } else {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Image(systemName: "sparkles").font(.largeTitle).foregroundStyle(.tint)
-                                Text("A little insight for your home.")
-                                    .font(.title2.weight(.semibold))
-                                Text("Bringing your energy use and local forecast together.")
-                                    .font(.callout).foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 24)
-                        }
-                        if advisor.busy {
-                            ProgressView("Thinking…")
-                                .font(.callout)
-                                .accessibilityIdentifier("advisorBusy")
-                        }
-                        if let error = advisor.error {
-                            Label(error, systemImage: "exclamationmark.circle")
-                                .font(.callout)
-                                .foregroundStyle(.red)
-                                .accessibilityIdentifier("advisorError")
-                        }
-                        if advisor.context != nil { composer }
-                        HStack {
-                            Button { advisor.start(viewModel: viewModel, hour: peakEnd) } label: {
-                                Label("Refresh advice", systemImage: "arrow.clockwise")
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(advisor.busy)
-                            Spacer()
-                        }
-                        if let context = advisor.context {
-                            VStack(spacing: 14) {
-                                AsyncImage(url: colorScheme == .dark ? context.attribution.combinedMarkDarkURL : context.attribution.combinedMarkLightURL) { image in
-                                    image.resizable().scaledToFit()
-                                } placeholder: { Text("Apple Weather") }
-                                .frame(width: 90, height: 24)
-                                Link("Weather data sources", destination: context.attribution.legalPageURL)
-                                    .font(.caption)
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.top, 4)
-                        }
-                    }
-                    .frame(maxWidth: 760, alignment: .leading)
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 28)
-                    .frame(maxWidth: .infinity)
-                }
+                .frame(maxWidth: 760, alignment: .leading)
+                .padding(.horizontal, 28)
+                .padding(.top, 28)
+                .padding(.bottom, 28)
+                .frame(maxWidth: .infinity)
             }
+        }
+        .overlay(alignment: .topTrailing) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Done")
+            .padding(.trailing, 24)
+            .padding(.top, 20)
         }
 #if os(macOS)
         .frame(minWidth: 620, idealWidth: 720, minHeight: 560, idealHeight: 760)
@@ -242,9 +242,6 @@ struct ExportAdvisorView: View {
                 metric("Expected use", kWh: context.averageUsageKWh, capacity: context.budget.capacityKWh, detail: "\(context.sampleCount)-day average", symbol: "house")
                 metric("Export potential", kWh: context.budget.exportKWh, capacity: context.budget.capacityKWh, detail: "potential export", symbol: "arrow.up.right")
             }
-            Text("Percentages of total battery capacity. Through \(context.end.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: context.timeZone))) · Updated \(context.generatedAt.formatted(date: .omitted, time: .shortened))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
