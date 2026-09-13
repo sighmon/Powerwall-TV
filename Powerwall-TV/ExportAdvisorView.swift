@@ -53,8 +53,8 @@ final class ExportAdvisor: ObservableObject {
 
     func followUp(_ question: String) {
         guard !busy, let context else { return }
-        guard Date().timeIntervalSince(context.generatedAt) < 900 else {
-            error = "This estimate is over 15 minutes old. Refresh before asking another question."
+        guard context.isFresh() else {
+            error = "This estimate is no longer current. Refresh before asking another question."
             return
         }
         let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -212,7 +212,7 @@ struct ExportAdvisorView: View {
                             Spacer(minLength: 0)
                         }
                         .padding(.top, 8)
-                        Text("Percentages of total battery capacity, considering usage until \(context.end.formatted(Date.FormatStyle(date: .omitted, time: .shortened, timeZone: context.timeZone))) tomorrow · Updated \(context.generatedAt.formatted(date: .omitted, time: .shortened))")
+                        Text("Percentages of total battery capacity, considering usage until \(context.end.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: context.timeZone))) · Updated \(context.generatedAt.formatted(date: .omitted, time: .shortened))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -253,8 +253,13 @@ struct ExportAdvisorView: View {
         .frame(minWidth: 620, idealWidth: 720, minHeight: 560, idealHeight: 760)
 #endif
         .onAppear {
-            if advisor.context == nil && !advisor.busy { advisor.start(viewModel: viewModel, hour: peakEnd) }
-            else { asking = true }
+            guard !advisor.busy else { return }
+            if advisor.context?.isFresh() != true || advisor.context?.siteID != viewModel.energySiteId {
+                // start() clears the old figures and conversation before fetching new data.
+                advisor.start(viewModel: viewModel, hour: peakEnd)
+            } else {
+                asking = true
+            }
         }
 #if os(tvOS)
         .onExitCommand { dismiss() }
@@ -265,6 +270,15 @@ struct ExportAdvisorView: View {
             advisor.context = nil
             dismiss()
         }
+    }
+
+    private var metricColumns: [GridItem] {
+#if os(tvOS)
+        // Exactly three columns fill the wider TV layout instead of reserving empty adaptive columns.
+        return Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .leading), count: 3)
+#else
+        return [GridItem(.adaptive(minimum: 150), alignment: .leading)]
+#endif
     }
 
     private func overview(_ context: ExportAdvisorContext) -> some View {
@@ -279,7 +293,7 @@ struct ExportAdvisorView: View {
                 }
                 Spacer(minLength: 0)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)], alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 12) {
                 metric("Above reserve", kWh: context.budget.availableKWh, capacity: context.budget.capacityKWh, detail: "available", symbol: "battery.75percent")
                 metric("Expected use", kWh: context.averageUsageKWh, capacity: context.budget.capacityKWh, detail: "\(context.sampleCount)-day average", symbol: "house")
                 metric("Export potential", kWh: context.budget.exportKWh, capacity: context.budget.capacityKWh, detail: "potential export", symbol: "arrow.up.right")

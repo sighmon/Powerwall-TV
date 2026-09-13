@@ -122,3 +122,13 @@ enum ExportForecastCoverage {
         return false
     }
 }
+
+/// An estimate is reusable only within its original site-local day and usage window.
+enum AdvisorEstimateFreshness {
+    static func isFresh(generatedAt: Date, end: Date, timeZone: TimeZone, now: Date = Date()) -> Bool {
+        let age = now.timeIntervalSince(generatedAt)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return age >= 0 && age < 900 && now < end && calendar.isDate(generatedAt, inSameDayAs: now)
+    }
+}

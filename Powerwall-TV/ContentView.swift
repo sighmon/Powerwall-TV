@@ -316,13 +316,14 @@ struct ContentView: View {
                 showingConfirmation: false,
                 viewModel: viewModel
             )
-#if !os(tvOS)
+#if os(tvOS)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+#endif
             .background(
                 Color.clear
                     .background(.regularMaterial)
                     .ignoresSafeArea()
             )
-#endif
         }
         .fullScreenCover(isPresented: $showingExportAdvisor) {
             ExportAdvisorView(advisor: exportAdvisor, viewModel: viewModel)

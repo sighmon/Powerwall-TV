@@ -16,6 +16,10 @@ struct ExportAdvisorContext {
     let weatherSymbol: String
     let weatherSummary: String
     let attribution: WeatherAttribution
+
+    func isFresh(at now: Date = Date()) -> Bool {
+        AdvisorEstimateFreshness.isFresh(generatedAt: generatedAt, end: end, timeZone: timeZone, now: now)
+    }
 }
 
 /// Requests are scoped to an immutable site/token snapshot so changing sites cannot mix data.
