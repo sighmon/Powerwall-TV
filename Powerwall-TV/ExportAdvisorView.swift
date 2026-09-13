@@ -104,6 +104,10 @@ struct ExportAdvisorView: View {
     @AppStorage("exportAdvisor_peakEnd") private var peakEnd = 10
     @State private var question = ""
     @FocusState private var asking: Bool
+#if os(tvOS)
+    private enum TVFocus: Hashable { case close, overview }
+    @FocusState private var tvFocus: TVFocus?
+#endif
 
     private var skyColors: [Color] {
         switch advisor.context?.weatherMood ?? .clear {
@@ -142,6 +146,13 @@ struct ExportAdvisorView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     if let context = advisor.context {
                         overview(context)
+#if os(tvOS)
+                            .accessibilityElement(children: .combine)
+                            .focusable()
+                            .focused($tvFocus, equals: .overview)
+                            .onMoveCommand { if $0 == .up { tvFocus = .close } }
+                            .accessibilityIdentifier("advisorOverview")
+#endif
                         ForEach(Array(advisor.messages.enumerated()), id: \.offset) { index, message in
                             messageView(message, index: index)
                         }
@@ -154,7 +165,22 @@ struct ExportAdvisorView: View {
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 24)
+#if os(tvOS)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .combine)
+                        .focusable()
+                        .focused($tvFocus, equals: .overview)
+                        .onMoveCommand { if $0 == .up { tvFocus = .close } }
+                        .accessibilityIdentifier("advisorOverview")
+#endif
                     }
+#if DEBUG && os(tvOS)
+                    if ProcessInfo.processInfo.arguments.contains("--advisor-focus-ui-test-long") {
+                        ForEach(0..<4) { index in
+                            messageView(String(repeating: "Local focus test: keep your battery reserve available while considering household use and tomorrow’s forecast. ", count: 5), index: index)
+                        }
+                    }
+#endif
                     if advisor.busy {
                         ProgressView("Thinking…")
                             .font(.callout)
@@ -191,12 +217,19 @@ struct ExportAdvisorView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+#if os(tvOS)
+                .frame(maxWidth: 1400, alignment: .leading)
+#else
                 .frame(maxWidth: 760, alignment: .leading)
+#endif
                 .padding(.horizontal, 28)
                 .padding(.top, 28)
                 .padding(.bottom, 28)
                 .frame(maxWidth: .infinity)
             }
+#if os(tvOS)
+            .focusSection()
+#endif
         }
         .overlay(alignment: .topTrailing) {
             Button { dismiss() } label: {
@@ -207,6 +240,12 @@ struct ExportAdvisorView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Done")
+#if os(tvOS)
+            .focused($tvFocus, equals: .close)
+            .onMoveCommand { direction in
+                if direction == .down || direction == .left { tvFocus = .overview }
+            }
+#endif
             .padding(.trailing, 24)
             .padding(.top, 20)
         }
@@ -217,6 +256,9 @@ struct ExportAdvisorView: View {
             if advisor.context == nil && !advisor.busy { advisor.start(viewModel: viewModel, hour: peakEnd) }
             else { asking = true }
         }
+#if os(tvOS)
+        .onExitCommand { dismiss() }
+#endif
         .onDisappear { advisor.cancel() }
         .onChange(of: viewModel.energySiteId) { _ in
             advisor.cancel()
@@ -268,6 +310,9 @@ struct ExportAdvisorView: View {
             .padding(isQuestion ? 4 : 22)
             .modifier(AdvisorGlassCard(cornerRadius: 24, enabled: !isQuestion))
             .accessibilityIdentifier("advisorMessage\(index)")
+#if os(tvOS)
+            .modifier(AdvisorReadingFocus())
+#endif
     }
 
     private var composer: some View {
@@ -311,3 +356,19 @@ struct AdvisorGlassCard: ViewModifier {
         }
     }
 }
+
+#if os(tvOS)
+/// Reading targets let the Siri Remote advance through answers and scroll them into view.
+private struct AdvisorReadingFocus: ViewModifier {
+    @FocusState private var focused: Bool
+    func body(content: Content) -> some View {
+        content
+            .focusable()
+            .focused($focused)
+            .overlay {
+                RoundedRectangle(cornerRadius: 24)
+                    .strokeBorder(.primary.opacity(focused ? 0.5 : 0), lineWidth: 2)
+            }
+    }
+}
+#endif

@@ -55,9 +55,12 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
+#if !os(tvOS)
             Rectangle().fill(.background)
+                .ignoresSafeArea()
             LinearGradient(colors: [.blue.opacity(0.12), .cyan.opacity(0.06), .purple.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
                 .ignoresSafeArea()
+#endif
             VStack(spacing: 20) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
@@ -86,7 +89,13 @@ struct SettingsView: View {
                 formContent
             }
             .padding(.top, 24)
+#if os(tvOS)
+            .frame(maxWidth: 1400)
+#endif
         }
+#if os(iOS)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+#endif
 #if os(macOS)
         .frame(minWidth: 580, idealWidth: 660, minHeight: 580, idealHeight: 740)
 #endif
@@ -336,7 +345,11 @@ struct SettingsView: View {
 #endif
           .padding(.horizontal, 24)
           .padding(.bottom, 24)
+#if os(tvOS)
+          .frame(maxWidth: 1400)
+#else
           .frame(maxWidth: 800)
+#endif
           .frame(maxWidth: .infinity)
         }
         .id(selectedTab)

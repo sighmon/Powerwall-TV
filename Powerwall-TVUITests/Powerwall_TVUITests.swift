@@ -7,6 +7,7 @@
 
 import XCTest
 
+#if os(macOS)
 final class Powerwall_TVUITests: XCTestCase {
 
     override func setUpWithError() throws {
@@ -26,6 +27,7 @@ final class Powerwall_TVUITests: XCTestCase {
     func testLiveExportAdvisorAnswersAndFollowUp() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["POWERWALL_LIVE_ADVISOR"] == "1", "Opt-in live service test")
         let app = XCUIApplication()
+        app.launchArguments = ["-homeEnergyAdvisor_showButton", "YES"]
         app.launch()
         let advisor = app.buttons["homeEnergyAdvisorButton"]
         XCTAssertTrue(advisor.waitForExistence(timeout: 20))
@@ -71,13 +73,25 @@ final class Powerwall_TVUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["homeEnergyAdvisorVisibility"].exists)
         let voicePicker = app.popUpButtons["advisorVoicePicker"]
         XCTAssertTrue(voicePicker.waitForExistence(timeout: 5))
-        let voicesLoaded = NSPredicate { _, _ in voicePicker.isEnabled }
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: voicesLoaded, evaluatedWith: nil)], timeout: 30), .completed)
+        // Presence is independent of credentials, connectivity and service availability.
         // Inspect only: do not save Settings or replace installed credentials.
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Export advisor settings"
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    @MainActor
+    func testLiveAdvisorVoicesLoad() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["POWERWALL_LIVE_ADVISOR"] == "1", "Opt-in live service test")
+        let app = XCUIApplication()
+        app.launch()
+        openSettingsIfNeeded(app)
+        app.radioButtons["Advisor"].click()
+        let voicePicker = app.popUpButtons["advisorVoicePicker"]
+        XCTAssertTrue(voicePicker.waitForExistence(timeout: 5))
+        let voicesLoaded = NSPredicate { _, _ in voicePicker.isEnabled }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: voicesLoaded, evaluatedWith: nil)], timeout: 30), .completed)
     }
 
     @MainActor
@@ -167,3 +181,64 @@ final class Powerwall_TVUITests: XCTestCase {
         saveButton.tap()
     }
 }
+
+#endif
+
+#if os(tvOS)
+final class AdvisorTVFocusTests: XCTestCase {
+    @MainActor
+    func testRemoteScrollsThroughAnswers() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--advisor-focus-ui-test", "--advisor-focus-ui-test-long", "-loginMode", "local", "-gatewayIP", "demo"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 15))
+        let remote = XCUIRemote.shared
+        remote.press(.up)
+        remote.press(.down)
+        let focused = NSPredicate(format: "hasFocus == true")
+        for index in 0..<4 {
+            remote.press(.down)
+            let message = app.descendants(matching: .any)["advisorMessage\(index)"].firstMatch
+            expectation(for: focused, evaluatedWith: message)
+            waitForExpectations(timeout: 5)
+            XCTAssertTrue(message.isHittable)
+        }
+        remote.press(.down)
+        expectation(for: focused, evaluatedWith: app.buttons["Refresh advice"])
+        waitForExpectations(timeout: 5)
+        remote.press(.menu)
+        XCTAssertTrue(app.buttons["Done"].waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testRemoteCanLeaveCloseAndReachRefresh() throws {
+        let app = XCUIApplication()
+        continueAfterFailure = false
+        app.launchArguments = ["--advisor-focus-ui-test", "-loginMode", "local", "-gatewayIP", "demo"]
+        app.launch()
+        let close = app.buttons["Done"]
+        XCTAssertTrue(close.waitForExistence(timeout: 15))
+        let remote = XCUIRemote.shared
+        // Up from the first reading target explicitly returns to Close.
+        remote.press(.up)
+        let focused = NSPredicate(format: "hasFocus == true")
+        expectation(for: focused, evaluatedWith: close)
+        waitForExpectations(timeout: 5)
+        remote.press(.down)
+        let overview = app.descendants(matching: .any)["advisorOverview"].firstMatch
+        expectation(for: focused, evaluatedWith: overview)
+        waitForExpectations(timeout: 5)
+        remote.press(.down)
+        let refresh = app.buttons["Refresh advice"]
+        expectation(for: focused, evaluatedWith: refresh)
+        waitForExpectations(timeout: 5)
+        remote.press(.up)
+        remote.press(.up)
+        expectation(for: focused, evaluatedWith: close)
+        waitForExpectations(timeout: 5)
+        remote.press(.select)
+        XCTAssertTrue(close.waitForNonExistence(timeout: 5))
+    }
+}
+#endif

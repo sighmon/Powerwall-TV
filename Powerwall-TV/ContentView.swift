@@ -316,11 +316,13 @@ struct ContentView: View {
                 showingConfirmation: false,
                 viewModel: viewModel
             )
+#if !os(tvOS)
             .background(
                 Color.clear
                     .background(.regularMaterial)
                     .ignoresSafeArea()
             )
+#endif
         }
         .fullScreenCover(isPresented: $showingExportAdvisor) {
             ExportAdvisorView(advisor: exportAdvisor, viewModel: viewModel)
@@ -349,6 +351,13 @@ struct ContentView: View {
             // Opportunistic: opening the advisor retries and presents any service error.
             try? await service.prefetchWeather()
         }
+#if DEBUG && os(tvOS)
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("--advisor-focus-ui-test") {
+                showingExportAdvisor = true
+            }
+        }
+#endif
         .onChange(of: viewModel.energySiteId) { _ in
             exportAdvisor.cancel()
             exportAdvisor.context = nil
@@ -1119,8 +1128,13 @@ struct ContentView: View {
                             showingExportAdvisor = true
                         } label: {
                             Image(systemName: "sparkles")
+#if os(tvOS)
+                                .font(.title3)
+                                .frame(width: 80, height: 80)
+#else
                                 .font(.title2)
                                 .frame(width: 40, height: 40)
+#endif
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.large)
