@@ -13,19 +13,30 @@ final class ExportAdvisor: ObservableObject {
     private var task: Task<Void, Never>?
     private var generation = UUID()
 
+    var hasInitialAnswer: Bool { messages.count >= 2 }
+
     func cancel() {
         generation = UUID()
         task?.cancel()
         player?.stop()
         busy = false
+        if !hasInitialAnswer { clearConversation() }
     }
 
-    func start(viewModel: PowerwallViewModel, hour: Int) {
-        cancel()
+    private func clearConversation() {
         context = nil
         messages = []
         conversation = []
         error = nil
+    }
+
+    func invalidate() {
+        cancel()
+        clearConversation()
+    }
+
+    func start(viewModel: PowerwallViewModel, hour: Int) {
+        invalidate()
         guard viewModel.loginMode == .fleetAPI, let siteID = viewModel.energySiteId else {
             error = "Sign in with Fleet API and select a Powerwall site first."
             return
@@ -55,8 +66,13 @@ final class ExportAdvisor: ObservableObject {
         }
     }
 
-    func followUp(_ question: String) {
-        guard !busy, let context else { return }
+    func followUp(_ question: String, viewModel: PowerwallViewModel) {
+        guard viewModel.loginMode == .fleetAPI, context?.siteID == viewModel.energySiteId else {
+            invalidate()
+            error = "Sign in with Fleet API and select a Powerwall site first."
+            return
+        }
+        guard !busy, hasInitialAnswer, let context else { return }
         guard context.matchesCurrentSettings else {
             error = "Advisor settings have changed. Refresh before asking another question."
             return
@@ -80,9 +96,12 @@ final class ExportAdvisor: ObservableObject {
     }
 
     private func answer(_ question: String) async throws {
+        let requestGeneration = generation
         let pending = conversation + [["role": "user", "content": question]]
         let client = GrokAdvisorClient(apiKey: KeychainWrapper.standard.string(forKey: "xai_apiKey") ?? "")
         let reply = try await client.answer(messages: pending)
+        try Task.checkCancellation()
+        guard generation == requestGeneration else { throw CancellationError() }
         conversation = pending + [["role": "assistant", "content": reply]]
         messages.append(question)
         messages.append(reply)
@@ -93,6 +112,8 @@ final class ExportAdvisor: ObservableObject {
                 try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
                 try AVAudioSession.sharedInstance().setActive(true)
 #endif
+                try Task.checkCancellation()
+                guard generation == requestGeneration else { throw CancellationError() }
                 player = try AVAudioPlayer(data: audio)
                 player?.play()
             } catch is CancellationError { throw CancellationError() }
@@ -261,8 +282,12 @@ struct ExportAdvisorView: View {
         .frame(minWidth: 620, idealWidth: 720, minHeight: 560, idealHeight: 760)
 #endif
         .onAppear {
+            guard viewModel.loginMode == .fleetAPI else {
+                advisor.start(viewModel: viewModel, hour: peakEnd)
+                return
+            }
             guard !advisor.busy else { return }
-            if advisor.context?.isFresh() != true || advisor.context?.matchesCurrentSettings != true || advisor.context?.siteID != viewModel.energySiteId {
+            if !advisor.hasInitialAnswer || advisor.context?.isFresh() != true || advisor.context?.matchesCurrentSettings != true || advisor.context?.siteID != viewModel.energySiteId {
                 // start() clears the old figures and conversation before fetching new data.
                 advisor.start(viewModel: viewModel, hour: peakEnd)
             } else {
@@ -273,9 +298,12 @@ struct ExportAdvisorView: View {
         .onExitCommand { dismiss() }
 #endif
         .onDisappear { advisor.cancel() }
+        .onChange(of: viewModel.loginMode) { _ in
+            advisor.invalidate()
+            dismiss()
+        }
         .onChange(of: viewModel.energySiteId) { _ in
-            advisor.cancel()
-            advisor.context = nil
+            advisor.invalidate()
             dismiss()
         }
     }
@@ -358,7 +386,7 @@ struct ExportAdvisorView: View {
 
     private func send() {
         guard !advisor.busy else { return }
-        advisor.followUp(question)
+        advisor.followUp(question, viewModel: viewModel)
         question = ""
     }
 }

@@ -359,10 +359,11 @@ struct ContentView: View {
             }
         }
 #endif
+        .onChange(of: viewModel.loginMode) { _ in
+            exportAdvisor.invalidate()
+        }
         .onChange(of: viewModel.energySiteId) { _ in
-            exportAdvisor.cancel()
-            exportAdvisor.context = nil
-            exportAdvisor.messages = []
+            exportAdvisor.invalidate()
         }
         .onReceive(timer) { _ in
             powerwallRuntimeEstimateTimerCycle += 1

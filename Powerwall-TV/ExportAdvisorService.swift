@@ -16,7 +16,12 @@ struct ExportAdvisorContext {
     let weatherMood: AdvisorWeatherMood
     let weatherSymbol: String
     let weatherSummary: String
-    let attribution: WeatherAttribution
+    struct Attribution {
+        let legalPageURL: URL
+        let combinedMarkDarkURL: URL
+        let combinedMarkLightURL: URL
+    }
+    let attribution: Attribution
 
     var matchesCurrentSettings: Bool { settings == .current(siteID: siteID) }
 
@@ -162,7 +167,7 @@ struct ExportAdvisorService {
         let firstHour = hours.first!
         let mood: AdvisorWeatherMood = !firstHour.isDaylight ? .night : firstHour.precipitationChance >= 0.35 ? .rain : firstHour.cloudCover >= 0.6 ? .cloudy : .clear
         let summary = "\(firstHour.condition.description) · \(Int(firstHour.temperature.converted(to: .celsius).value.rounded()))°C"
-        return ExportAdvisorContext(generatedAt: now, siteID: siteID, settings: settings, prompt: prompt, budget: budget, averageUsageKWh: average, sampleCount: usage.count, end: window.interval.end, timeZone: zone, weatherLocationName: locationName, weatherMood: mood, weatherSymbol: firstHour.symbolName, weatherSummary: summary, attribution: attribution)
+        return ExportAdvisorContext(generatedAt: now, siteID: siteID, settings: settings, prompt: prompt, budget: budget, averageUsageKWh: average, sampleCount: usage.count, end: window.interval.end, timeZone: zone, weatherLocationName: locationName, weatherMood: mood, weatherSymbol: firstHour.symbolName, weatherSummary: summary, attribution: .init(legalPageURL: attribution.legalPageURL, combinedMarkDarkURL: attribution.combinedMarkDarkURL, combinedMarkLightURL: attribution.combinedMarkLightURL))
     }
 
     private struct WeatherSnapshot {
