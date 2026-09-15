@@ -192,11 +192,13 @@ final class AdvisorTVFocusTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--advisor-focus-ui-test", "--advisor-focus-ui-test-long", "-loginMode", "local", "-gatewayIP", "demo"]
         app.launch()
-        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 15))
+        let overview = app.descendants(matching: .any)["advisorOverview"].firstMatch
+        XCTAssertTrue(overview.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Done"].exists)
         let remote = XCUIRemote.shared
-        remote.press(.up)
-        remote.press(.down)
         let focused = NSPredicate(format: "hasFocus == true")
+        expectation(for: focused, evaluatedWith: overview)
+        waitForExpectations(timeout: 5)
         for index in 0..<4 {
             remote.press(.down)
             let message = app.descendants(matching: .any)["advisorMessage\(index)"].firstMatch
@@ -208,36 +210,85 @@ final class AdvisorTVFocusTests: XCTestCase {
         expectation(for: focused, evaluatedWith: app.buttons["Refresh advice"])
         waitForExpectations(timeout: 5)
         remote.press(.menu)
-        XCTAssertTrue(app.buttons["Done"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(overview.waitForNonExistence(timeout: 5))
     }
 
     @MainActor
-    func testRemoteCanLeaveCloseAndReachRefresh() throws {
+    func testRemoteCanReachRefreshAndDismissWithBack() throws {
         let app = XCUIApplication()
         continueAfterFailure = false
         app.launchArguments = ["--advisor-focus-ui-test", "-loginMode", "local", "-gatewayIP", "demo"]
         app.launch()
-        let close = app.buttons["Done"]
-        XCTAssertTrue(close.waitForExistence(timeout: 15))
-        let remote = XCUIRemote.shared
-        // Up from the first reading target explicitly returns to Close.
-        remote.press(.up)
-        let focused = NSPredicate(format: "hasFocus == true")
-        expectation(for: focused, evaluatedWith: close)
-        waitForExpectations(timeout: 5)
-        remote.press(.down)
         let overview = app.descendants(matching: .any)["advisorOverview"].firstMatch
+        XCTAssertTrue(overview.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Done"].exists)
+        let remote = XCUIRemote.shared
+        let focused = NSPredicate(format: "hasFocus == true")
         expectation(for: focused, evaluatedWith: overview)
         waitForExpectations(timeout: 5)
         remote.press(.down)
-        let refresh = app.buttons["Refresh advice"]
-        expectation(for: focused, evaluatedWith: refresh)
+        expectation(for: focused, evaluatedWith: app.buttons["Refresh advice"])
         waitForExpectations(timeout: 5)
         remote.press(.up)
-        remote.press(.up)
-        expectation(for: focused, evaluatedWith: close)
+        expectation(for: focused, evaluatedWith: overview)
         waitForExpectations(timeout: 5)
-        remote.press(.select)
+        remote.press(.menu)
+        XCTAssertTrue(overview.waitForNonExistence(timeout: 5))
+    }
+}
+#endif
+
+#if os(iOS) || os(macOS)
+final class OverlayCloseButtonTests: XCTestCase {
+    @MainActor
+    func testAdvisorCloseTargetDismisses() throws {
+        try checkDismissal(argument: "--advisor-close-ui-test", identifier: "Done")
+    }
+
+    @MainActor
+    func testGraphCloseTargetDismisses() throws {
+        try checkDismissal(argument: "--graph-close-ui-test", identifier: "graphCloseButton")
+    }
+
+#if os(macOS)
+    @MainActor
+    func testGraphInitiallyReceivesArrowKeys() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--graph-close-ui-test", "-loginMode", "local", "-gatewayIP", "demo"]
+        app.launch()
+        let close = app.buttons["graphCloseButton"]
+        XCTAssertTrue(close.waitForExistence(timeout: 15))
+        let title = app.staticTexts["selectedGraphTitle"]
+        XCTAssertEqual(title.value as? String ?? title.label, "Powerwall")
+        // Send keys without clicking the chart or otherwise moving focus first.
+        app.typeKey(.downArrow, modifierFlags: [])
+        expectation(for: NSPredicate { _, _ in (title.value as? String ?? title.label) == "Solar" }, evaluatedWith: title)
+        waitForExpectations(timeout: 5)
+        app.typeKey(.upArrow, modifierFlags: [])
+        expectation(for: NSPredicate { _, _ in (title.value as? String ?? title.label) == "Powerwall" }, evaluatedWith: title)
+        waitForExpectations(timeout: 5)
+        close.click()
+        XCTAssertTrue(close.waitForNonExistence(timeout: 5))
+    }
+#endif
+
+    @MainActor
+    private func checkDismissal(argument: String, identifier: String) throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = [argument, "-loginMode", "local", "-gatewayIP", "demo"]
+        app.launch()
+        let close = app.buttons[identifier]
+        XCTAssertTrue(close.waitForExistence(timeout: 15))
+        XCTAssertTrue(close.isHittable)
+        XCTAssertGreaterThanOrEqual(close.frame.width, 48)
+        XCTAssertGreaterThanOrEqual(close.frame.height, 48)
+#if os(iOS)
+        close.tap()
+#else
+        close.click()
+#endif
         XCTAssertTrue(close.waitForNonExistence(timeout: 5))
     }
 }

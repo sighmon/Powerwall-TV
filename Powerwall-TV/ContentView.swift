@@ -352,10 +352,12 @@ struct ContentView: View {
             // Opportunistic: opening the advisor retries and presents any service error.
             try? await service.prefetchWeather()
         }
-#if DEBUG && os(tvOS)
+#if DEBUG
         .onAppear {
-            if ProcessInfo.processInfo.arguments.contains("--advisor-focus-ui-test") {
+            if ProcessInfo.processInfo.arguments.contains("--advisor-focus-ui-test") || ProcessInfo.processInfo.arguments.contains("--advisor-close-ui-test") {
                 showingExportAdvisor = true
+            } else if ProcessInfo.processInfo.arguments.contains("--graph-close-ui-test") {
+                showingGraph = true
             }
         }
 #endif
@@ -1130,12 +1132,19 @@ struct ContentView: View {
                             showingExportAdvisor = true
                         } label: {
                             Image(systemName: "sparkles")
-#if os(tvOS)
+#if os(macOS)
+                                .font(.system(size: 18, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.primary)
+                                .frame(width: 40, height: 40)
+#elseif os(iOS)
+                                .font(.system(size: 24, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.gray)
+                                .frame(width: 40, height: 40)
+#else
                                 .font(.title3)
                                 .frame(width: 80, height: 80)
-#else
-                                .font(.title2)
-                                .frame(width: 40, height: 40)
 #endif
                         }
                         .buttonStyle(.bordered)
@@ -1143,6 +1152,7 @@ struct ContentView: View {
                         .accessibilityLabel("Home Energy Advisor")
                         .accessibilityHint("Open again to ask follow-up questions")
                         .accessibilityIdentifier("homeEnergyAdvisorButton")
+                        .environment(\.colorScheme, .dark)
                     }
                 }
             }

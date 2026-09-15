@@ -134,7 +134,7 @@ struct ExportAdvisorView: View {
     @State private var question = ""
     @FocusState private var asking: Bool
 #if os(tvOS)
-    private enum TVFocus: Hashable { case close, overview }
+    private enum TVFocus: Hashable { case overview }
     @FocusState private var tvFocus: TVFocus?
 #endif
 
@@ -170,7 +170,6 @@ struct ExportAdvisorView: View {
 
     var body: some View {
         ZStack {
-            weatherBackground
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     if let context = advisor.context {
@@ -179,7 +178,6 @@ struct ExportAdvisorView: View {
                             .accessibilityElement(children: .combine)
                             .focusable()
                             .focused($tvFocus, equals: .overview)
-                            .onMoveCommand { if $0 == .up { tvFocus = .close } }
                             .accessibilityIdentifier("advisorOverview")
 #endif
                         ForEach(Array(advisor.messages.enumerated()), id: \.offset) { index, message in
@@ -199,7 +197,6 @@ struct ExportAdvisorView: View {
                         .accessibilityElement(children: .combine)
                         .focusable()
                         .focused($tvFocus, equals: .overview)
-                        .onMoveCommand { if $0 == .up { tvFocus = .close } }
                         .accessibilityIdentifier("advisorOverview")
 #endif
                     }
@@ -260,24 +257,18 @@ struct ExportAdvisorView: View {
             .focusSection()
 #endif
         }
+        .background { weatherBackground }
+#if !os(tvOS)
         .overlay(alignment: .topTrailing) {
             Button { dismiss() } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
+                OverlayCloseButtonLabel()
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Done")
-#if os(tvOS)
-            .focused($tvFocus, equals: .close)
-            .onMoveCommand { direction in
-                if direction == .down || direction == .left { tvFocus = .overview }
-            }
-#endif
-            .padding(.trailing, 24)
-            .padding(.top, 20)
+            .padding(.trailing, 16)
+            .padding(.top, 12)
         }
+#endif
 #if os(macOS)
         .frame(minWidth: 620, idealWidth: 720, minHeight: 560, idealHeight: 760)
 #endif
@@ -295,6 +286,7 @@ struct ExportAdvisorView: View {
             }
         }
 #if os(tvOS)
+        .defaultFocus($tvFocus, .overview)
         .onExitCommand { dismiss() }
 #endif
         .onDisappear { advisor.cancel() }

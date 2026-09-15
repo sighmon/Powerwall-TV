@@ -204,13 +204,13 @@ struct GraphView: View {
     private func graphBody(
         primaryChartHeight: CGFloat,
         secondaryChartHeight: CGFloat,
-        iOSTopPadding: CGFloat = 0,
-        iOSCloseTopPadding: CGFloat = 12
+        iOSTopPadding: CGFloat = 0
     ) -> some View {
         VStack(spacing: 20) {
             // Battery Power Flow Chart
             Text(selectedGraph.title)
                 .font(.title)
+                .accessibilityIdentifier("selectedGraphTitle")
             Text("\(viewModel.currentDateLabel) · \(selectedGraph.subtitle) · \(selectedEnergyTotalLabel) kWh")
                 .opacity(0.6)
                 .fontWeight(.bold)
@@ -417,27 +417,6 @@ struct GraphView: View {
             }
             isGraphFocused = true
         }
-#if os(iOS)
-        .overlay(alignment: .topTrailing) {
-            Button(action: {
-                dismiss()
-            }) {
-                ZStack {
-                    Image(systemName: "xmark")
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.gray)
-                        .font(.system(size: 30, weight: .semibold))
-                        .frame(width: 40, height: 40)
-                }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .accessibilityLabel("Close")
-            .environment(\.colorScheme, .dark)
-            .padding(.top, iOSCloseTopPadding)
-            .padding(.trailing, 12)
-        }
-#endif
         .focusable() // Still needed to make it focusable
         .focused($isGraphFocused) // Bind focus state
 #if os(iOS)
@@ -466,6 +445,10 @@ struct GraphView: View {
 #endif
 #if os(macOS)
         .frame(minWidth: 1000)
+        .onKeyPress(.escape, phases: .down) { _ in
+            dismiss()
+            return .handled
+        }
         .onKeyPress(.upArrow, phases: .down) { _ in
             cycleGraph(-1)
             return .handled
@@ -478,14 +461,14 @@ struct GraphView: View {
     }
 
     var body: some View {
+        Group {
 #if os(iOS)
         GeometryReader { geometry in
             let dynamicHeights = chartHeights(containerSize: geometry.size, safeAreaInsets: geometry.safeAreaInsets)
             graphBody(
                 primaryChartHeight: dynamicHeights.primary,
                 secondaryChartHeight: dynamicHeights.secondary,
-                iOSTopPadding: max(48, geometry.safeAreaInsets.top + 12),
-                iOSCloseTopPadding: max(8, geometry.safeAreaInsets.top + 4)
+                iOSTopPadding: max(64, geometry.safeAreaInsets.top + 12)
             )
         }
 #else
@@ -493,6 +476,25 @@ struct GraphView: View {
             primaryChartHeight: maxChartHeight,
             secondaryChartHeight: maxChartHeight / 3
         )
+#endif
+        }
+#if os(iOS) || os(macOS)
+        .overlay(alignment: .topTrailing) {
+            Button { dismiss() } label: {
+                OverlayCloseButtonLabel()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close")
+            .accessibilityIdentifier("graphCloseButton")
+#if os(macOS)
+            .focusable(false)
+#endif
+            .padding(.top, 12)
+            .padding(.trailing, 16)
+        }
+#endif
+#if os(macOS)
+        .defaultFocus($isGraphFocused, true, priority: .userInitiated)
 #endif
     }
 }
