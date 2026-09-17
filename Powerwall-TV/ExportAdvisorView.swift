@@ -9,7 +9,7 @@ final class ExportAdvisor: ObservableObject {
     @Published var busy = false
     @Published var error: String?
     private var conversation: [[String: String]] = []
-    private var player: AVAudioPlayer?
+    private let speechPlayback = AdvisorSpeechPlayback()
     private var task: Task<Void, Never>?
     private var generation = UUID()
 
@@ -18,7 +18,7 @@ final class ExportAdvisor: ObservableObject {
     func cancel() {
         generation = UUID()
         task?.cancel()
-        player?.stop()
+        speechPlayback.stop()
         busy = false
         if !hasInitialAnswer { clearConversation() }
     }
@@ -108,14 +108,9 @@ final class ExportAdvisor: ObservableObject {
         if UserDefaults.standard.object(forKey: "exportAdvisor_voice") as? Bool ?? true {
             do {
                 let audio = try await client.speech(text: reply, voiceID: UserDefaults.standard.string(forKey: "homeEnergyAdvisor_voiceID") ?? "luna")
-#if !os(macOS)
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-                try AVAudioSession.sharedInstance().setActive(true)
-#endif
                 try Task.checkCancellation()
                 guard generation == requestGeneration else { throw CancellationError() }
-                player = try AVAudioPlayer(data: audio)
-                player?.play()
+                try speechPlayback.play(audio)
             } catch is CancellationError { throw CancellationError() }
             catch {
                 try Task.checkCancellation()
@@ -391,10 +386,17 @@ struct AdvisorGlassCard: ViewModifier {
     func body(content: Content) -> some View {
         if !enabled {
             content
-        } else if #available(iOS 26.0, macOS 26.0, tvOS 26.0, *) {
-            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius))
         } else {
+#if compiler(>=6.2) && !ADVISOR_LEGACY_GLASS
+            // Runtime availability alone cannot hide unknown APIs from older SDKs.
+            if #available(iOS 26.0, macOS 26.0, tvOS 26.0, *) {
+                content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius))
+            } else {
+                content.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+            }
+#else
             content.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+#endif
         }
     }
 }
