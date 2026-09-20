@@ -186,7 +186,7 @@ class PowerwallViewModel: ObservableObject {
     }
 
     // URLSession instances
-    private let localURLSession: URLSession  // For local, insecure connections
+    private var localURLSession: URLSession  // For local, insecure connections
     private let fleetURLSession: URLSession = {  // For Fleet API
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 9 // seconds (e.g., request-level timeout)
@@ -206,6 +206,11 @@ class PowerwallViewModel: ObservableObject {
             self.vehicleChargeStates = currentCache.compactMapValues { $0.snapshot }
             self.lastVehicleDataFetchAt = currentCache.mapValues(\.fetchedAt)
         }
+    }
+
+    convenience init(localURLSession: URLSession) {
+        self.init()
+        self.localURLSession = localURLSession
     }
 
     private func persistVehicleChargeCache() {
@@ -297,6 +302,13 @@ class PowerwallViewModel: ObservableObject {
     // MARK: - Local Login
 
     private func localLogin(ipAddress: String, password: String, completion: @escaping (Bool) -> Void) {
+        guard !isDemoMode else {
+            completion(false)
+            return
+        }
+        // Fleet-mode island commands also authenticate with the local Gateway.
+        // Reject a changed connection, rather than requiring Local display mode.
+        let requestedLoginMode = loginMode
         guard let url = URL(string: "https://\(ipAddress)/api/login/Basic") else {
             errorMessage = "Invalid login URL"
             completion(false)
@@ -325,7 +337,7 @@ class PowerwallViewModel: ObservableObject {
             guard let self = self else { return }
             if let error = error {
                 DispatchQueue.main.async {
-                    guard !self.isDemoMode, self.loginMode == .local, self.ipAddress == ipAddress else {
+                    guard !self.isDemoMode, self.loginMode == requestedLoginMode, self.ipAddress == ipAddress else {
                         completion(false)
                         return
                     }
@@ -338,7 +350,7 @@ class PowerwallViewModel: ObservableObject {
             if let httpResponse = response as? HTTPURLResponse,
                HTTPCookie.cookies(withResponseHeaderFields: httpResponse.allHeaderFields as? [String: String] ?? [:], for: url).contains(where: { $0.name == "AuthCookie" }) {
                 DispatchQueue.main.async {
-                    guard !self.isDemoMode, self.loginMode == .local, self.ipAddress == ipAddress else {
+                    guard !self.isDemoMode, self.loginMode == requestedLoginMode, self.ipAddress == ipAddress else {
                         completion(false)
                         return
                     }
@@ -346,7 +358,7 @@ class PowerwallViewModel: ObservableObject {
                 }
             } else {
                 DispatchQueue.main.async {
-                    guard !self.isDemoMode, self.loginMode == .local, self.ipAddress == ipAddress else {
+                    guard !self.isDemoMode, self.loginMode == requestedLoginMode, self.ipAddress == ipAddress else {
                         completion(false)
                         return
                     }
