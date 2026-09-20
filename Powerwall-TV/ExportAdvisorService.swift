@@ -21,7 +21,8 @@ struct ExportAdvisorContext {
         let combinedMarkDarkURL: URL
         let combinedMarkLightURL: URL
     }
-    let attribution: Attribution
+    let attribution: Attribution?
+    var isDemo = false
 
     var matchesCurrentSettings: Bool { settings == .current(siteID: siteID) }
 

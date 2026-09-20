@@ -37,6 +37,13 @@ final class ExportAdvisor: ObservableObject {
 
     func start(viewModel: PowerwallViewModel, hour: Int) {
         invalidate()
+        if viewModel.isDemoMode {
+            do {
+                context = try DemoEnergyData.advisorContext(morningEndHour: hour)
+                messages = [HomeEnergyAdvisorPreferences.initialPrompt(), DemoEnergyData.advice]
+            } catch { self.error = error.localizedDescription }
+            return
+        }
         guard viewModel.loginMode == .fleetAPI, let siteID = viewModel.energySiteId else {
             error = "Sign in with Fleet API and select a Powerwall site first."
             return
@@ -67,6 +74,13 @@ final class ExportAdvisor: ObservableObject {
     }
 
     func followUp(_ question: String, viewModel: PowerwallViewModel) {
+        if viewModel.isDemoMode {
+            let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !question.isEmpty, context?.isDemo == true, hasInitialAnswer else { return }
+            messages += [question, DemoEnergyData.followUp(question)]
+            return
+        }
+        if context?.isDemo == true { invalidate() }
         guard viewModel.loginMode == .fleetAPI, context?.siteID == viewModel.energySiteId else {
             invalidate()
             error = "Sign in with Fleet API and select a Powerwall site first."
@@ -223,16 +237,18 @@ struct ExportAdvisorView: View {
                         Spacer()
                     }
                     if let context = advisor.context {
-                        VStack(spacing: 14) {
-                            AsyncImage(url: colorScheme == .dark ? context.attribution.combinedMarkDarkURL : context.attribution.combinedMarkLightURL) { image in
-                                image.resizable().scaledToFit()
-                            } placeholder: { Text("Apple Weather") }
-                            .frame(width: 90, height: 24)
-                            Link("Weather data sources", destination: context.attribution.legalPageURL)
-                                .font(.caption)
-                            Spacer(minLength: 0)
+                        if let attribution = context.attribution {
+                            VStack(spacing: 14) {
+                                AsyncImage(url: colorScheme == .dark ? attribution.combinedMarkDarkURL : attribution.combinedMarkLightURL) { image in
+                                    image.resizable().scaledToFit()
+                                } placeholder: { Text("Apple Weather") }
+                                .frame(width: 90, height: 24)
+                                Link("Weather data sources", destination: attribution.legalPageURL)
+                                    .font(.caption)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.top, 8)
                         }
-                        .padding(.top, 8)
                         Text("Percentages of total battery capacity, considering usage until \(context.end.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: context.timeZone))) · Updated \(context.generatedAt.formatted(date: .omitted, time: .shortened))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -268,12 +284,16 @@ struct ExportAdvisorView: View {
         .frame(minWidth: 620, idealWidth: 720, minHeight: 560, idealHeight: 760)
 #endif
         .onAppear {
+            if viewModel.isDemoMode {
+                advisor.start(viewModel: viewModel, hour: peakEnd)
+                return
+            }
             guard viewModel.loginMode == .fleetAPI else {
                 advisor.start(viewModel: viewModel, hour: peakEnd)
                 return
             }
             guard !advisor.busy else { return }
-            if !advisor.hasInitialAnswer || advisor.context?.isFresh() != true || advisor.context?.matchesCurrentSettings != true || advisor.context?.siteID != viewModel.energySiteId {
+            if advisor.context?.isDemo == true || !advisor.hasInitialAnswer || advisor.context?.isFresh() != true || advisor.context?.matchesCurrentSettings != true || advisor.context?.siteID != viewModel.energySiteId {
                 // start() clears the old figures and conversation before fetching new data.
                 advisor.start(viewModel: viewModel, hour: peakEnd)
             } else {
@@ -285,6 +305,10 @@ struct ExportAdvisorView: View {
         .onExitCommand { dismiss() }
 #endif
         .onDisappear { advisor.cancel() }
+        .onChange(of: viewModel.isDemoMode) { _ in
+            advisor.invalidate()
+            dismiss()
+        }
         .onChange(of: viewModel.loginMode) { _ in
             advisor.invalidate()
             dismiss()

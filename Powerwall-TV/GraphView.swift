@@ -207,6 +207,9 @@ struct GraphView: View {
         iOSTopPadding: CGFloat = 0
     ) -> some View {
         VStack(spacing: 20) {
+            if viewModel.isDemoMode {
+                Text("Demo · Sample energy data").font(.caption).foregroundStyle(.secondary)
+            }
             // Battery Power Flow Chart
             Text(selectedGraph.title)
                 .font(.title)
@@ -412,7 +415,7 @@ struct GraphView: View {
         .padding()
 #endif
         .onAppear {
-            if viewModel.loginMode == .fleetAPI {
+            if viewModel.isDemoMode || viewModel.loginMode == .fleetAPI {
                 viewModel.fetchFleetAPIHistory()
             }
             isGraphFocused = true

@@ -119,7 +119,7 @@ struct ContentView: View {
     @State private var animations = true
     private var weatherPrefetchIdentity: [String] {
         [viewModel.loginMode.rawValue, viewModel.energySiteId ?? "", viewModel.fleetBaseURL,
-         viewModel.accessToken, String(showingSettings),
+         viewModel.accessToken, String(showingSettings), String(viewModel.isDemoMode),
          UserDefaults.standard.string(forKey: "exportAdvisor_weatherLocation_" + (viewModel.energySiteId ?? "")) ?? ""]
     }
 
@@ -346,7 +346,7 @@ struct ContentView: View {
         }
 #endif
         .task(id: weatherPrefetchIdentity) {
-            guard !showingSettings, viewModel.loginMode == .fleetAPI,
+            guard !showingSettings, !viewModel.isDemoMode, viewModel.loginMode == .fleetAPI,
                   let siteID = viewModel.energySiteId, !viewModel.accessToken.isEmpty else { return }
             let service = ExportAdvisorService(baseURL: viewModel.fleetBaseURL, token: viewModel.accessToken, siteID: siteID)
             // Opportunistic: opening the advisor retries and presents any service error.
@@ -361,6 +361,9 @@ struct ContentView: View {
             }
         }
 #endif
+        .onChange(of: viewModel.isDemoMode) { _ in
+            exportAdvisor.invalidate()
+        }
         .onChange(of: viewModel.loginMode) { _ in
             exportAdvisor.invalidate()
         }
@@ -373,7 +376,7 @@ struct ContentView: View {
             if showingSettings {
                 return
             }
-            if viewModel.loginMode == .fleetAPI {
+            if !viewModel.isDemoMode && viewModel.loginMode == .fleetAPI {
                 PowerwallScheduleManager.shared.applyDueSchedules(using: viewModel)
             }
             if viewModel.ipAddress == "demo" {
@@ -1070,8 +1073,8 @@ struct ContentView: View {
                 .accessibilityLabel("Settings")
                 .environment(\.colorScheme, .dark)
 
-                if viewModel.loginMode == .fleetAPI {
-                    if viewModel.showSchedulerButton {
+                if viewModel.isDemoMode || viewModel.loginMode == .fleetAPI {
+                    if viewModel.loginMode == .fleetAPI && !viewModel.isDemoMode && viewModel.showSchedulerButton {
                         Button(action: {
                             revealAutoHiddenOverlays()
                             showingScheduler = true
@@ -1126,7 +1129,7 @@ struct ContentView: View {
                     .controlSize(.large)
                     .accessibilityLabel("Chart")
                     .environment(\.colorScheme, .dark)
-                    if showHomeEnergyAdvisorButton {
+                    if showHomeEnergyAdvisorButton || viewModel.isDemoMode {
                         Button {
                             revealAutoHiddenOverlays()
                             showingExportAdvisor = true

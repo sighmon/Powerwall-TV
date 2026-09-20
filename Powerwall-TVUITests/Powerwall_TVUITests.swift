@@ -190,7 +190,7 @@ final class AdvisorTVFocusTests: XCTestCase {
     func testRemoteScrollsThroughAnswers() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--advisor-focus-ui-test", "--advisor-focus-ui-test-long", "-loginMode", "local", "-gatewayIP", "demo"]
+        app.launchArguments = ["--advisor-focus-ui-test", "--advisor-focus-ui-test-long", "-loginMode", "local", "-gatewayIP", "127.0.0.1"]
         app.launch()
         let overview = app.descendants(matching: .any)["advisorOverview"].firstMatch
         XCTAssertTrue(overview.waitForExistence(timeout: 15))
@@ -217,7 +217,7 @@ final class AdvisorTVFocusTests: XCTestCase {
     func testRemoteCanReachRefreshAndDismissWithBack() throws {
         let app = XCUIApplication()
         continueAfterFailure = false
-        app.launchArguments = ["--advisor-focus-ui-test", "-loginMode", "local", "-gatewayIP", "demo"]
+        app.launchArguments = ["--advisor-focus-ui-test", "-loginMode", "local", "-gatewayIP", "127.0.0.1"]
         app.launch()
         let overview = app.descendants(matching: .any)["advisorOverview"].firstMatch
         XCTAssertTrue(overview.waitForExistence(timeout: 15))

@@ -23,6 +23,7 @@ An AppleTV/macOS/iPad application to view and manage the current state of your T
 * Optional Electricity Maps grid carbon intensity and renewable percentage display.
 * Optional Wall Connector status from a local Wall Connector IP address.
 * Fleet API energy history graphs and multi-site support.
+* Set the local Gateway address to `demo` to explore sample energy graphs and Home Energy Advisor estimates, forecast, and follow-up replies without service credentials. Both buttons are available in demo mode; advisor responses are illustrative and do not use live AI or speech.
 * macOS menu bar display, keep-window-in-front mode, and scene layout controls.
 * Beta scheduler for switching Powerwall modes at configured start and end times.
 
