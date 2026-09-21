@@ -4,11 +4,12 @@ import Testing
 
 @MainActor
 struct DemoEnergyDataTests {
-    @Test func demoRefreshSkipsLoginAndClearsStaleConnectionErrors() {
+    @Test(arguments: ["demo", "Demo", "DEMO", " demo \n"])
+    func demoRefreshSkipsLoginAndClearsStaleConnectionErrors(_ address: String) {
         let model = PowerwallViewModel()
         model.ipAddress = "192.168.1.1"
         model.errorMessage = "Login failed: connection unavailable"
-        model.ipAddress = "demo"
+        model.ipAddress = address
         #expect(model.errorMessage == nil)
         for mode in [LoginMode.local, .fleetAPI] {
             model.loginMode = mode

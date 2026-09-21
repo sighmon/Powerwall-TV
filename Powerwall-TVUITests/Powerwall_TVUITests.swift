@@ -293,3 +293,33 @@ final class OverlayCloseButtonTests: XCTestCase {
     }
 }
 #endif
+
+#if os(tvOS)
+final class DemoTVLaunchTests: XCTestCase {
+    @MainActor
+    func testCapitalizedDemoLoadsHomeAndAdvisor() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-loginMode", "local", "-gatewayIP", " Demo "]
+        app.launch()
+        XCTAssertTrue(app.buttons["Chart"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Home sweet home"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["homeEnergyAdvisorButton"].exists)
+        app.terminate()
+        app.launchArguments += ["--advisor-close-ui-test"]
+        app.launch()
+        let overview = app.descendants(matching: .any)["advisorOverview"].firstMatch
+        XCTAssertTrue(overview.waitForExistence(timeout: 15))
+        XCTAssertTrue(overview.label.contains("Demo home"))
+        XCTAssertTrue(app.staticTexts["advisorMessage1"].exists)
+        XCTAssertFalse(app.staticTexts["advisorError"].exists)
+    }
+
+    @MainActor
+    func testCapitalizedDemoLoadsGraph() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--graph-close-ui-test", "-loginMode", "local", "-gatewayIP", " Demo "]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Demo · Sample energy data"].waitForExistence(timeout: 15))
+    }
+}
+#endif

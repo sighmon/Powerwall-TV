@@ -361,8 +361,12 @@ struct ContentView: View {
             }
         }
 #endif
-        .onChange(of: viewModel.isDemoMode) { _ in
+        .onChange(of: viewModel.isDemoMode) { isDemo in
             exportAdvisor.invalidate()
+            if isDemo { queueInitialDemoData() }
+        }
+        .onChange(of: showingSettings) { isShowing in
+            if !isShowing && viewModel.isDemoMode { queueInitialDemoData() }
         }
         .onChange(of: viewModel.loginMode) { _ in
             exportAdvisor.invalidate()
@@ -379,7 +383,7 @@ struct ContentView: View {
             if !viewModel.isDemoMode && viewModel.loginMode == .fleetAPI {
                 PowerwallScheduleManager.shared.applyDueSchedules(using: viewModel)
             }
-            if viewModel.ipAddress == "demo" {
+            if viewModel.isDemoMode {
                 let homeLoad = Double(arc4random_uniform(4096)) + 256
                 queueDemoPowerwallData(
                     batteryPower: homeLoad * 0.2,
@@ -409,7 +413,7 @@ struct ContentView: View {
             }
         }
         .onReceive(timerElectricityMaps) { _ in
-            if viewModel.ipAddress == "demo" {
+            if viewModel.isDemoMode {
                 queueDemoElectricityGridData()
             } else {
                 viewModel.fetchElectricityMapsData()
@@ -422,7 +426,7 @@ struct ContentView: View {
         }
         .onAppear {
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
-            let isDemoMode = demo || viewModel.ipAddress == "demo"
+            let isDemoMode = demo || viewModel.isDemoMode
             if demo {
                 DispatchQueue.main.async {
                     viewModel.ipAddress = "demo"
@@ -432,19 +436,7 @@ struct ContentView: View {
             if shouldAutoOpenSettingsOnLaunch {
                 showingSettings = true
             } else if isDemoMode {
-                queueDemoPowerwallData(
-                    batteryPower: 256,
-                    batteryPercentage: 100,
-                    loadPower: 2304,
-                    solarPower: 2048,
-                    solarEnergyExported: 4096000,
-                    sitePower: 1024,
-                    gridStatus: "SystemIslandedActive",
-                    wallConnectorPower: 512,
-                    vehicleBatteryLevel: 80,
-                    siteName: "Home sweet home"
-                )
-                // viewModel.errorMessage = "An error has occured"
+                queueInitialDemoData()
             } else {
                 viewModel.fetchElectricityMapsData()
                 viewModel.fetchData()
@@ -1282,6 +1274,21 @@ struct ContentView: View {
         viewModel.gridFossilFuelPercentage = 58
     }
 
+    private func queueInitialDemoData() {
+        queueDemoPowerwallData(
+            batteryPower: 256,
+            batteryPercentage: 100,
+            loadPower: 2304,
+            solarPower: 2048,
+            solarEnergyExported: 4096000,
+            sitePower: 1024,
+            gridStatus: "SystemIslandedActive",
+            wallConnectorPower: 512,
+            vehicleBatteryLevel: 80,
+            siteName: "Home sweet home"
+        )
+    }
+
     private func queueDemoPowerwallData(
         batteryPower: Double,
         batteryPercentage: Double,
@@ -1295,6 +1302,7 @@ struct ContentView: View {
         siteName: String? = nil
     ) {
         DispatchQueue.main.async {
+            guard viewModel.isDemoMode else { return }
             viewModel.data = PowerwallData(
                 battery: PowerwallData.Battery(instantPower: batteryPower, count: 1),
                 load: PowerwallData.Load(instantPower: loadPower),

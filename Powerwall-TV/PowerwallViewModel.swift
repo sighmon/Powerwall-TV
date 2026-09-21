@@ -42,7 +42,7 @@ func clampSceneVerticalOffset(_ value: Double) -> Double {
 class PowerwallViewModel: ObservableObject {
     // Published properties for UI binding
 
-    var isDemoMode: Bool { ipAddress == "demo" }
+    var isDemoMode: Bool { ipAddress.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "demo" }
 
     // Local login
     @Published var loginMode: LoginMode = LoginMode(rawValue: UserDefaults.standard.string(forKey: "loginMode") ?? LoginMode.fleetAPI.rawValue) ?? .fleetAPI

@@ -160,6 +160,10 @@ struct SettingsView: View {
                     Text("IP Address").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     TextField("IP Address", text: $ipAddress)
                         .textContentType(.URL)
+#if os(iOS) || os(tvOS)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+#endif
                     Text("Username").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     TextField("Username", text: $username)
                         .textContentType(.username)
