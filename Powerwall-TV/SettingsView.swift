@@ -266,7 +266,7 @@ struct SettingsView: View {
                     Text(voiceError).font(.caption).foregroundStyle(.secondary)
                     Button("Retry loading voices") { voiceReload += 1 }
                 }
-                Text("Adding a key enables the advisor. When requested, your battery status, recent usage, local forecast and questions are sent to xAI. Your key is stored in Keychain. Requires Fleet API and WeatherKit access. Estimates do not export energy automatically.")
+                Text("Weather and energy estimates work without a key. Adding a key enables Grok’s summary, follow-up questions and spoken answers. When requested, your battery status, recent usage, local forecast and questions are sent to xAI. Your key is stored in Keychain. Requires Fleet API and WeatherKit access. Estimates do not export energy automatically.")
                     .font(.footnote)
             }
 

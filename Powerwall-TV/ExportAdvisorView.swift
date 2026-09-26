@@ -8,6 +8,23 @@ final class ExportAdvisor: ObservableObject {
     @Published var messages: [String] = []
     @Published var busy = false
     @Published var error: String?
+    @Published private(set) var needsAPIKey = false
+    private let apiKey: () -> String
+    private let loadContext: (ExportAdvisorService, Int) async throws -> ExportAdvisorContext
+
+    init(
+        apiKey: @escaping () -> String = { KeychainWrapper.standard.string(forKey: "xai_apiKey") ?? "" },
+        loadContext: @escaping (ExportAdvisorService, Int) async throws -> ExportAdvisorContext = { service, hour in
+            try await service.context(morningEndHour: hour)
+        }
+    ) {
+        self.apiKey = apiKey
+        self.loadContext = loadContext
+    }
+
+    func updateCredentialAvailability() {
+        needsAPIKey = apiKey().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
     private var conversation: [[String: String]] = []
     private let speechPlayback = AdvisorSpeechPlayback()
     private var task: Task<Void, Never>?
@@ -20,7 +37,7 @@ final class ExportAdvisor: ObservableObject {
         task?.cancel()
         speechPlayback.stop()
         busy = false
-        if !hasInitialAnswer { clearConversation() }
+        if !hasInitialAnswer && !needsAPIKey { clearConversation() }
     }
 
     private func clearConversation() {
@@ -28,6 +45,7 @@ final class ExportAdvisor: ObservableObject {
         messages = []
         conversation = []
         error = nil
+        needsAPIKey = false
     }
 
     func invalidate() {
@@ -48,17 +66,14 @@ final class ExportAdvisor: ObservableObject {
             error = "Sign in with Fleet API and select a Powerwall site first."
             return
         }
-        guard !(KeychainWrapper.standard.string(forKey: "xai_apiKey") ?? "").isEmpty else {
-            error = "Add your xAI API key in Settings to enable the Home Energy Advisor."
-            return
-        }
+        updateCredentialAvailability()
         let service = ExportAdvisorService(baseURL: viewModel.fleetBaseURL, token: viewModel.accessToken, siteID: siteID)
         busy = true
         let requestGeneration = generation
         task = Task {
             defer { if generation == requestGeneration { busy = false } }
             do {
-                let result = try await service.context(morningEndHour: hour)
+                let result = try await loadContext(service, hour)
                 try Task.checkCancellation()
                 guard result.matchesCurrentSettings else {
                     error = "Advisor settings changed while loading. Refresh to use the new settings."
@@ -66,7 +81,7 @@ final class ExportAdvisor: ObservableObject {
                 }
                 context = result
                 conversation = [["role": "system", "content": result.prompt]]
-                try await answer(HomeEnergyAdvisorPreferences.initialPrompt())
+                if !needsAPIKey { try await answer(HomeEnergyAdvisorPreferences.initialPrompt()) }
             } catch is CancellationError {} catch {
                 if generation == requestGeneration { self.error = error.localizedDescription }
             }
@@ -86,7 +101,8 @@ final class ExportAdvisor: ObservableObject {
             error = "Sign in with Fleet API and select a Powerwall site first."
             return
         }
-        guard !busy, hasInitialAnswer, let context else { return }
+        updateCredentialAvailability()
+        guard !needsAPIKey, !busy, hasInitialAnswer, let context else { return }
         guard context.matchesCurrentSettings else {
             error = "Advisor settings have changed. Refresh before asking another question."
             return
@@ -112,7 +128,7 @@ final class ExportAdvisor: ObservableObject {
     private func answer(_ question: String) async throws {
         let requestGeneration = generation
         let pending = conversation + [["role": "user", "content": question]]
-        let client = GrokAdvisorClient(apiKey: KeychainWrapper.standard.string(forKey: "xai_apiKey") ?? "")
+        let client = GrokAdvisorClient(apiKey: apiKey().trimmingCharacters(in: .whitespacesAndNewlines))
         let reply = try await client.answer(messages: pending)
         try Task.checkCancellation()
         guard generation == requestGeneration else { throw CancellationError() }
@@ -165,12 +181,6 @@ struct ExportAdvisorView: View {
                 .frame(width: 380, height: 380)
                 .blur(radius: 65)
                 .offset(x: 130, y: -170)
-            Image(systemName: advisor.context?.weatherSymbol ?? "cloud.sun.fill")
-                .symbolRenderingMode(.hierarchical)
-                .font(.system(size: 220, weight: .ultraLight))
-                .foregroundStyle(skyColors[0].opacity(colorScheme == .dark ? 0.15 : 0.09))
-                .rotationEffect(.degrees(-12))
-                .offset(x: 45, y: 20)
         }
         .accessibilityHidden(true)
         .allowsHitTesting(false)
@@ -217,7 +227,7 @@ struct ExportAdvisorView: View {
                     }
 #endif
                     if advisor.busy {
-                        ProgressView("Thinking…")
+                        ProgressView(advisor.context == nil ? "Loading weather and energy use…" : "Thinking…")
                             .font(.callout)
                             .accessibilityIdentifier("advisorBusy")
                     }
@@ -227,7 +237,13 @@ struct ExportAdvisorView: View {
                             .foregroundStyle(.red)
                             .accessibilityIdentifier("advisorError")
                     }
-                    if advisor.context != nil { composer }
+                    if advisor.context != nil && advisor.needsAPIKey {
+                        Label("Add an xAI API token in Settings → Advisor to enable Grok’s summary and follow-up questions. Weather and energy estimates are available without it.", systemImage: "info.circle")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("advisorAPIKeyNote")
+                    }
+                    if advisor.hasInitialAnswer && !advisor.needsAPIKey { composer }
                     HStack {
                         Button { advisor.start(viewModel: viewModel, hour: peakEnd) } label: {
                             Label("Refresh advice", systemImage: "arrow.clockwise")
@@ -293,11 +309,12 @@ struct ExportAdvisorView: View {
                 return
             }
             guard !advisor.busy else { return }
-            if advisor.context?.isDemo == true || !advisor.hasInitialAnswer || advisor.context?.isFresh() != true || advisor.context?.matchesCurrentSettings != true || advisor.context?.siteID != viewModel.energySiteId {
+            advisor.updateCredentialAvailability()
+            if advisor.context?.isDemo == true || (!advisor.hasInitialAnswer && !advisor.needsAPIKey) || advisor.context?.isFresh() != true || advisor.context?.matchesCurrentSettings != true || advisor.context?.siteID != viewModel.energySiteId {
                 // start() clears the old figures and conversation before fetching new data.
                 advisor.start(viewModel: viewModel, hour: peakEnd)
             } else {
-                asking = true
+                asking = advisor.hasInitialAnswer && !advisor.needsAPIKey
             }
         }
 #if os(tvOS)
