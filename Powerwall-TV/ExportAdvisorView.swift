@@ -129,7 +129,7 @@ final class ExportAdvisor: ObservableObject {
         let requestGeneration = generation
         let pending = conversation + [["role": "user", "content": question]]
         let client = GrokAdvisorClient(apiKey: apiKey().trimmingCharacters(in: .whitespacesAndNewlines))
-        let reply = try await client.answer(messages: pending)
+        let reply = try await client.answer(messages: pending, modelID: UserDefaults.standard.string(forKey: "homeEnergyAdvisor_modelID") ?? "")
         try Task.checkCancellation()
         guard generation == requestGeneration else { throw CancellationError() }
         conversation = pending + [["role": "assistant", "content": reply]]

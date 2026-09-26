@@ -5,12 +5,36 @@ struct GrokAdvisorClient {
     let apiKey: String
     var session: URLSession = .shared
 
-    func answer(messages: [[String: String]]) async throws -> String {
+    struct Model: Decodable, Identifiable {
+        let id: String
+        let created: Int
+        let input_modalities: [String]
+        let output_modalities: [String]
+    }
+
+    func models() async throws -> [Model] {
+        struct Response: Decodable { let models: [Model] }
+        let data = try await request("language-models", method: "GET")
+        let models = try JSONDecoder().decode(Response.self, from: data).models
+            .filter { $0.input_modalities.contains("text") && $0.output_modalities.contains("text") }
+            .sorted {
+                if $0.created != $1.created { return $0.created > $1.created }
+                return $0.id.compare($1.id, options: .numeric) == .orderedDescending
+            }
+        guard !models.isEmpty else { throw ExportEstimateError.service("No Grok text models are available", 0) }
+        return models
+    }
+
+    func answer(messages: [[String: String]], modelID: String = "") async throws -> String {
+        let selected = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model: String
+        if selected.isEmpty { model = try await models()[0].id }
+        else { model = selected }
+
         let data = try await request("chat/completions", body: [
-            "model": "grok-4.6",
+            "model": model,
             "messages": messages,
             "max_tokens": 1200,
-            "reasoning_effort": "low",
         ])
         struct Response: Decodable {
             struct Choice: Decodable {

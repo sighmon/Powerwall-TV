@@ -47,6 +47,11 @@ struct SettingsView: View {
         case connection = "Connect", display = "Display", advisor = "Advisor", about = "About"
     }
     @AppStorage("homeEnergyAdvisor_voiceID") private var advisorVoiceID = "luna"
+    @AppStorage("homeEnergyAdvisor_modelID") private var advisorModelID = ""
+    @State private var grokModels: [GrokAdvisorClient.Model] = []
+    @State private var loadingModels = false
+    @State private var modelError: String?
+    @State private var modelReload = 0
     @State private var grokVoices: [GrokAdvisorClient.Voice] = []
     @State private var loadingVoices = false
     @State private var voiceError: String?
@@ -99,6 +104,29 @@ struct SettingsView: View {
 #if os(macOS)
         .frame(minWidth: 580, idealWidth: 660, minHeight: 580, idealHeight: 740)
 #endif
+        .task(id: [selectedTab.rawValue, xaiAPIKey, String(modelReload)]) {
+            guard selectedTab == .advisor else { return }
+            loadingModels = true
+            modelError = nil
+            grokModels = []
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+                let key = xaiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty else {
+                    modelError = "Add an xAI API key to load available models."
+                    loadingModels = false
+                    return
+                }
+                let models = try await GrokAdvisorClient(apiKey: key).models()
+                try Task.checkCancellation()
+                grokModels = models
+                loadingModels = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                modelError = "Could not load Grok models. \(error.localizedDescription)"
+                loadingModels = false
+            }
+        }
         .task(id: [selectedTab.rawValue, xaiAPIKey, String(voiceReload)]) {
             guard selectedTab == .advisor else { return }
             loadingVoices = true
@@ -236,6 +264,27 @@ struct SettingsView: View {
                     .textContentType(.password)
                     .accessibilityLabel("xAI API key")
                     .accessibilityIdentifier("exportAdvisorAPIKey")
+                Picker("Grok model", selection: $advisorModelID) {
+                    Text("Latest available").tag("")
+                    if !advisorModelID.isEmpty && !grokModels.contains(where: { $0.id == advisorModelID }) {
+                        Text(advisorModelID + " (saved)").tag(advisorModelID)
+                    }
+                    ForEach(grokModels) { model in Text(model.id).tag(model.id) }
+                }
+#if !os(tvOS)
+                .pickerStyle(.menu)
+#endif
+                .accessibilityIdentifier("advisorModelPicker")
+                if loadingModels { ProgressView("Loading Grok models…").font(.caption) }
+                if let modelError {
+                    Text(modelError).font(.caption).foregroundStyle(.secondary)
+                    Button("Retry loading models") { modelReload += 1 }
+                }
+                Text("Latest available selects the newest text model by xAI’s creation date for each response. Your choice applies to the next summary or follow-up; model pricing varies.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if advisorModelID.isEmpty, let latest = grokModels.first {
+                    Text("Currently: " + latest.id).font(.caption).foregroundStyle(.secondary)
+                }
                 Text("Weather location (suburb, country)").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 TextField("Weather location (suburb, country)", text: $exportWeatherLocation)
                     .accessibilityLabel("Weather location")

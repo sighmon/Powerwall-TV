@@ -27,16 +27,21 @@ private final class AdvisorURLProtocol: URLProtocol, @unchecked Sendable {
         if authorization == "Bearer invalid-test-key" {
             status = 401
             response = Data("secret server detail should not be displayed".utf8)
+        } else if authorization == "Bearer isolated-test-key", request.httpMethod == "GET", request.url?.path == "/v1/language-models", data == nil {
+            status = 200
+            response = Data(#"{"models":[{"id":"grok-3","created":100,"input_modalities":["text"],"output_modalities":["text"]},{"id":"image-only","created":999,"input_modalities":["text"],"output_modalities":["image"]},{"id":"grok-4.6","created":200,"input_modalities":["text","image"],"output_modalities":["text"]}]}"#.utf8)
         } else if authorization == "Bearer isolated-test-key", request.httpMethod == "GET", request.url?.path == "/v1/tts/voices", data == nil {
             status = 200
             response = Data(#"{"voices":[{"voice_id":"luna","name":"Luna"},{"voice_id":"ara","name":"Ara"}]}"#.utf8)
         } else if authorization == "Bearer isolated-test-key", request.httpMethod == "POST",
                   request.value(forHTTPHeaderField: "Content-Type") == "application/json" {
-            if request.url?.path == "/v1/chat/completions", body?["model"] as? String == "grok-4.6",
+            if request.url?.path == "/v1/chat/completions", ["grok-4.6", "grok-3"].contains(body?["model"] as? String ?? ""),
+               body?["reasoning_effort"] == nil,
                let messages = body?["messages"] as? [[String: String]],
                messages.first?["role"] == "system", messages.last?["role"] == "user" {
                 status = 200
-                let content = messages.last?["content"] == "follow-up" ? "The reserve remains protected." : "Estimate: 2.7 kWh, 10% of 27 kWh."
+                var content = messages.last?["content"] == "follow-up" ? "The reserve remains protected." : "Estimate: 2.7 kWh, 10% of 27 kWh."
+                if messages.last?["content"] == "model" { content = body?["model"] as? String ?? "missing" }
                 let finish = messages.last?["content"] == "truncate" ? "length" : "stop"
                 response = try! JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": content], "finish_reason": finish]]])
             } else if request.url?.path == "/v1/tts", ["luna", "ara"].contains(body?["voice_id"] as? String ?? ""),
@@ -72,6 +77,19 @@ struct GrokAdvisorClientTests {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [AdvisorURLProtocol.self]
         return GrokAdvisorClient(apiKey: key, session: URLSession(configuration: config))
+    }
+
+    @Test func listsTextModelsNewestFirst() async throws {
+        let models = try await client().models()
+        #expect(models.map(\.id) == ["grok-4.6", "grok-3"])
+    }
+
+    @Test func automaticAndExplicitModelSelectionReachTheRequest() async throws {
+        let messages = [["role": "system", "content": "Test"], ["role": "user", "content": "model"]]
+        let automatic = try await client().answer(messages: messages)
+        #expect(automatic == "grok-4.6")
+        let selected = try await client().answer(messages: messages, modelID: "grok-3")
+        #expect(selected == "grok-3")
     }
 
     @Test func sendsConversationToGrokAndDecodesAnswer() async throws {
