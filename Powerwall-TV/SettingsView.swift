@@ -271,9 +271,7 @@ struct SettingsView: View {
                     }
                     ForEach(grokModels) { model in Text(model.id).tag(model.id) }
                 }
-#if !os(tvOS)
                 .pickerStyle(.menu)
-#endif
                 .accessibilityIdentifier("advisorModelPicker")
                 if loadingModels { ProgressView("Loading Grok models…").font(.caption) }
                 if let modelError {
@@ -293,6 +291,9 @@ struct SettingsView: View {
                 Picker("Morning peak ends (site time)", selection: $exportPeakEnd) {
                     ForEach(0...12, id: \.self) { hour in Text("\(hour):00").tag(hour) }
                 }
+                .pickerStyle(.menu)
+                Text("Used to help advise how much battery is needed to get you through the night.")
+                    .font(.footnote)
                 Toggle("Speak answers with Grok Voice", isOn: $exportVoice)
                 Picker("Grok voice", selection: $advisorVoiceID) {
                     if !grokVoices.contains(where: { $0.id == advisorVoiceID }) {
@@ -302,9 +303,7 @@ struct SettingsView: View {
                         Text(voice.name).tag(voice.id)
                     }
                 }
-#if !os(tvOS)
                 .pickerStyle(.menu)
-#endif
                 .accessibilityIdentifier("advisorVoicePicker")
                 .disabled(loadingVoices || grokVoices.isEmpty)
                 if loadingVoices {
