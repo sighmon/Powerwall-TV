@@ -42,9 +42,18 @@ func clampSceneVerticalOffset(_ value: Double) -> Double {
 class PowerwallViewModel: ObservableObject {
     // Published properties for UI binding
 
+    var isDemoMode: Bool { ipAddress.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "demo" }
+
     // Local login
     @Published var loginMode: LoginMode = LoginMode(rawValue: UserDefaults.standard.string(forKey: "loginMode") ?? LoginMode.fleetAPI.rawValue) ?? .fleetAPI
-    @Published var ipAddress: String = UserDefaults.standard.string(forKey: "gatewayIP") ?? ""
+    @Published var ipAddress: String = UserDefaults.standard.string(forKey: "gatewayIP") ?? "" {
+        didSet {
+            if isDemoMode {
+                errorMessage = nil
+                infoMessage = nil
+            }
+        }
+    }
     @Published var wallConnectorIPAddress: String = UserDefaults.standard.string(forKey: "wallConnectorIP") ?? ""
     @Published var username: String = UserDefaults.standard.string(forKey: "username") ?? "customer"
     @Published var password: String = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
@@ -177,7 +186,7 @@ class PowerwallViewModel: ObservableObject {
     }
 
     // URLSession instances
-    private let localURLSession: URLSession  // For local, insecure connections
+    private var localURLSession: URLSession  // For local, insecure connections
     private let fleetURLSession: URLSession = {  // For Fleet API
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 9 // seconds (e.g., request-level timeout)
@@ -197,6 +206,11 @@ class PowerwallViewModel: ObservableObject {
             self.vehicleChargeStates = currentCache.compactMapValues { $0.snapshot }
             self.lastVehicleDataFetchAt = currentCache.mapValues(\.fetchedAt)
         }
+    }
+
+    convenience init(localURLSession: URLSession) {
+        self.init()
+        self.localURLSession = localURLSession
     }
 
     private func persistVehicleChargeCache() {
@@ -262,6 +276,11 @@ class PowerwallViewModel: ObservableObject {
 
     // Logs in based on the selected login mode
     func login(completion: @escaping (Bool) -> Void) {
+        guard !isDemoMode else {
+            errorMessage = nil
+            completion(false) // No authenticated connection or follow-on requests in demo mode.
+            return
+        }
         switch loginMode {
         case .local:
             if ipAddress.isEmpty || password.isEmpty {
@@ -283,6 +302,13 @@ class PowerwallViewModel: ObservableObject {
     // MARK: - Local Login
 
     private func localLogin(ipAddress: String, password: String, completion: @escaping (Bool) -> Void) {
+        guard !isDemoMode else {
+            completion(false)
+            return
+        }
+        // Fleet-mode island commands also authenticate with the local Gateway.
+        // Reject a changed connection, rather than requiring Local display mode.
+        let requestedLoginMode = loginMode
         guard let url = URL(string: "https://\(ipAddress)/api/login/Basic") else {
             errorMessage = "Invalid login URL"
             completion(false)
@@ -311,6 +337,10 @@ class PowerwallViewModel: ObservableObject {
             guard let self = self else { return }
             if let error = error {
                 DispatchQueue.main.async {
+                    guard !self.isDemoMode, self.loginMode == requestedLoginMode, self.ipAddress == ipAddress else {
+                        completion(false)
+                        return
+                    }
                     self.errorMessage = "Login failed: \(error.localizedDescription)"
                     completion(false)
                 }
@@ -320,10 +350,18 @@ class PowerwallViewModel: ObservableObject {
             if let httpResponse = response as? HTTPURLResponse,
                HTTPCookie.cookies(withResponseHeaderFields: httpResponse.allHeaderFields as? [String: String] ?? [:], for: url).contains(where: { $0.name == "AuthCookie" }) {
                 DispatchQueue.main.async {
+                    guard !self.isDemoMode, self.loginMode == requestedLoginMode, self.ipAddress == ipAddress else {
+                        completion(false)
+                        return
+                    }
                     completion(true) // Success
                 }
             } else {
                 DispatchQueue.main.async {
+                    guard !self.isDemoMode, self.loginMode == requestedLoginMode, self.ipAddress == ipAddress else {
+                        completion(false)
+                        return
+                    }
                     self.errorMessage = "Login failed: No AuthCookie received"
                     completion(false)
                 }
@@ -629,11 +667,12 @@ class PowerwallViewModel: ObservableObject {
     func fetchData() {
         self.errorMessage = nil
         self.infoMessage = nil
+        guard !isDemoMode else { return }
         switch loginMode {
         case .local:
             // Ensure login before fetching data
             login { success in
-                if success {
+                if success, !self.isDemoMode, self.loginMode == .local {
                     self.fetchLocalDataAfterLogin()
                     self.fetchLocalBatteryPercentage()
                     self.fetchLocalGridStatus()
@@ -1426,6 +1465,7 @@ class PowerwallViewModel: ObservableObject {
     }
 
     func fetchSolarEnergyToday() {
+        guard !isDemoMode else { return }
         guard let energySiteId = energySiteId else { return }
 
         // UTC timestamps in ISO-8601 so we match the cloud API
@@ -1456,6 +1496,7 @@ class PowerwallViewModel: ObservableObject {
     }
 
     func fetchSiteInfo() {
+        guard !isDemoMode else { return }
         guard let energySiteId = energySiteId else { return }
         let requestedEnergySiteId = energySiteId
 
@@ -1747,6 +1788,15 @@ class PowerwallViewModel: ObservableObject {
     }
 
     func fetchFleetAPIHistory() {
+        if isDemoMode {
+            let history = DemoEnergyData.history(endingAt: endOfDayIfNeeded(currentEndDate))
+            batteryPowerHistory = history.battery
+            batteryPercentageHistory = history.charge
+            solarPowerHistory = history.solar
+            homePowerHistory = history.home
+            gridPowerHistory = history.grid
+            return
+        }
         fetchPowerHistory { result in
             switch result {
             case .success(let dataPoints):
@@ -1775,6 +1825,7 @@ class PowerwallViewModel: ObservableObject {
     }
 
     func fetchElectricityMapsData() {
+        guard !isDemoMode else { return }
         let apiKey = electricityMapsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let zone = electricityMapsZone.trimmingCharacters(in: .whitespacesAndNewlines)
 

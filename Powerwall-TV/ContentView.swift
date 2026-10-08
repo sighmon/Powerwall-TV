@@ -117,7 +117,16 @@ struct ContentView: View {
     @ObservedObject private var scheduleManager = PowerwallScheduleManager.shared
     @State private var demo = false
     @State private var animations = true
+    private var weatherPrefetchIdentity: [String] {
+        [viewModel.loginMode.rawValue, viewModel.energySiteId ?? "", viewModel.fleetBaseURL,
+         viewModel.accessToken, String(showingSettings), String(viewModel.isDemoMode),
+         UserDefaults.standard.string(forKey: "exportAdvisor_weatherLocation_" + (viewModel.energySiteId ?? "")) ?? ""]
+    }
+
     @State private var showingSettings = false
+    @State private var showingExportAdvisor = false
+    @StateObject private var exportAdvisor = ExportAdvisor()
+    @AppStorage("homeEnergyAdvisor_showButton") private var showHomeEnergyAdvisorButton = false
     @State private var showingGraph = false
     @State private var showingScheduler = false
     @State private var wiggleWatts = 40.0
@@ -260,6 +269,9 @@ struct ContentView: View {
                     .ignoresSafeArea()
             )
         }
+        .sheet(isPresented: $showingExportAdvisor) {
+            ExportAdvisorView(advisor: exportAdvisor, viewModel: viewModel)
+        }
         .sheet(isPresented: $showingGraph) {
             GraphView(viewModel: viewModel)
                 .background(
@@ -304,11 +316,17 @@ struct ContentView: View {
                 showingConfirmation: false,
                 viewModel: viewModel
             )
+#if os(tvOS)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+#endif
             .background(
                 Color.clear
                     .background(.regularMaterial)
                     .ignoresSafeArea()
             )
+        }
+        .fullScreenCover(isPresented: $showingExportAdvisor) {
+            ExportAdvisorView(advisor: exportAdvisor, viewModel: viewModel)
         }
         .fullScreenCover(isPresented: $showingGraph) {
             GraphView(viewModel: viewModel)
@@ -327,16 +345,45 @@ struct ContentView: View {
                 )
         }
 #endif
+        .task(id: weatherPrefetchIdentity) {
+            guard !showingSettings, !viewModel.isDemoMode, viewModel.loginMode == .fleetAPI,
+                  let siteID = viewModel.energySiteId, !viewModel.accessToken.isEmpty else { return }
+            let service = ExportAdvisorService(baseURL: viewModel.fleetBaseURL, token: viewModel.accessToken, siteID: siteID)
+            // Opportunistic: opening the advisor retries and presents any service error.
+            try? await service.prefetchWeather()
+        }
+#if DEBUG
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("--advisor-focus-ui-test") || ProcessInfo.processInfo.arguments.contains("--advisor-close-ui-test") {
+                showingExportAdvisor = true
+            } else if ProcessInfo.processInfo.arguments.contains("--graph-close-ui-test") {
+                showingGraph = true
+            }
+        }
+#endif
+        .onChange(of: viewModel.isDemoMode) { isDemo in
+            exportAdvisor.invalidate()
+            if isDemo { queueInitialDemoData() }
+        }
+        .onChange(of: showingSettings) { isShowing in
+            if !isShowing && viewModel.isDemoMode { queueInitialDemoData() }
+        }
+        .onChange(of: viewModel.loginMode) { _ in
+            exportAdvisor.invalidate()
+        }
+        .onChange(of: viewModel.energySiteId) { _ in
+            exportAdvisor.invalidate()
+        }
         .onReceive(timer) { _ in
             powerwallRuntimeEstimateTimerCycle += 1
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
             if showingSettings {
                 return
             }
-            if viewModel.loginMode == .fleetAPI {
+            if !viewModel.isDemoMode && viewModel.loginMode == .fleetAPI {
                 PowerwallScheduleManager.shared.applyDueSchedules(using: viewModel)
             }
-            if viewModel.ipAddress == "demo" {
+            if viewModel.isDemoMode {
                 let homeLoad = Double(arc4random_uniform(4096)) + 256
                 queueDemoPowerwallData(
                     batteryPower: homeLoad * 0.2,
@@ -366,7 +413,7 @@ struct ContentView: View {
             }
         }
         .onReceive(timerElectricityMaps) { _ in
-            if viewModel.ipAddress == "demo" {
+            if viewModel.isDemoMode {
                 queueDemoElectricityGridData()
             } else {
                 viewModel.fetchElectricityMapsData()
@@ -379,7 +426,7 @@ struct ContentView: View {
         }
         .onAppear {
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
-            let isDemoMode = demo || viewModel.ipAddress == "demo"
+            let isDemoMode = demo || viewModel.isDemoMode
             if demo {
                 DispatchQueue.main.async {
                     viewModel.ipAddress = "demo"
@@ -389,19 +436,7 @@ struct ContentView: View {
             if shouldAutoOpenSettingsOnLaunch {
                 showingSettings = true
             } else if isDemoMode {
-                queueDemoPowerwallData(
-                    batteryPower: 256,
-                    batteryPercentage: 100,
-                    loadPower: 2304,
-                    solarPower: 2048,
-                    solarEnergyExported: 4096000,
-                    sitePower: 1024,
-                    gridStatus: "SystemIslandedActive",
-                    wallConnectorPower: 512,
-                    vehicleBatteryLevel: 80,
-                    siteName: "Home sweet home"
-                )
-                // viewModel.errorMessage = "An error has occured"
+                queueInitialDemoData()
             } else {
                 viewModel.fetchElectricityMapsData()
                 viewModel.fetchData()
@@ -1030,8 +1065,8 @@ struct ContentView: View {
                 .accessibilityLabel("Settings")
                 .environment(\.colorScheme, .dark)
 
-                if viewModel.loginMode == .fleetAPI {
-                    if viewModel.showSchedulerButton {
+                if viewModel.isDemoMode || viewModel.loginMode == .fleetAPI {
+                    if viewModel.loginMode == .fleetAPI && !viewModel.isDemoMode && viewModel.showSchedulerButton {
                         Button(action: {
                             revealAutoHiddenOverlays()
                             showingScheduler = true
@@ -1086,6 +1121,34 @@ struct ContentView: View {
                     .controlSize(.large)
                     .accessibilityLabel("Chart")
                     .environment(\.colorScheme, .dark)
+                    if showHomeEnergyAdvisorButton || viewModel.isDemoMode {
+                        Button {
+                            revealAutoHiddenOverlays()
+                            showingExportAdvisor = true
+                        } label: {
+                            Image(systemName: "sparkles")
+#if os(macOS)
+                                .font(.system(size: 18, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.primary)
+                                .frame(width: 40, height: 40)
+#elseif os(iOS)
+                                .font(.system(size: 24, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.gray)
+                                .frame(width: 40, height: 40)
+#else
+                                .font(.title3)
+                                .frame(width: 80, height: 80)
+#endif
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .accessibilityLabel("Home Energy Advisor")
+                        .accessibilityHint("Open again to ask follow-up questions")
+                        .accessibilityIdentifier("homeEnergyAdvisorButton")
+                        .environment(\.colorScheme, .dark)
+                    }
                 }
             }
             .overlayChromeBackground(
@@ -1211,6 +1274,21 @@ struct ContentView: View {
         viewModel.gridFossilFuelPercentage = 58
     }
 
+    private func queueInitialDemoData() {
+        queueDemoPowerwallData(
+            batteryPower: 256,
+            batteryPercentage: 100,
+            loadPower: 2304,
+            solarPower: 2048,
+            solarEnergyExported: 4096000,
+            sitePower: 1024,
+            gridStatus: "SystemIslandedActive",
+            wallConnectorPower: 512,
+            vehicleBatteryLevel: 80,
+            siteName: "Home sweet home"
+        )
+    }
+
     private func queueDemoPowerwallData(
         batteryPower: Double,
         batteryPercentage: Double,
@@ -1224,6 +1302,7 @@ struct ContentView: View {
         siteName: String? = nil
     ) {
         DispatchQueue.main.async {
+            guard viewModel.isDemoMode else { return }
             viewModel.data = PowerwallData(
                 battery: PowerwallData.Battery(instantPower: batteryPower, count: 1),
                 load: PowerwallData.Load(instantPower: loadPower),

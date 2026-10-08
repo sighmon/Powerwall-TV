@@ -23,6 +23,7 @@ An AppleTV/macOS/iPad application to view and manage the current state of your T
 * Optional Electricity Maps grid carbon intensity and renewable percentage display.
 * Optional Wall Connector status from a local Wall Connector IP address.
 * Fleet API energy history graphs and multi-site support.
+* Set the local Gateway address to `demo` to explore sample energy graphs and Home Energy Advisor estimates, forecast, and follow-up replies without service credentials. Both buttons are available in demo mode; advisor responses are illustrative and do not use live AI or speech.
 * macOS menu bar display, keep-window-in-front mode, and scene layout controls.
 * Beta scheduler for switching Powerwall modes at configured start and end times.
 
@@ -94,3 +95,19 @@ enum Secrets {
 This application collects no personal data, and all information entered into it is only used to connect directly to your Powerwall via your own WiFi network, or directly to official Tesla Fleet API servers to retrieve Powerwall data remotely.
 
 All connection tokens and local Gateway credentials are stored in the device Keychain where supported.
+
+### Home Energy Advisor
+
+In Fleet API mode, the home screen's sparkles button opens Home Energy Advisor with a weather-themed background and Liquid Glass cards on OS 26 or later (translucent material on older systems). The summary cards lead with percentages of total installed battery capacity, with kWh underneath; advice also leads with percentages. Weather and energy-use cards work without an xAI token; add your own token in Settings → Advisor to enable Grok’s summary and follow-up questions. Confirm the morning peak end hour (in the Tesla site's time zone), then save. If Tesla does not provide coordinates, enter the selected site’s suburb and country in Weather location. Open the button again to ask follow-up questions about the same estimate. The text field supports the platform's normal keyboard/dictation input. Answers can be spoken with Grok Voice; choose a voice or disable spoken answers in Settings → Advisor. Opening the Advisor tab loads available Grok text models and voices from xAI using the entered API key. The model picker defaults to Latest available (newest creation date) or can retain a specific model for subsequent summaries and follow-ups. The selection is saved for subsequent spoken answers.
+
+Settings also lets you edit the default prompt, restore the original question, and hide the magic button from Home. Prompt changes apply on the next refresh; a blank prompt uses the built-in default.
+
+On first load in Fleet API mode, the app prefetches weather in the background. Successful forecasts, resolved locations and attribution are cached in memory for up to 15 minutes and shared with advisor requests. Site, location and forecast-window changes use separate cache entries; failed requests can retry. Battery charge is still fetched fresh when requesting advice.
+
+The advisor reads the selected site's location, time zone, battery count, live charge and backup reserve from Fleet API. It averages up to five completed matching usage windows, requiring at least three with complete five-minute energy buckets. It fetches WeatherKit hourly weather from now through the end of tomorrow. The calculated export ceiling retains the greater of the highest recent usage or 120% of average usage, plus the backup reserve. Grok assesses weather-related uncertainty and explains the estimate in kWh and percentage of total battery capacity. Measured pack capacity is preferred; otherwise the displayed assumption is 13.5 kWh per Powerwall. No energy export commands are issued.
+
+Only requesting advice sends usage, battery status, forecast and questions to xAI. The xAI key is saved in Keychain. Follow-ups expire after 15 minutes and changing sites clears the conversation. Tesla and Apple WeatherKit access are required for the estimates; xAI access is only required for Grok summaries, follow-ups and speech; API usage may incur charges on the user's accounts.
+
+**Developer setup:** enable WeatherKit for `com.sighmon.Powerwall-TV` in **both App Capabilities and App Services** in the Apple Developer portal, then regenerate provisioning profiles. Xcode automatic signing can supply the entitlement while the separate App Services activation is still missing. The WeatherKit entitlement is included in the app. Unsigned local builds verify compilation but cannot prove WeatherKit authorization. Verify on a signed build using a Fleet account with energy data permission and an xAI key with access to a text model and `/v1/tts`.
+
+Implementation references: [Tesla energy endpoints](https://developer.tesla.com/docs/fleet-api/endpoints/energy), [Apple WeatherService](https://developer.apple.com/documentation/weatherkit/weatherservice), [xAI models](https://docs.x.ai/developers/models), and [Grok text-to-speech](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech).
