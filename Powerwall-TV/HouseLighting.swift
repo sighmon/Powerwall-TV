@@ -21,6 +21,7 @@
 import Foundation
 import SceneKit
 import CoreLocation
+import CoreGraphics
 import WeatherKit
 #if canImport(UIKit)
 import UIKit
@@ -44,6 +45,120 @@ struct HouseLightingParameters: Equatable {
     var nightLight: SIMD3<Float> = SIMD3(1.0, 0.894, 0.8)
     var rainIntensity: Float = 0   // 0…1, drives particle birth rate
     var snowIntensity: Float = 0   // 0…1
+    /// Degrees above the horizon. Negative is below it. The visible disc uses this;
+    /// the fill light stays a little above the horizon so the house never goes unlit.
+    var sunAltitude: Float = 35
+    /// Clockwise from true north, degrees.
+    var sunAzimuth: Float = 180
+    /// Model +Z compass facing. 180 means the street side faces south.
+    var houseHeading: Float = 180
+    /// 0 clear … 1 overcast. Veils the sun disc and fills in the cloud wisps.
+    /// Ambient dimming still uses the measured cover inside `WeatherLighting`.
+    var cloudCover: Float = 0
+}
+
+// MARK: - Visible sky
+
+/// The house camera looks down a 30° frame, so the real sun is usually outside the picture.
+/// The disc still follows the site's altitude and azimuth: east on the left, overhead at midday,
+/// west on the right, gone at night, and faded by WeatherKit cloud cover.
+enum HouseSky {
+    struct Wisp: Equatable {
+        var x: Float
+        var y: Float
+        var depth: Float
+        var width: Float
+        var height: Float
+        /// Cloud cover at which this wisp is fully present.
+        var threshold: Float
+        var cirrus: Bool
+    }
+
+    struct Placement: Equatable {
+        var sunPosition: SIMD3<Float>
+        /// -1 is the left of the view, 1 is the right.
+        var screenX: Float
+        /// 0 is the look-at centre, 1 is the top of the frame.
+        var screenY: Float
+        var sunOpacity: Float
+        var haloOpacity: Float
+        var discRadius: Float
+        var haloRadius: Float
+        var sunColor: SIMD3<Float>
+    }
+
+    /// High streaks first, then lower puffs as the cover thickens.
+    static let wisps: [Wisp] = [
+        Wisp(x: -0.62, y: 0.80, depth: -1.4, width: 8.8, height: 0.52, threshold: 0.34, cirrus: true),
+        Wisp(x: 0.08, y: 0.88, depth: -2.2, width: 10.4, height: 0.40, threshold: 0.40, cirrus: true),
+        Wisp(x: 0.60, y: 0.74, depth: -0.8, width: 7.4, height: 0.46, threshold: 0.48, cirrus: true),
+        Wisp(x: -0.34, y: 0.64, depth: 0.3, width: 4.6, height: 1.55, threshold: 0.55, cirrus: false),
+        Wisp(x: 0.40, y: 0.68, depth: -0.4, width: 5.4, height: 1.70, threshold: 0.64, cirrus: false),
+        Wisp(x: -0.04, y: 0.56, depth: 0.7, width: 6.2, height: 1.90, threshold: 0.74, cirrus: false),
+        Wisp(x: 0.70, y: 0.58, depth: 0.1, width: 3.8, height: 1.30, threshold: 0.82, cirrus: false),
+        Wisp(x: -0.74, y: 0.60, depth: -0.9, width: 4.2, height: 1.25, threshold: 0.90, cirrus: false),
+    ]
+
+    static func placement(altitude: Float, azimuth: Float, heading: Float, cloudCover: Float,
+                          eye: SIMD3<Float>, target: SIMD3<Float>, viewport: CGSize,
+                          fieldOfView: Float = 30) -> Placement {
+        let cover = min(max(cloudCover, 0), 1)
+        let alt = altitude * .pi / 180
+        let az = (azimuth - heading) * .pi / 180
+        let world = SIMD3<Float>(sin(az) * cos(alt), sin(alt), cos(az) * cos(alt))
+        let forward = simd_normalize(target - eye)
+        let right = simd_normalize(cross(forward, SIMD3<Float>(0, 1, 0)))
+        let up = simd_normalize(cross(right, forward))
+
+        let side = min(max(world.x * 0.92, -0.82), 0.82)
+        let rise = max(world.y, 0)
+        let screenY = 0.30 + rise * 0.46
+        let distance: Float = 22
+        let halfHeight = tan(fieldOfView * .pi / 180 / 2) * distance
+        let aspect = Float(viewport.width / max(viewport.height, 1))
+        let halfWidth = halfHeight * max(aspect, 0.01)
+        let position = eye + forward * distance + right * (side * halfWidth) + up * (screenY * halfHeight)
+
+        let day = smoothstep(-5, 6, altitude)
+        let veil = pow(1 - cover, 1.45)
+        let warm = smoothstep(0, 26, altitude)
+        let low = SIMD3<Float>(1, 0.55, 0.28)
+        let high = SIMD3<Float>(1, 0.97, 0.90)
+        let tint = low + (high - low) * warm
+        let grey = SIMD3<Float>(0.86, 0.89, 0.93)
+        return Placement(
+            sunPosition: position,
+            screenX: side,
+            screenY: screenY,
+            sunOpacity: day * veil,
+            haloOpacity: day * (0.42 * veil + 0.08 * cover),
+            discRadius: 1.35 + 1.2 * cover,
+            haloRadius: 3.6 + 2.0 * cover,
+            sunColor: tint + (grey - tint) * (cover * 0.65)
+        )
+    }
+
+    static func wispOpacity(threshold: Float, cloudCover: Float, cirrus: Bool) -> Float {
+        let cover = min(max(cloudCover, 0), 1)
+        let t = smoothstep(threshold, threshold + 0.12, cover)
+        return t * (cirrus ? 0.42 : 0.55)
+    }
+
+    /// Site-less preview. The arc crosses the camera's sky: east in the morning, overhead at noon, west in the evening.
+    static func clockSun(at date: Date, heading: Double, calendar: Calendar = .current) -> (altitude: Double, azimuth: Double) {
+        let hour = calendar.component(.hour, from: date)
+        let minute = calendar.component(.minute, from: date)
+        let t = (Double(hour * 60 + minute) - 6 * 60) / (12 * 60)
+        let altitude = (0...1).contains(t) ? sin(t * .pi) * 58 : -8
+        var azimuth = (heading - 90 + t * 180).truncatingRemainder(dividingBy: 360)
+        if azimuth < 0 { azimuth += 360 }
+        return (altitude, azimuth)
+    }
+
+    static func smoothstep(_ edge0: Float, _ edge1: Float, _ value: Float) -> Float {
+        let t = min(max((value - edge0) / (edge1 - edge0), 0), 1)
+        return t * t * (3 - 2 * t)
+    }
 }
 
 // MARK: - Shader modifiers
@@ -285,9 +400,17 @@ final class HouseLighting {
     private let rainNode = SCNNode()
     private let snowNode = SCNNode()
     private let sunLight = SCNNode()
+    private let skyRig = SCNNode()
+    private let sunDisc = SCNNode()
+    private let sunHalo = SCNNode()
+    private var cloudCards: [SCNNode] = []
     private let rain = HouseLighting.makeRain()
     private let snow = HouseLighting.makeSnow()
     private var parameters = HouseLightingParameters()
+    private var skyEye = HouseCameraFraming.position
+    private var skyAim = HouseCameraFraming.subject
+    private var skyViewport = CGSize(width: 1280, height: 720)
+    private var skyFieldOfView: Float = HouseCameraFraming.verticalFOVDegrees
     /// Emitter volume relative to a 4,000 m³ reference, so a larger view stays the same density.
     private var coverageScale: CGFloat = 1
 
@@ -365,6 +488,7 @@ final class HouseLighting {
         snowNode.addParticleSystem(snow)
         root.addChildNode(rainNode)
         root.addChildNode(snowNode)
+        installSky()
 
         apply(HouseLightingParameters())
     }
@@ -399,12 +523,20 @@ final class HouseLighting {
 
         rain.birthRate = CGFloat(p.rainIntensity) * 90 * coverageScale
         snow.birthRate = CGFloat(p.snowIntensity) * 22 * coverageScale
+        layoutSky(animated: animated)
     }
 
     /// Sizes the rain and snow volume to the camera frustum so precipitation covers the
     /// whole view, including the sky around the house, at a light density.
     func updateWeatherCoverage(camera: SCNNode, viewport: CGSize) {
         guard viewport.width > 1, viewport.height > 1 else { return }
+        let transform = camera.simdWorldTransform
+        skyEye = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+        let forward = -SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
+        skyAim = skyEye + forward
+        skyViewport = viewport
+        skyFieldOfView = Float(camera.camera?.fieldOfView ?? CGFloat(HouseCameraFraming.verticalFOVDegrees))
+        layoutSky(animated: false)
         let holder = root.parent ?? root
         if rainNode.parent !== holder {
             holder.addChildNode(rainNode)
@@ -413,10 +545,8 @@ final class HouseLighting {
         let vfov = Float((camera.camera?.fieldOfView ?? 30) * .pi / 180)
         let aspect = Float(viewport.width / viewport.height)
         let hfov = 2 * atan(tan(vfov / 2) * aspect)
-        let transform = camera.simdWorldTransform
-        let origin = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+        let origin = skyEye
         // SceneKit cameras look down their local −Z axis.
-        let forward = -SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
         let up = SIMD3<Float>(transform.columns.1.x, transform.columns.1.y, transform.columns.1.z)
         let right = SIMD3<Float>(transform.columns.0.x, transform.columns.0.y, transform.columns.0.z)
         var minB = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
@@ -532,6 +662,114 @@ final class HouseLighting {
     }
 
     // MARK: Helpers
+
+    private func installSky() {
+        skyRig.name = "HouseSky"
+        let halo = SCNPlane(width: 1, height: 1)
+        halo.materials = [HouseSkyArt.material(HouseSkyArt.sunGlow, additive: true)]
+        sunHalo.geometry = halo
+        sunHalo.name = "SunHalo"
+        sunHalo.renderingOrder = 5
+        let disc = SCNPlane(width: 1, height: 1)
+        disc.materials = [HouseSkyArt.material(HouseSkyArt.sunCore, additive: true)]
+        sunDisc.geometry = disc
+        sunDisc.name = "SunDisc"
+        sunDisc.renderingOrder = 6
+        skyRig.addChildNode(sunHalo)
+        skyRig.addChildNode(sunDisc)
+
+        for (index, wisp) in HouseSky.wisps.enumerated() {
+            let plane = SCNPlane(width: CGFloat(wisp.width), height: CGFloat(wisp.height))
+            plane.materials = [HouseSkyArt.material(wisp.cirrus ? HouseSkyArt.cirrus : HouseSkyArt.puff, additive: false)]
+            let card = SCNNode(geometry: plane)
+            card.name = "HouseCloud\(index)"
+            card.renderingOrder = 4
+            let drift = SCNAction.sequence([
+                SCNAction.moveBy(x: 0.7, y: 0.05, z: 0, duration: 42 + Double(index) * 5),
+                SCNAction.moveBy(x: -0.7, y: -0.05, z: 0, duration: 42 + Double(index) * 5),
+            ])
+            card.runAction(.repeatForever(drift))
+            let holder = SCNNode()
+            holder.opacity = 0
+            holder.isHidden = true
+            holder.addChildNode(card)
+            skyRig.addChildNode(holder)
+            cloudCards.append(holder)
+        }
+        sunDisc.opacity = 0
+        sunHalo.opacity = 0
+        sunDisc.isHidden = true
+        sunHalo.isHidden = true
+        root.addChildNode(skyRig)
+    }
+
+    /// Moves the sun along the visible arc and shows the wisps for the current cover.
+    /// Positions are applied without the lighting fade so a viewport change does not slide the sky.
+    private func layoutSky(animated: Bool) {
+        let p = parameters
+        let sky = HouseSky.placement(
+            altitude: p.sunAltitude,
+            azimuth: p.sunAzimuth,
+            heading: p.houseHeading,
+            cloudCover: p.cloudCover,
+            eye: skyEye,
+            target: skyAim,
+            viewport: skyViewport,
+            fieldOfView: skyFieldOfView
+        )
+        let holder = root.parent ?? root
+        if skyRig.parent !== holder {
+            holder.addChildNode(skyRig)
+        }
+        let forward = simd_normalize(skyAim - skyEye)
+        let right = simd_normalize(cross(forward, SIMD3<Float>(0, 1, 0)))
+        let up = simd_normalize(cross(right, forward))
+        let center = skyEye + forward * 22 + up * (0.52 * tan(skyFieldOfView * .pi / 180 / 2) * 22)
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        var basis = matrix_identity_float4x4
+        basis.columns.0 = SIMD4<Float>(right.x, right.y, right.z, 0)
+        basis.columns.1 = SIMD4<Float>(up.x, up.y, up.z, 0)
+        // Plane faces +Z. Point that axis back at the camera.
+        basis.columns.2 = SIMD4<Float>(-forward.x, -forward.y, -forward.z, 0)
+        basis.columns.3 = SIMD4<Float>(center.x, center.y, center.z, 1)
+        skyRig.simdWorldTransform = basis
+
+        let halfHeight = tan(skyFieldOfView * .pi / 180 / 2) * 22
+        let aspect = Float(skyViewport.width / max(skyViewport.height, 1))
+        let halfWidth = halfHeight * max(aspect, 0.01)
+        let localSun = SIMD3<Float>(sky.screenX * halfWidth, (sky.screenY - 0.52) * halfHeight, 0)
+        sunDisc.simdPosition = localSun
+        sunHalo.simdPosition = localSun
+        sunDisc.scale = SCNVector3(sky.discRadius, sky.discRadius, 1)
+        sunHalo.scale = SCNVector3(sky.haloRadius, sky.haloRadius, 1)
+        for (holder, wisp) in zip(cloudCards, HouseSky.wisps) {
+            holder.simdPosition = SIMD3<Float>(wisp.x * halfWidth * 0.92, (wisp.y - 0.52) * halfHeight, wisp.depth)
+        }
+        SCNTransaction.commit()
+
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = animated ? 1.5 : 0
+        SCNTransaction.disableActions = !animated
+        if !animated {
+            sunDisc.removeAllAnimations()
+            sunHalo.removeAllAnimations()
+            cloudCards.forEach { $0.removeAllAnimations() }
+        }
+        let tint = HouseColor(red: CGFloat(sky.sunColor.x), green: CGFloat(sky.sunColor.y), blue: CGFloat(sky.sunColor.z), alpha: 1)
+        sunDisc.geometry?.firstMaterial?.multiply.contents = tint
+        sunHalo.geometry?.firstMaterial?.multiply.contents = tint
+        sunDisc.opacity = CGFloat(sky.sunOpacity)
+        sunHalo.opacity = CGFloat(sky.haloOpacity)
+        sunDisc.isHidden = sky.sunOpacity < 0.02
+        sunHalo.isHidden = sky.haloOpacity < 0.02
+        for (holder, wisp) in zip(cloudCards, HouseSky.wisps) {
+            let opacity = HouseSky.wispOpacity(threshold: wisp.threshold, cloudCover: p.cloudCover, cirrus: wisp.cirrus)
+            holder.opacity = CGFloat(opacity)
+            holder.isHidden = opacity < 0.02
+        }
+        SCNTransaction.commit()
+    }
 
     private func installFillLights() {
         let ambient = SCNNode()
@@ -792,6 +1030,10 @@ struct WeatherLighting {
         p.sunDirection = SIMD3(Float(d.x), Float(d.y), Float(d.z))
 
         p.nightLightPower = Float(1 - smoothstep(-2, 6, sunAltitude) * 0.9)
+        p.sunAltitude = Float(sunAltitude)
+        p.sunAzimuth = Float(sunAzimuth)
+        p.houseHeading = Float(houseHeadingDegrees)
+        p.cloudCover = Float(min(max(deckCover(reported: clouds, condition: condition), 0), 1))
 
         let intensity = Float(min(max(precipitationMillimetresPerHour / 8, 0), 1))
         switch condition {
@@ -816,6 +1058,143 @@ struct WeatherLighting {
     private func smoothstep(_ e0: Double, _ e1: Double, _ x: Double) -> Double {
         let t = min(max((x - e0) / (e1 - e0), 0), 1)
         return t * t * (3 - 2 * t)
+    }
+
+    /// The visible deck can read fuller than the cover used to dim the house.
+    private func deckCover(reported: Double, condition: WeatherCondition) -> Double {
+        switch condition {
+        case .partlyCloudy:
+            return max(reported, 0.42)
+        case .mostlyCloudy:
+            return max(reported, 0.68)
+        case .cloudy, .foggy, .haze, .smoky, .blowingDust:
+            return max(reported, 0.88)
+        case .thunderstorms, .isolatedThunderstorms, .scatteredThunderstorms, .strongStorms,
+             .heavyRain, .blizzard, .tropicalStorm, .hurricane:
+            return max(reported, 0.92)
+        default:
+            return reported
+        }
+    }
+}
+
+// MARK: - Sky sprites
+
+enum HouseSkyArt {
+    static let sunCore = radialImage(size: 128, inner: 0.16, outer: 0.62, peak: 1)
+    static let sunGlow = radialImage(size: 128, inner: 0.0, outer: 0.92, peak: 0.45)
+    static let cirrus = cloudImage(
+        width: 512, height: 64,
+        blobs: [
+            Blob(x: -0.55, y: 0.05, rx: 0.28, ry: 0.08, amp: 0.55),
+            Blob(x: -0.18, y: -0.02, rx: 0.22, ry: 0.05, amp: 0.4),
+            Blob(x: 0.16, y: 0.04, rx: 0.26, ry: 0.06, amp: 0.5),
+            Blob(x: 0.52, y: -0.03, rx: 0.24, ry: 0.05, amp: 0.35),
+        ],
+        shred: 14
+    )
+    static let puff = cloudImage(
+        width: 320, height: 140,
+        blobs: [
+            Blob(x: -0.28, y: 0.02, rx: 0.34, ry: 0.16, amp: 0.55),
+            Blob(x: 0.05, y: 0.08, rx: 0.28, ry: 0.12, amp: 0.45),
+            Blob(x: 0.32, y: -0.04, rx: 0.30, ry: 0.14, amp: 0.4),
+            Blob(x: -0.02, y: -0.10, rx: 0.18, ry: 0.08, amp: 0.3),
+        ],
+        shred: 7
+    )
+
+    static func material(_ image: CGImage, additive: Bool) -> SCNMaterial {
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.isDoubleSided = true
+        material.diffuse.contents = platformImage(image)
+        material.blendMode = additive ? .add : .alpha
+        material.writesToDepthBuffer = false
+        material.readsFromDepthBuffer = true
+        material.transparencyMode = additive ? .rgbZero : .aOne
+        return material
+    }
+
+    private struct Blob {
+        var x, y, rx, ry, amp: Float
+    }
+
+    private static func radialImage(size: Int, inner: Float, outer: Float, peak: Float) -> CGImage {
+        var pixels = [UInt8](repeating: 0, count: size * size * 4)
+        let last = Float(size - 1)
+        for y in 0..<size {
+            for x in 0..<size {
+                let u = Float(x) / last * 2 - 1
+                let v = Float(y) / last * 2 - 1
+                let radius = sqrt(u * u + v * v)
+                let t = min(max((radius - inner) / max(outer - inner, 0.001), 0), 1)
+                let fade = (1 - t) * (1 - t) * peak
+                // Premultiplied white. Additive glow falls off before it lifts the dark sky.
+                let channel = UInt8(min(max(fade, 0), 1) * 255)
+                let index = (y * size + x) * 4
+                pixels[index] = channel
+                pixels[index + 1] = channel
+                pixels[index + 2] = channel
+                pixels[index + 3] = channel
+            }
+        }
+        return image(pixels, width: size, height: size)
+    }
+
+    private static func cloudImage(width: Int, height: Int, blobs: [Blob], shred: Float) -> CGImage {
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let u = Float(x) / Float(width - 1) * 2 - 1
+                let v = Float(y) / Float(height - 1) * 2 - 1
+                var amount: Float = 0
+                for blob in blobs {
+                    let dx = (u - blob.x) / blob.rx
+                    let dy = (v - blob.y) / blob.ry
+                    amount += blob.amp * exp(-(dx * dx + dy * dy))
+                }
+                let strands = 0.55 + 0.45 * sin(u * shred + v * 2.5) * sin(u * shred * 0.37 - 1.3)
+                let edge = max(abs(u) / 0.98, abs(v) / 0.9)
+                let window = 1 - HouseSky.smoothstep(0.45, 1, edge)
+                let alpha = min(max(amount * strands * window, 0), 0.62)
+                let index = (y * width + x) * 4
+                // Cool white. Alpha carries the wisp so stacked clouds stay soft.
+                pixels[index] = 226
+                pixels[index + 1] = 234
+                pixels[index + 2] = 242
+                pixels[index + 3] = UInt8(alpha * 255)
+            }
+        }
+        return image(pixels, width: width, height: height)
+    }
+
+    private static func image(_ pixels: [UInt8], width: Int, height: Int) -> CGImage {
+        let data = Data(pixels) as CFData
+        let provider = CGDataProvider(data: data)!
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        )!
+    }
+
+    private static func platformImage(_ image: CGImage) -> Any {
+        #if canImport(UIKit)
+        return UIImage(cgImage: image)
+        #elseif canImport(AppKit)
+        return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+        #else
+        return image
+        #endif
     }
 }
 

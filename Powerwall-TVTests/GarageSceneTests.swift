@@ -126,6 +126,68 @@ struct GarageSceneTests {
         )
         #expect(storm.rainIntensity >= 0.8)
         #expect(storm.theme < 0.7)
+        #expect(storm.cloudCover >= 0.9)
+        #expect(night.cloudCover == 0)
+
+        let partly = lighting.parameters(
+            sunAltitude: 40,
+            sunAzimuth: 90,
+            isDaylight: true,
+            cloudCover: 0.1,
+            condition: .partlyCloudy,
+            precipitationMillimetresPerHour: 0
+        )
+        #expect(partly.cloudCover >= 0.42)
+        // The visible deck can thicken without dimming the house beyond the measured cover.
+        #expect(partly.ambientScale > 0.95)
+    }
+
+    @Test func sunArcsAcrossTheVisibleSkyAndCloudsVeilIt() {
+        let view = CGSize(width: 1280, height: 720)
+        let eye = HouseCameraFraming.eye(viewport: view)
+        let target = HouseCameraFraming.target(viewport: view)
+        func place(altitude: Float, azimuth: Float, cloud: Float) -> HouseSky.Placement {
+            HouseSky.placement(
+                altitude: altitude, azimuth: azimuth, heading: 180, cloudCover: cloud,
+                eye: eye, target: target, viewport: view
+            )
+        }
+        let morning = place(altitude: 22, azimuth: 90, cloud: 0)
+        let noon = place(altitude: 58, azimuth: 180, cloud: 0)
+        let evening = place(altitude: 22, azimuth: 270, cloud: 0)
+        let night = place(altitude: -10, azimuth: 270, cloud: 0)
+        let veiled = place(altitude: 58, azimuth: 180, cloud: 0.9)
+        #expect(morning.screenX < -0.5)
+        #expect(evening.screenX > 0.5)
+        #expect(abs(noon.screenX) < 0.05)
+        #expect(noon.screenY > morning.screenY + 0.15)
+        #expect(night.sunOpacity == 0)
+        #expect(noon.sunOpacity > veiled.sunOpacity * 4)
+
+        #expect(HouseSky.wispOpacity(threshold: 0.34, cloudCover: 0, cirrus: true) == 0)
+        #expect(HouseSky.wispOpacity(threshold: 0.9, cloudCover: 0.4, cirrus: false) == 0)
+        #expect(HouseSky.wispOpacity(threshold: 0.34, cloudCover: 1, cirrus: true) > 0.35)
+        let thin = HouseSky.wisps.filter { $0.cirrus && HouseSky.wispOpacity(threshold: $0.threshold, cloudCover: 0.5, cirrus: true) > 0 }
+        let thick = HouseSky.wisps.filter { !$0.cirrus && HouseSky.wispOpacity(threshold: $0.threshold, cloudCover: 0.5, cirrus: false) > 0.2 }
+        #expect(!thin.isEmpty)
+        #expect(thick.isEmpty)
+    }
+
+    @Test func clockSunRisesOnTheLeftAndSetsOnTheRight() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        func sun(_ hour: Int, _ minute: Int) -> (altitude: Double, azimuth: Double) {
+            let date = calendar.date(from: DateComponents(year: 2026, month: 6, day: 21, hour: hour, minute: minute))!
+            return HouseSky.clockSun(at: date, heading: 180, calendar: calendar)
+        }
+        let morning = sun(8, 0)
+        let noon = sun(12, 0)
+        let evening = sun(16, 0)
+        let night = sun(2, 0)
+        #expect(morning.azimuth < noon.azimuth)
+        #expect(noon.azimuth < evening.azimuth)
+        #expect(noon.altitude > morning.altitude)
+        #expect(night.altitude < 0)
     }
 
     @Test func solarPositionStaysOnTheCompassAndIsHigherInSummer() {
@@ -183,6 +245,18 @@ struct GarageSceneTests {
         let roofEnd = roof.ribbons.first { $0.name == "Solar_1A" }?.midU.last ?? 0
         #expect(panelEnd <= 2.2)
         #expect(roofEnd > panelEnd)
+    }
+
+    @Test func solarRibbonDrawsOverTheRoofOnTheSamePath() {
+        let house = SCNNode()
+        _ = PowerFlowSceneKitRenderer(house: house)
+        let solar = house.childNode(withName: "PowerFlowWire_Solar_1A", recursively: true)
+        let grid = house.childNode(withName: "PowerFlowWire_Grid_1A", recursively: true)
+        #expect(solar != nil)
+        #expect(solar?.renderingOrder == 15)
+        #expect(solar?.geometry?.materials.allSatisfy { $0.readsFromDepthBuffer == false } == true)
+        #expect(grid?.renderingOrder == 10)
+        #expect(grid?.geometry?.materials.first?.readsFromDepthBuffer == true)
     }
 
     @Test func pipesKeepTheRouteAndStayOffThePowerwall() {
@@ -264,6 +338,62 @@ struct GarageSceneTests {
         #expect(abs(simd_dot(straight, aimed) - 1) < 0.0001)
     }
 
+    @Test func savedPoseKeepsTheCentredCameraUntilItChanges() {
+        let size = CGSize(width: 1280, height: 720)
+        let identity = HouseScenePose.identity
+        #expect(simd_length(identity.eye - HouseCameraFraming.position) < 0.0001)
+        #expect(simd_length(identity.target - HouseCameraFraming.subject) < 0.0001)
+        #expect(simd_length(identity.eye - HouseCameraFraming.eye(viewport: size)) < 0.0001)
+
+        let world = SIMD3<Float>(0.05, 0.17, 0.92)
+        let centred = HouseCameraFraming.project(world, viewport: size)
+        let posed = HouseCameraFraming.project(world, viewport: size, eye: identity.eye, aim: identity.target)
+        #expect(abs(centred.x - posed.x) < 0.01)
+        #expect(abs(centred.y - posed.y) < 0.01)
+
+        var turned = identity
+        turned.yawDegrees = 25
+        let yawed = turned.clamped()
+        #expect(simd_length(yawed.target - identity.target) < 0.0001)
+        #expect(simd_length(yawed.eye - identity.eye) > 1)
+        let marker = HouseCameraFraming.subject + SIMD3<Float>(1.2, 0.4, 0)
+        let before = HouseCameraFraming.project(marker, viewport: size, eye: identity.eye, aim: identity.target)
+        let after = HouseCameraFraming.project(marker, viewport: size, eye: yawed.eye, aim: yawed.target)
+        #expect(hypot(after.x - before.x, after.y - before.y) > 20)
+
+        let panned = identity.panned(by: SIMD3<Float>(0.4, -0.2, 0.1)).clamped()
+        let shift = panned.target - identity.target
+        #expect(simd_length(shift - SIMD3<Float>(0.4, -0.2, 0.1)) < 0.001)
+        #expect(simd_length((panned.eye - identity.eye) - shift) < 0.001)
+
+        var closer = identity
+        closer.distanceScale = 0.5
+        let closerLength = simd_length(closer.eye - closer.target)
+        let identityLength = simd_length(identity.eye - identity.target)
+        #expect(abs(closerLength / identityLength - 0.5) < 0.001)
+        #expect(simd_dot(simd_normalize(closer.eye - closer.target), simd_normalize(identity.eye - identity.target)) > 0.999)
+
+        var low = identity
+        low.pitchDegrees = -80
+        let floor = low.clamped()
+        let offset = floor.eye - floor.target
+        let pitch = asin(offset.y / simd_length(offset)) * 180 / .pi
+        #expect(abs(pitch - 8) < 0.05)
+
+        let draggedRight = identity.panned(by: -HouseScenePose.basis.right).clamped()
+        let anchor = SIMD3<Float>(0.2, 0.8, 0.4)
+        let parked = HouseCameraFraming.project(anchor, viewport: size, eye: identity.eye, aim: identity.target)
+        let followed = HouseCameraFraming.project(anchor, viewport: size, eye: draggedRight.eye, aim: draggedRight.target)
+        #expect(followed.x > parked.x + 20)
+
+        let upright = yawed.levelTransform
+        let cameraRight = SIMD3<Float>(upright.columns.0.x, upright.columns.0.y, upright.columns.0.z)
+        #expect(abs(cameraRight.y) < 0.001)
+        let foot = HouseCameraFraming.project(yawed.target, viewport: size, eye: yawed.eye, aim: yawed.target)
+        let head = HouseCameraFraming.project(yawed.target + SIMD3<Float>(0, 1, 0), viewport: size, eye: yawed.eye, aim: yawed.target)
+        #expect(abs(head.x - foot.x) < 1.5)
+    }
+
     #if os(macOS)
     @Test func calloutProjectionMatchesSceneKit() {
         let size = CGSize(width: 1280, height: 720)
@@ -284,6 +414,31 @@ struct GarageSceneTests {
         let hit = view.projectPoint(SCNVector3(world.x, world.y, world.z))
         #expect(abs(got.x - CGFloat(hit.x)) < 3)
         #expect(abs(got.y - (size.height - CGFloat(hit.y))) < 3)
+    }
+
+    @Test func turnedCameraStaysLevelInSceneKit() {
+        let size = CGSize(width: 1280, height: 720)
+        var pose = HouseScenePose.identity
+        pose.yawDegrees = -20
+        let camera = SCNNode()
+        camera.camera = SCNCamera()
+        camera.camera?.fieldOfView = 30
+        camera.simdTransform = pose.levelTransform
+        let scene = SCNScene()
+        scene.rootNode.addChildNode(camera)
+        let view = SCNView(frame: NSRect(x: 0, y: 0, width: size.width, height: size.height))
+        view.scene = scene
+        view.pointOfView = camera
+        func screen(_ world: SIMD3<Float>) -> CGPoint {
+            let hit = view.projectPoint(SCNVector3(world.x, world.y, world.z))
+            return CGPoint(x: CGFloat(hit.x), y: size.height - CGFloat(hit.y))
+        }
+        let foot = screen(pose.target)
+        let head = screen(pose.target + SIMD3<Float>(0, 1, 0))
+        #expect(abs(head.x - foot.x) < 2)
+        let predicted = HouseCameraFraming.project(pose.target + SIMD3<Float>(0, 1, 0), viewport: size, eye: pose.eye, aim: pose.target)
+        #expect(abs(predicted.x - head.x) < 3)
+        #expect(abs(predicted.y - head.y) < 3)
     }
 
     @Test func gradedHouseStaysAsDarkAsTheReference() throws {

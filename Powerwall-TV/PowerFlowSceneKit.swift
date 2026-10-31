@@ -19,12 +19,17 @@ final class PowerFlowSceneKitRenderer {
             let source = SCNGeometrySource(vertices: verts)
             var elements: [SCNGeometryElement] = []
             var materials: [SCNMaterial] = []
+            // The solar centreline stays where Tesla baked it, including where it
+            // runs under the roof mesh. Draw that wire over the roof. The other
+            // wires still depth-test so they stay on the wall.
+            let overRoof = ribbon.name.hasPrefix("Solar")
             for q in 0..<ribbon.quadCount {
                 elements.append(SCNGeometryElement(indices: PowerFlowRibbon.indices(quad: q), primitiveType: .triangles))
                 let material = SCNMaterial()
                 material.lightingModel = .constant
                 material.isDoubleSided = true
                 material.writesToDepthBuffer = false
+                material.readsFromDepthBuffer = !overRoof
                 material.blendMode = .alpha
                 material.diffuse.contents = HouseColor.clear
                 materials.append(material)
@@ -33,7 +38,8 @@ final class PowerFlowSceneKitRenderer {
             geometry.materials = materials
             let node = SCNNode(geometry: geometry)
             node.name = "PowerFlowWire_\(ribbon.name)"
-            node.renderingOrder = 10
+            // Above the house (0) and the other wires (10), under the Powerwall and gateway (20).
+            node.renderingOrder = overRoof ? 15 : 10
             node.castsShadow = false
             node.isHidden = true
             parent.addChildNode(node)

@@ -360,8 +360,40 @@ struct SettingsView: View {
                     sceneVerticalOffset = 0.0
                     houseHeadingDegrees = 180
                 }
+                Text("Scale and offsets move the flat home image and the metric frame.")
+                    .font(.footnote)
+                    .foregroundColor(.gray)
             }
 #endif
+            if HouseLighting.resourceURL(name: "ResidentialClassic", ext: "usdz") != nil {
+                settingsCard("3D View") {
+                    Toggle("Show 3D house", isOn: $viewModel.showHouseScene)
+                    Text(houseSceneGestureHelp)
+                        .font(.footnote)
+                        .foregroundColor(.gray)
+                    Stepper(value: $viewModel.houseScenePose.yawDegrees, in: HouseScenePose.yawRange, step: 1) {
+                        Text("Yaw: \(houseSceneDegrees(viewModel.houseScenePose.yawDegrees))")
+                    }
+                    Stepper(value: $viewModel.houseScenePose.pitchDegrees, in: HouseScenePose.pitchRange, step: 1) {
+                        Text("Pitch: \(houseSceneDegrees(viewModel.houseScenePose.pitchDegrees))")
+                    }
+                    Stepper(value: $viewModel.houseScenePose.distanceScale, in: HouseScenePose.distanceRange, step: 0.05) {
+                        Text("Distance: \(Int((viewModel.houseScenePose.distanceScale * 100).rounded()))%")
+                    }
+                    Stepper(value: $viewModel.houseScenePose.panRight, in: HouseScenePose.panRange, step: 0.05) {
+                        Text("Pan right: \(houseSceneMetres(viewModel.houseScenePose.panRight))")
+                    }
+                    Stepper(value: $viewModel.houseScenePose.panUp, in: HouseScenePose.panRange, step: 0.05) {
+                        Text("Pan up: \(houseSceneMetres(viewModel.houseScenePose.panUp))")
+                    }
+                    Stepper(value: $viewModel.houseScenePose.panForward, in: HouseScenePose.panRange, step: 0.05) {
+                        Text("Pan forward: \(houseSceneMetres(viewModel.houseScenePose.panForward))")
+                    }
+                    Button("Reset 3D view") {
+                        viewModel.houseScenePose = .identity
+                    }
+                }
+            }
 
             }
             if selectedTab == .about {
@@ -450,6 +482,9 @@ struct SettingsView: View {
         UserDefaults.standard.set(clampSceneScale(sceneScale), forKey: "sceneScale")
         UserDefaults.standard.set(clampSceneHorizontalOffset(sceneHorizontalOffset), forKey: "sceneHorizontalOffset")
         UserDefaults.standard.set(clampSceneVerticalOffset(sceneVerticalOffset), forKey: "sceneVerticalOffset")
+        viewModel.houseScenePose = viewModel.houseScenePose.clamped()
+        UserDefaults.standard.set(viewModel.showHouseScene, forKey: HouseScenePose.Key.show)
+        viewModel.houseScenePose.write()
         viewModel.fetchElectricityMapsData()
         presentationMode.wrappedValue.dismiss()
     }
@@ -477,6 +512,7 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "sceneVerticalOffset")
         UserDefaults.standard.removeObject(forKey: "lastChargingWallConnectorVIN")
         UserDefaults.standard.removeObject(forKey: "houseHeadingDegrees")
+        HouseScenePose.removeStored()
         viewModel.clearVehicleChargeCache()
         viewModel.clearVehicleAppearanceCache()
         keepWindowInFront = false
@@ -490,6 +526,26 @@ struct SettingsView: View {
         sceneVerticalOffset = 0.0
         lastChargingWallConnectorVIN = ""
         houseHeadingDegrees = 180
+        viewModel.showHouseScene = true
+        viewModel.houseScenePose = .identity
+    }
+
+    private var houseSceneGestureHelp: String {
+        #if os(macOS)
+        "Drag to rotate. Option-drag or right-drag to move. Scroll or pinch to zoom. These values are saved as you change them."
+        #elseif os(iOS)
+        "Drag to rotate. Two-finger drag to move. Pinch to zoom. These values are saved as you change them."
+        #else
+        "Use the controls below to frame the house. These values are saved as you change them."
+        #endif
+    }
+
+    private func houseSceneDegrees(_ value: Double) -> String {
+        String(format: "%+.0f°", value)
+    }
+
+    private func houseSceneMetres(_ value: Double) -> String {
+        String(format: "%+.2f m", value)
     }
 }
 

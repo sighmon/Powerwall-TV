@@ -178,7 +178,7 @@ struct ContentView: View {
                 Color(red: 22/255, green: 23/255, blue: 24/255)
                     .ignoresSafeArea()
 
-                if Self.houseSceneAvailable {
+                if showsHouseScene {
                     // The metric overlay stays in the 16:9 frame. The house itself fills the window.
                     HouseSceneView(viewModel: viewModel)
                         .ignoresSafeArea()
@@ -186,7 +186,7 @@ struct ContentView: View {
                         .scaleEffect(showBackground ? 1 : 1.04)
                 }
 
-                if Self.houseSceneAvailable, let data = viewModel.data, let houseCallouts {
+                if showsHouseScene, let data = viewModel.data, let houseCallouts {
                     metricLeaderLines(
                         data: data,
                         sceneSize: sceneSize,
@@ -198,8 +198,8 @@ struct ContentView: View {
                 }
 
                 ZStack {
-                    if !Self.houseSceneAvailable {
-                        homeBackground
+                    if !showsHouseScene {
+                        homeBackgroundImage
                             .frame(width: sceneSize.width, height: sceneSize.height)
                             .opacity(showBackground ? 1 : 0)
                             .scaleEffect(showBackground ? 1 : 1.04)
@@ -537,13 +537,8 @@ struct ContentView: View {
 
     private static let houseSceneAvailable = HouseLighting.resourceURL(name: "ResidentialClassic", ext: "usdz") != nil
 
-    @ViewBuilder
-    private var homeBackground: some View {
-        if Self.houseSceneAvailable {
-            HouseSceneView(viewModel: viewModel)
-        } else {
-            homeBackgroundImage
-        }
+    private var showsHouseScene: Bool {
+        Self.houseSceneAvailable && viewModel.showHouseScene
     }
 
     @ViewBuilder
@@ -621,7 +616,7 @@ struct ContentView: View {
         gridCarbonXPosition = 0.035
 #endif
 
-        let showFlatPower = animations && !Self.houseSceneAvailable
+        let showFlatPower = animations && !showsHouseScene
         return ZStack {
             if showSiteSummaryInScene {
                 siteSummaryView(data: data, valueFont: valueFont, labelFont: labelFont, messageWidth: summaryMessageWidth)
@@ -646,7 +641,7 @@ struct ContentView: View {
                     .position(scenePoint(x: -0.104, y: -0.40, in: sceneSize))
             }
 
-            if !Self.houseSceneAvailable {
+            if !showsHouseScene {
                 batteryPercentageIndicator(
                     indicatorWidth: batteryIndicatorWidth,
                     indicatorHeight: batteryIndicatorHeight

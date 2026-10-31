@@ -69,6 +69,21 @@ class PowerwallViewModel: ObservableObject {
     @Published var sceneScale: Double = clampSceneScale(UserDefaults.standard.object(forKey: "sceneScale") as? Double ?? 1.0)
     @Published var sceneHorizontalOffset: Double = clampSceneHorizontalOffset(UserDefaults.standard.object(forKey: "sceneHorizontalOffset") as? Double ?? 0.0)
     @Published var sceneVerticalOffset: Double = clampSceneVerticalOffset(UserDefaults.standard.object(forKey: "sceneVerticalOffset") as? Double ?? 0.0)
+    @Published var showHouseScene: Bool = UserDefaults.standard.object(forKey: HouseScenePose.Key.show) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showHouseScene, forKey: HouseScenePose.Key.show) }
+    }
+    @Published var houseScenePose: HouseScenePose = .stored() {
+        didSet {
+            let clamped = houseScenePose.clamped()
+            if clamped != houseScenePose {
+                houseScenePose = clamped
+                return
+            }
+            if clamped != oldValue {
+                clamped.write()
+            }
+        }
+    }
     @Published var currentEnergySiteIndex: Int = UserDefaults.standard.integer(forKey: "currentEnergySiteIndex")
     @Published var lastChargingWallConnectorVIN: String = UserDefaults.standard.string(forKey: "lastChargingWallConnectorVIN") ?? ""
     @Published var energySites: [Product] = []
