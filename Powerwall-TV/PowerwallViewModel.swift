@@ -114,6 +114,8 @@ class PowerwallViewModel: ObservableObject {
     @Published var installationDate: Date?
     @Published var vehicles: [FleetVehicle] = []
     @Published var vehicleChargeStates: [String: VehicleChargeSnapshot] = [:]
+    @Published var vehicleAppearances: [String: VehicleAppearance] = PowerwallViewModel.loadVehicleAppearances()
+    @Published var garageSolar: GarageSolar = .panels
     private var fleetRegionResolved: Bool = false
     @Published var fleetBaseURL: String = UserDefaults.standard.string(forKey: "fleetBaseURL") ?? "https://fleet-api.prd.na.vn.cloud.tesla.com"
     @Published var electricityMapsAPIKey: String = KeychainWrapper.standard.string(forKey: "electricityMaps_apiKey") ?? ""
@@ -133,6 +135,39 @@ class PowerwallViewModel: ObservableObject {
     private var vehicleChargeCacheGeneration: UInt = 0
     private var hasShownVehicleScopeWarning = false
     private static let vehicleChargeCacheKey = "fleetVehicleChargeCache"
+    private static let vehicleAppearanceCacheKey = "fleetVehicleAppearanceCache"
+
+    var garagePresentation: GaragePresentation {
+        GaragePresentation.make(
+            data: data,
+            fallbackVIN: lastChargingWallConnectorVIN,
+            appearances: vehicleAppearances,
+            solar: garageSolar
+        )
+    }
+
+    func rememberVehicleAppearance(_ appearance: VehicleAppearance, for vin: String) {
+        guard appearance.hasUsefulData else { return }
+        var updated = vehicleAppearances
+        updated[vin] = appearance
+        vehicleAppearances = updated
+        if let data = try? JSONEncoder().encode(updated) {
+            UserDefaults.standard.set(data, forKey: Self.vehicleAppearanceCacheKey)
+        }
+    }
+
+    func clearVehicleAppearanceCache() {
+        vehicleAppearances = [:]
+        UserDefaults.standard.removeObject(forKey: Self.vehicleAppearanceCacheKey)
+    }
+
+    private static func loadVehicleAppearances() -> [String: VehicleAppearance] {
+        guard let data = UserDefaults.standard.data(forKey: vehicleAppearanceCacheKey),
+              let decoded = try? JSONDecoder().decode([String: VehicleAppearance].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
 
     private func redactedVIN(_ vin: String) -> String {
         let suffix = vin.suffix(6)
@@ -1253,24 +1288,47 @@ class PowerwallViewModel: ObservableObject {
         return (force || isStale) && canRetry
     }
 
-    private func fetchVehicleData(vin: String, isOneTimePluggedVehicleFetch: Bool = false) {
+    private final class RetryFlag {
+        var value = false
+    }
+
+    private func vehicleDataURL(vin: String, includeConfiguration: Bool) -> URL? {
+        guard var components = URLComponents(string: "\(fleetBaseURL)/api/1/vehicles/\(vin)/vehicle_data") else { return nil }
+        if includeConfiguration {
+            // Ask for config on the charge request. Some firmware only returns vehicle_config when named,
+            // and some reject that legacy endpoint, so a 400 retries without the filter. This never calls wake_up.
+            components.queryItems = [URLQueryItem(name: "endpoints", value: "charge_state;vehicle_config;vehicle_state")]
+        }
+        return components.url
+    }
+
+    private func fetchVehicleData(vin: String, isOneTimePluggedVehicleFetch: Bool = false, includeConfiguration: Bool = true) {
         guard !vehicleDataFetchesInFlight.contains(vin) else { return }
-        guard let url = URL(string: "\(fleetBaseURL)/api/1/vehicles/\(vin)/vehicle_data") else { return }
+        guard let url = vehicleDataURL(vin: vin, includeConfiguration: includeConfiguration) else { return }
 
         vehicleDataFetchesInFlight.insert(vin)
         lastVehicleDataAttemptAt[vin] = Date()
         let requestCacheGeneration = vehicleChargeCacheGeneration
-        logVehicleDebug("GET /vehicles/\(redactedVIN(vin))/vehicle_data start")
+        logVehicleDebug("GET /vehicles/\(redactedVIN(vin))/vehicle_data start configuration=\(includeConfiguration)")
 
         var request = URLRequest(url: url)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
 
+        let retryWithoutConfiguration = RetryFlag()
         fleetURLSession.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
 
             defer {
+                let retry = retryWithoutConfiguration.value
                 DispatchQueue.main.async {
                     self.vehicleDataFetchesInFlight.remove(vin)
+                    if retry {
+                        self.fetchVehicleData(
+                            vin: vin,
+                            isOneTimePluggedVehicleFetch: isOneTimePluggedVehicleFetch,
+                            includeConfiguration: false
+                        )
+                    }
                 }
             }
 
@@ -1286,6 +1344,10 @@ class PowerwallViewModel: ObservableObject {
             self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data status=\(http.statusCode) bytes=\(data.count)")
             if http.statusCode != 200 {
                 self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data non-200 body=\(self.vehicleResponsePreview(from: data))")
+            }
+            if includeConfiguration && http.statusCode == 400 {
+                retryWithoutConfiguration.value = true
+                return
             }
             if self.vehicleDataResponseIsAsleepOrOffline(statusCode: http.statusCode, data: data) {
                 self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data unavailable because vehicle is asleep/offline")
@@ -1319,8 +1381,18 @@ class PowerwallViewModel: ObservableObject {
                 return
             }
 
+            let appearance = VehicleAppearance(
+                exteriorColor: vehicleData.response.vehicleConfig?.exteriorColor,
+                paintColorOverride: vehicleData.response.vehicleConfig?.paintColorOverride,
+                colorizerRemap: vehicleData.response.vehicleState?.colorizerPaintRemapEnabled ?? false,
+                carType: vehicleData.response.vehicleConfig?.carType
+            )
             guard let chargeState = vehicleData.response.chargeState else {
                 self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data missing charge_state body=\(self.vehicleResponsePreview(from: data))")
+                DispatchQueue.main.async {
+                    guard requestCacheGeneration == self.vehicleChargeCacheGeneration else { return }
+                    self.rememberVehicleAppearance(appearance, for: vin)
+                }
                 return
             }
 
@@ -1334,6 +1406,7 @@ class PowerwallViewModel: ObservableObject {
 
             DispatchQueue.main.async {
                 guard requestCacheGeneration == self.vehicleChargeCacheGeneration else { return }
+                self.rememberVehicleAppearance(appearance, for: vin)
                 self.vehicleChargeStates[vin] = snapshot
                 self.lastVehicleDataFetchAt[vin] = Date()
                 if isOneTimePluggedVehicleFetch {
@@ -1520,6 +1593,10 @@ class PowerwallViewModel: ObservableObject {
                 self.backupReservePercent = payload.response.backupReservePercent
                 self.version = payload.response.version
                 self.installationDate = payload.response.installationDate
+                self.garageSolar = GarageSolar.resolve(
+                    hasSolar: payload.response.components?.solar,
+                    solarType: payload.response.components?.solarType
+                )
                 if let siteName = payload.response.energySiteDisplayName {
                     self.applyEnergySiteDisplayName(for: requestedEnergySiteId, preferred: siteName)
                 }
@@ -2104,6 +2181,16 @@ struct GridStatus: Codable {
     }
 }
 
+struct SiteComponents: Codable {
+    let solar: Bool?
+    let solarType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case solar
+        case solarType = "solar_type"
+    }
+}
+
 struct SiteInfoResponse: Codable {
     let response: SiteInfo
 }
@@ -2119,6 +2206,7 @@ struct SiteInfo: Codable {
     let batteryCount: Double?
     let backupReservePercent: Double?
     let installationDate: Date?
+    let components: SiteComponents?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -2131,6 +2219,7 @@ struct SiteInfo: Codable {
         case batteryCount = "battery_count"
         case backupReservePercent = "backup_reserve_percent"
         case installationDate = "installation_date"
+        case components
     }
 
     var energySiteDisplayName: String? {
@@ -2259,9 +2348,33 @@ struct VehicleDataResponse: Codable {
 
 struct VehicleData: Codable {
     let chargeState: VehicleChargeState?
+    let vehicleConfig: VehicleConfig?
+    let vehicleState: VehicleStateInfo?
 
     enum CodingKeys: String, CodingKey {
         case chargeState = "charge_state"
+        case vehicleConfig = "vehicle_config"
+        case vehicleState = "vehicle_state"
+    }
+}
+
+struct VehicleConfig: Codable {
+    let exteriorColor: String?
+    let paintColorOverride: String?
+    let carType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case exteriorColor = "exterior_color"
+        case paintColorOverride = "paint_color_override"
+        case carType = "car_type"
+    }
+}
+
+struct VehicleStateInfo: Codable {
+    let colorizerPaintRemapEnabled: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case colorizerPaintRemapEnabled = "colorizer_paint_remap_enabled"
     }
 }
 

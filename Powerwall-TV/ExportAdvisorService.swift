@@ -31,6 +31,18 @@ struct ExportAdvisorContext {
     }
 }
 
+struct HouseWeatherSample {
+    let date: Date
+    let location: CLLocation
+    let isDaylight: Bool
+    let cloudCover: Double
+    let condition: WeatherCondition
+    let precipitationMillimetresPerHour: Double
+    let legalPageURL: URL
+    let combinedMarkDarkURL: URL
+    let combinedMarkLightURL: URL
+}
+
 /// Requests are scoped to an immutable site/token snapshot so changing sites cannot mix data.
 struct ExportAdvisorService {
     let baseURL: String
@@ -175,7 +187,39 @@ struct ExportAdvisorService {
         let forecast: Forecast<HourWeather>
         let attribution: WeatherAttribution
         let locationName: String
+        let location: CLLocation
         let end: Date
+    }
+
+    /// The current hour of the advisor's cached forecast, plus the coordinates used for sun position.
+    func houseWeather() async throws -> HouseWeatherSample {
+        let site = try JSONDecoder().decode(SitePayload.self, from: await fleet("site_info")).response
+        guard let name = site.timeZoneIdentifier, let zone = TimeZone(identifier: name) else {
+            throw ExportEstimateError.missingSiteMetadata
+        }
+        let snapshot = try await weather(
+            site: site,
+            zone: zone,
+            now: Date(),
+            address: AdvisorEstimateSettings.current(siteID: siteID).weatherLocation
+        )
+        let now = Date()
+        let hours = snapshot.forecast.forecast
+        guard let hour = hours.filter({ $0.date <= now.addingTimeInterval(90) }).max(by: { $0.date < $1.date })
+                ?? hours.min(by: { $0.date < $1.date }) else {
+            throw ExportEstimateError.incompleteForecast("WeatherKit returned no hours")
+        }
+        return HouseWeatherSample(
+            date: hour.date,
+            location: snapshot.location,
+            isDaylight: hour.isDaylight,
+            cloudCover: hour.cloudCover,
+            condition: hour.condition,
+            precipitationMillimetresPerHour: hour.precipitationAmount.converted(to: .millimeters).value,
+            legalPageURL: snapshot.attribution.legalPageURL,
+            combinedMarkDarkURL: snapshot.attribution.combinedMarkDarkURL,
+            combinedMarkLightURL: snapshot.attribution.combinedMarkLightURL
+        )
     }
 
     private static let weatherCache = AdvisorRequestCache<String, WeatherSnapshot>()
@@ -234,7 +278,7 @@ struct ExportAdvisorService {
             guard ExportForecastCoverage.isComplete(dates: weather.forecast.map(\.date), from: now, through: forecastEnd) else {
                 throw ExportEstimateError.incompleteForecast("WeatherKit did not return the full forecast window")
             }
-            return WeatherSnapshot(forecast: weather, attribution: attribution, locationName: locationName, end: forecastEnd)
+            return WeatherSnapshot(forecast: weather, attribution: attribution, locationName: locationName, location: location, end: forecastEnd)
         }
     }
 }

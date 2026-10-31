@@ -48,6 +48,7 @@ struct SettingsView: View {
     }
     @AppStorage("homeEnergyAdvisor_voiceID") private var advisorVoiceID = "luna"
     @AppStorage("homeEnergyAdvisor_modelID") private var advisorModelID = ""
+    @AppStorage("houseHeadingDegrees") private var houseHeadingDegrees = 180.0
     @State private var grokModels: [GrokAdvisorClient.Model] = []
     @State private var loadingModels = false
     @State private var modelError: String?
@@ -334,6 +335,12 @@ struct SettingsView: View {
                 Toggle("Show schedule (beta)", isOn: $showSchedulerButton)
                 // For debugging vehicles on accounts without a v3 wall connector
                 // Toggle("Show vehicles", isOn: $showVehicles)
+                Stepper(value: $houseHeadingDegrees, in: 0...345, step: 15) {
+                    Text("Garage faces \(HouseHeading.label(houseHeadingDegrees))")
+                }
+                Text("Points the street side of the 3D house so the sun matches this site. South is 180°.")
+                    .font(.footnote)
+                    .foregroundColor(.gray)
                 Toggle("Prevent screen saver from showing", isOn: $preventScreenSaver)
                 if preventScreenSaver {
                     Text("Warning: keeping the screen on may increase power usage and risk burn-in.")
@@ -351,6 +358,7 @@ struct SettingsView: View {
                     sceneScale = 1.0
                     sceneHorizontalOffset = 0.0
                     sceneVerticalOffset = 0.0
+                    houseHeadingDegrees = 180
                 }
             }
 #endif
@@ -468,7 +476,9 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "sceneHorizontalOffset")
         UserDefaults.standard.removeObject(forKey: "sceneVerticalOffset")
         UserDefaults.standard.removeObject(forKey: "lastChargingWallConnectorVIN")
+        UserDefaults.standard.removeObject(forKey: "houseHeadingDegrees")
         viewModel.clearVehicleChargeCache()
+        viewModel.clearVehicleAppearanceCache()
         keepWindowInFront = false
         autoHideSummaryOnOverlap = true
         autoHideButtonsOnOverlap = true
@@ -479,6 +489,7 @@ struct SettingsView: View {
         sceneHorizontalOffset = 0.0
         sceneVerticalOffset = 0.0
         lastChargingWallConnectorVIN = ""
+        houseHeadingDegrees = 180
     }
 }
 
