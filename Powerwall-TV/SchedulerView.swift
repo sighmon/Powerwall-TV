@@ -11,237 +11,110 @@ struct SchedulerView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Group {
-#if os(macOS)
-            macOSBody
-#elseif os(tvOS)
-            tvOSBody
-#else
-            navigationBody
+        ZStack {
+#if !os(tvOS)
+            Rectangle().fill(.background)
+                .ignoresSafeArea()
+            LinearGradient(colors: [.blue.opacity(0.12), .cyan.opacity(0.06), .purple.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
+#endif
+            VStack(spacing: 20) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Scheduler").font(.title2.weight(.semibold))
+                        Text("Change modes while you're away.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        scheduleManager.addSchedule()
+                    } label: {
+                        Label("Add Schedule", systemImage: "plus")
+                    }
+                    .buttonStyle(.bordered)
+                    Button("Done") { dismiss() }
+                        .buttonStyle(.borderedProminent)
+#if !os(tvOS)
+                        .keyboardShortcut(.defaultAction)
+#endif
+                }
+                .padding(.horizontal, 24)
+                formContent
+            }
+            .padding(.top, 24)
+#if os(tvOS)
+            .frame(maxWidth: 1400)
 #endif
         }
+#if os(iOS)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+#endif
+#if os(macOS)
+        .frame(minWidth: 580, idealWidth: 660, minHeight: 580, idealHeight: 740)
+#endif
         .onAppear {
             scheduleManager.scheduleBackgroundRefresh()
         }
     }
 
-    private var navigationBody: some View {
-        NavigationStack {
-            List {
-                Section {
+    private func settingsCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(title).font(.headline)
+            VStack(alignment: .leading, spacing: 16, content: content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(22)
+        .modifier(AdvisorGlassCard(cornerRadius: 24))
+    }
+
+    private var formContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                settingsCard("Scheduler") {
                     schedulerControls
                 }
 
-                Section {
-                    if scheduleManager.schedules.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("No schedules")
-                                .foregroundStyle(.secondary)
-                            Button {
-                                scheduleManager.addSchedule()
-                            } label: {
-                                Label("Create Schedule", systemImage: "calendar.badge.plus")
-                            }
-                        }
-                        .padding(.vertical, 6)
-                    } else {
-                        ForEach(scheduleManager.schedules) { schedule in
-                            PowerwallScheduleRow(schedule: binding(for: schedule), sites: scheduleSites)
-                        }
-                        .onDelete(perform: scheduleManager.deleteSchedules)
-                    }
-                } header: {
-                    Text("Schedules")
-                }
-
-                Section {
-                    if let warning = viewModel.fleetCommandPermissionWarning {
-                        Text(warning)
-                            .foregroundStyle(.orange)
-                        Button {
-                            _ = viewModel.startFleetLoginManually()
-                        } label: {
-                            Label("Re-login with Tesla", systemImage: "person.crop.circle.badge.exclamationmark")
-                        }
-                    }
-                    Button {
-                        scheduleManager.applyDueSchedules(using: viewModel)
-                    } label: {
-                        if scheduleManager.isRunning {
-                            ProgressView()
-                        } else {
-                            Label("Run Due Schedules", systemImage: "bolt.badge.clock")
-                        }
-                    }
-                    Text(scheduleManager.lastRunStatus)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Powerwall Scheduler")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        scheduleManager.addSchedule()
-                    } label: {
-                        Label("Add Schedule", systemImage: "plus")
-                    }
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
-
-#if os(tvOS)
-    private var tvOSBody: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 32) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        schedulerControls
-                    }
-
-                    VStack(alignment: .leading, spacing: 20) {
-                        Text("Schedules")
-                            .font(.headline)
+                if scheduleManager.schedules.isEmpty {
+                    settingsCard("Schedules") {
+                        Text("No schedules")
+                            .font(.footnote)
                             .foregroundStyle(.secondary)
-
-                        if scheduleManager.schedules.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("No schedules")
-                                    .foregroundStyle(.secondary)
-                                Button {
-                                    scheduleManager.addSchedule()
-                                } label: {
-                                    Label("Create Schedule", systemImage: "calendar.badge.plus")
-                                }
-                            }
-                        } else {
-                            ForEach(scheduleManager.schedules) { schedule in
-                                VStack(alignment: .leading, spacing: 18) {
-                                    HStack(alignment: .top, spacing: 20) {
-                                        PowerwallScheduleRow(schedule: binding(for: schedule), sites: scheduleSites)
-                                        Button(role: .destructive) {
-                                            scheduleManager.deleteSchedule(id: schedule.id)
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
-                                        }
-                                    }
-                                    if schedule.id != scheduleManager.schedules.last?.id {
-                                        Divider()
-                                    }
-                                }
-                            }
+                        Button {
+                            scheduleManager.addSchedule()
+                        } label: {
+                            Label("Create Schedule", systemImage: "calendar.badge.plus")
                         }
                     }
+                } else {
+                    ForEach(scheduleManager.schedules) { schedule in
+                        settingsCard(schedule.name.isEmpty ? "Schedule" : schedule.name) {
+                            PowerwallScheduleRow(schedule: binding(for: schedule), sites: scheduleSites)
+                            Button(role: .destructive) {
+                                scheduleManager.deleteSchedule(id: schedule.id)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .accessibilityLabel("Delete Schedule")
+                        }
+                    }
+                }
 
-                    VStack(alignment: .leading, spacing: 16) {
-                        runControls
-                    }
-                }
-                .padding(48)
-            }
-            .navigationTitle("Powerwall Scheduler")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        scheduleManager.addSchedule()
-                    } label: {
-                        Label("Add Schedule", systemImage: "plus")
-                    }
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
+                settingsCard("Run") {
+                    runControls
                 }
             }
+#if !os(tvOS)
+            .textFieldStyle(.roundedBorder)
+#endif
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+#if os(tvOS)
+            .frame(maxWidth: 1400)
+#else
+            .frame(maxWidth: 800)
+#endif
+            .frame(maxWidth: .infinity)
         }
     }
-#endif
-
-#if os(macOS)
-    private var macOSBody: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Powerwall Scheduler")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Spacer()
-                Button {
-                    scheduleManager.addSchedule()
-                } label: {
-                    Label("Add Schedule", systemImage: "plus")
-                }
-                Button("Done") {
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding()
-
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 10) {
-                            schedulerControls
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    GroupBox("Schedules") {
-                        VStack(alignment: .leading, spacing: 14) {
-                            if scheduleManager.schedules.isEmpty {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("No schedules")
-                                        .foregroundStyle(.secondary)
-                                    Button {
-                                        scheduleManager.addSchedule()
-                                    } label: {
-                                        Label("Create Schedule", systemImage: "calendar.badge.plus")
-                                    }
-                                }
-                            } else {
-                                ForEach(scheduleManager.schedules) { schedule in
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        HStack(alignment: .top) {
-                                            PowerwallScheduleRow(schedule: binding(for: schedule), sites: scheduleSites)
-                                            Button {
-                                                scheduleManager.deleteSchedule(id: schedule.id)
-                                            } label: {
-                                                Image(systemName: "trash")
-                                            }
-                                            .buttonStyle(.borderless)
-                                            .accessibilityLabel("Delete Schedule")
-                                        }
-                                        if schedule.id != scheduleManager.schedules.last?.id {
-                                            Divider()
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 10) {
-                            runControls
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding()
-            }
-        }
-        .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 680)
-    }
-#endif
 
     private func binding(for schedule: PowerwallSchedule) -> Binding<PowerwallSchedule> {
         Binding {
@@ -264,22 +137,19 @@ struct SchedulerView: View {
     }
 
     private var schedulerControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 16) {
             Toggle("Scheduler Active", isOn: $scheduleManager.isSchedulerEnabled)
             Text(scheduleManager.isSchedulerEnabled ? "Schedules will run automatically." : "Schedules are saved but will not run.")
+                .font(.footnote)
                 .foregroundStyle(.secondary)
-            Button {
-                scheduleManager.addSchedule()
-            } label: {
-                Label("Add Schedule", systemImage: "plus")
-            }
         }
     }
 
     private var runControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 16) {
             if let warning = viewModel.fleetCommandPermissionWarning {
                 Text(warning)
+                    .font(.footnote)
                     .foregroundStyle(.orange)
                 Button {
                     _ = viewModel.startFleetLoginManually()
@@ -297,6 +167,7 @@ struct SchedulerView: View {
                 }
             }
             Text(scheduleManager.lastRunStatus)
+                .font(.footnote)
                 .foregroundStyle(.secondary)
         }
     }
@@ -307,18 +178,17 @@ private struct PowerwallScheduleRow: View {
     let sites: [ScheduleSiteOption]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                TextField("Name", text: $schedule.name)
-                Toggle("Schedule Enabled", isOn: enabledBinding)
-                    .disabled(schedule.energySiteId == nil)
-            }
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Name").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            TextField("Name", text: $schedule.name)
+            Toggle("Schedule Enabled", isOn: enabledBinding)
+                .disabled(schedule.energySiteId == nil)
 
             ScheduleSitePicker(schedule: $schedule, sites: sites)
 
             if schedule.energySiteId == nil {
                 Text("Select a home before enabling this schedule.")
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(.orange)
             }
 
@@ -331,10 +201,9 @@ private struct PowerwallScheduleRow: View {
             ScheduleTimePicker(title: "End", minutes: $schedule.endMinutes)
 
             Text(scheduleSummary)
-                .font(.caption)
+                .font(.footnote)
                 .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 6)
     }
 
     private var scheduleSummary: String {
@@ -385,9 +254,7 @@ private struct ScheduleSitePicker: View {
     let sites: [ScheduleSiteOption]
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text("Home")
-            Picker("Home", selection: selection) {
+        Picker("Home", selection: selection) {
                 Text("Select Home").tag(String?.none)
                 ForEach(availableSites) { site in
                     Text(site.title).tag(Optional(site.id))
@@ -397,9 +264,7 @@ private struct ScheduleSitePicker: View {
             .pickerStyle(.navigationLink)
 #else
             .pickerStyle(.menu)
-            .labelsHidden()
 #endif
-        }
     }
 
     private var selection: Binding<String?> {
@@ -432,9 +297,7 @@ private struct ScheduleModePicker: View {
     @Binding var mode: PowerwallOperationMode
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(title)
-            Picker(title, selection: $mode) {
+        Picker(title, selection: $mode) {
                 ForEach(PowerwallOperationMode.allCases) { mode in
                     Text(mode.title).tag(mode)
                 }
@@ -443,9 +306,7 @@ private struct ScheduleModePicker: View {
             .pickerStyle(.navigationLink)
 #else
             .pickerStyle(.menu)
-            .labelsHidden()
 #endif
-        }
     }
 }
 
@@ -454,39 +315,38 @@ private struct ScheduleTimePicker: View {
     @Binding var minutes: Int
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(title)
-#if !os(iOS)
-            Spacer()
-#endif
-            Picker("Hour", selection: hourBinding) {
-                ForEach(0..<24, id: \.self) { hour in
-                    Text(String(format: "%02d", hour)).tag(hour)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Picker("Hour", selection: hourBinding) {
+                    ForEach(0..<24, id: \.self) { hour in
+                        Text(String(format: "%02d", hour)).tag(hour)
+                    }
                 }
-            }
 #if os(tvOS)
-            .pickerStyle(.navigationLink)
+                .pickerStyle(.navigationLink)
 #elseif os(iOS)
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .frame(width: 70)
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 70)
 #else
-            .frame(minWidth: 110)
+                .frame(minWidth: 110)
 #endif
-            Picker("Minute", selection: minuteBinding) {
-                ForEach(stride(from: 0, through: 55, by: 5).map { $0 }, id: \.self) { minute in
-                    Text(String(format: "%02d", minute)).tag(minute)
+                Picker("Minute", selection: minuteBinding) {
+                    ForEach(stride(from: 0, through: 55, by: 5).map { $0 }, id: \.self) { minute in
+                        Text(String(format: "%02d", minute)).tag(minute)
+                    }
                 }
-            }
 #if os(tvOS)
-            .pickerStyle(.navigationLink)
+                .pickerStyle(.navigationLink)
 #elseif os(iOS)
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .frame(width: 70)
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 70)
 #else
-            .frame(minWidth: 110)
+                .frame(minWidth: 110)
 #endif
+            }
         }
     }
 
