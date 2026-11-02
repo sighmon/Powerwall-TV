@@ -207,7 +207,11 @@ struct ContentView: View {
 
                     sceneOverlay(
                         in: sceneSize,
-                        showSiteSummaryInScene: !detachSiteSummary
+                        showSiteSummaryInScene: !detachSiteSummary,
+                        offGridOnRibbon: offGridOnRibbon(
+                            callouts: houseCallouts,
+                            sceneFrame: sceneFrame
+                        )
                     )
                         .frame(width: sceneSize.width, height: sceneSize.height)
                         .opacity(showMetrics ? 1 : 0)
@@ -566,8 +570,17 @@ struct ContentView: View {
         return presentation.model == .cybertruck ? "home-charger-cybertruck.png" : "home-charger.png"
     }
 
+    /// Window point of the grid-ribbon midpoint, in the fitted overlay's coordinates.
+    private func offGridOnRibbon(callouts: HouseCalloutPoints?, sceneFrame: CGRect) -> CGPoint? {
+        guard showsHouseScene, let callouts else { return nil }
+        return CGPoint(
+            x: callouts.gridRibbon.x - sceneFrame.minX,
+            y: callouts.gridRibbon.y - sceneFrame.minY
+        )
+    }
+
     @ViewBuilder
-    private func sceneOverlay(in sceneSize: CGSize, showSiteSummaryInScene: Bool) -> some View {
+    private func sceneOverlay(in sceneSize: CGSize, showSiteSummaryInScene: Bool, offGridOnRibbon: CGPoint?) -> some View {
         if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
             Text("Please configure the gateway settings.")
                 .foregroundColor(.gray)
@@ -575,7 +588,8 @@ struct ContentView: View {
             sceneDataOverlay(
                 data: data,
                 sceneSize: sceneSize,
-                showSiteSummaryInScene: showSiteSummaryInScene
+                showSiteSummaryInScene: showSiteSummaryInScene,
+                offGridOnRibbon: offGridOnRibbon
             )
                 .foregroundColor(.white)
         } else {
@@ -597,7 +611,7 @@ struct ContentView: View {
         }
     }
 
-    private func sceneDataOverlay(data: PowerwallData, sceneSize: CGSize, showSiteSummaryInScene: Bool) -> some View {
+    private func sceneDataOverlay(data: PowerwallData, sceneSize: CGSize, showSiteSummaryInScene: Bool, offGridOnRibbon: CGPoint?) -> some View {
         let batteryPercentage = max(0.0, min(1.0, (viewModel.batteryPercentage?.percentage ?? 0) / 100))
         let batteryIndicatorHeight = sceneHeight(0.076, in: sceneSize) * batteryPercentage
         let batteryIndicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0024, in: sceneSize))
@@ -742,8 +756,14 @@ struct ContentView: View {
             }
 
             if viewModel.isOffGrid() {
-                offGridImage(sceneSize: sceneSize)
-                    .position(scenePoint(x: 0.151, y: 0.234, in: sceneSize))
+                if let offGridOnRibbon {
+                    offGridImage(sceneSize: sceneSize)
+                        .position(offGridOnRibbon)
+                        .allowsHitTesting(false)
+                } else if !showsHouseScene {
+                    offGridImage(sceneSize: sceneSize)
+                        .position(scenePoint(x: 0.151, y: 0.234, in: sceneSize))
+                }
             }
         }
         .frame(width: sceneSize.width, height: sceneSize.height)

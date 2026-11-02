@@ -87,16 +87,17 @@ enum HouseSky {
         var sunColor: SIMD3<Float>
     }
 
-    /// High streaks first, then lower puffs as the cover thickens.
+    /// High wisps first, then lower puffs as the cover thickens.
+    /// Heights are metres on the sky card. The old streaks were under half a metre tall.
     static let wisps: [Wisp] = [
-        Wisp(x: -0.62, y: 0.80, depth: -1.4, width: 8.8, height: 0.52, threshold: 0.34, cirrus: true),
-        Wisp(x: 0.08, y: 0.88, depth: -2.2, width: 10.4, height: 0.40, threshold: 0.40, cirrus: true),
-        Wisp(x: 0.60, y: 0.74, depth: -0.8, width: 7.4, height: 0.46, threshold: 0.48, cirrus: true),
-        Wisp(x: -0.34, y: 0.64, depth: 0.3, width: 4.6, height: 1.55, threshold: 0.55, cirrus: false),
-        Wisp(x: 0.40, y: 0.68, depth: -0.4, width: 5.4, height: 1.70, threshold: 0.64, cirrus: false),
-        Wisp(x: -0.04, y: 0.56, depth: 0.7, width: 6.2, height: 1.90, threshold: 0.74, cirrus: false),
-        Wisp(x: 0.70, y: 0.58, depth: 0.1, width: 3.8, height: 1.30, threshold: 0.82, cirrus: false),
-        Wisp(x: -0.74, y: 0.60, depth: -0.9, width: 4.2, height: 1.25, threshold: 0.90, cirrus: false),
+        Wisp(x: -0.62, y: 0.80, depth: -1.4, width: 11.0, height: 3.4, threshold: 0.34, cirrus: true),
+        Wisp(x: 0.08, y: 0.88, depth: -2.2, width: 13.0, height: 3.1, threshold: 0.40, cirrus: true),
+        Wisp(x: 0.60, y: 0.74, depth: -0.8, width: 9.5, height: 2.8, threshold: 0.48, cirrus: true),
+        Wisp(x: -0.34, y: 0.64, depth: 0.3, width: 6.4, height: 3.4, threshold: 0.55, cirrus: false),
+        Wisp(x: 0.40, y: 0.68, depth: -0.4, width: 7.2, height: 3.6, threshold: 0.64, cirrus: false),
+        Wisp(x: -0.04, y: 0.56, depth: 0.7, width: 8.0, height: 4.0, threshold: 0.74, cirrus: false),
+        Wisp(x: 0.70, y: 0.58, depth: 0.1, width: 5.2, height: 2.8, threshold: 0.82, cirrus: false),
+        Wisp(x: -0.74, y: 0.60, depth: -0.9, width: 5.6, height: 2.6, threshold: 0.90, cirrus: false),
     ]
 
     static func placement(altitude: Float, azimuth: Float, heading: Float, cloudCover: Float,
@@ -227,52 +228,12 @@ enum HouseShaderModifiers {
     float fadeEnv = mix(1.0 - environmentAffect, 1.0, environment);
     float3 colour = albedo * fadeEnv * in.ambientLight
                   + nightLight * nightAffect * night * nightLightPower;
-    // Window panes are painted near-white in the atlas so they stay bright
-    // while the walls take the dark grade. The reference art is lit glass.
+    // Window glass in the atlas stays bright while the walls take the dark grade.
     float glass = smoothstep(0.80, 0.84, _surface.diffuse.r);
     colour = mix(colour, _surface.diffuse.rgb, glass);
     float lip = smoothstep(0.55, 0.92, in.doorRib);
     colour += lip * float3(0.07, 0.07, 0.075);
     _output.color = float4(colour, 1.0);
-    """
-
-    /// Flat glass. The bundled glow mask is a radial blob, so sampling it
-    /// lights only the middle of a window.
-    static let windowFragment = """
-    #pragma body
-    _output.color = float4(float3(0.86, 0.87, 0.88), 1.0);
-    """
-}
-
-extension HouseShaderModifiers {
-    /// The baked panel art is a fine cell grid. On the roof it minifies into a few
-    /// large octagons, and the UVs repeat that tile. Draw the grid from the roof's
-    /// own surface instead: along the ridge (model Z) and down the slope.
-    static let solarGeometry = """
-    #pragma varyings
-    float3 solarPos;
-
-    #pragma body
-    out.solarPos = _geometry.position.xyz;
-    """
-
-    static let solarFragment = """
-    #pragma arguments
-    float solarTheme;
-
-    #pragma body
-    float ridge = in.solarPos.z;
-    float slope = in.solarPos.x * 0.8321 - in.solarPos.y * 0.5547;
-    float2 g = float2(ridge * 5.0, slope * 4.2);
-    float2 dist = min(fract(g), 1.0 - fract(g));
-    float lx = 1.0 - smoothstep(0.012, 0.028, dist.x);
-    float ly = 1.0 - smoothstep(0.012, 0.028, dist.y);
-    float line = clamp(max(lx, ly), 0.0, 1.0);
-    float3 cell = float3(0.055, 0.075, 0.12);
-    float3 grid = float3(0.62, 0.67, 0.74);
-    float3 colour = mix(cell, grid, line);
-    float3 tint = mix(float3(0.55, 0.60, 0.70), float3(1.0, 1.0, 1.0), solarTheme);
-    _output.color = float4(colour * tint, 1.0);
     """
 }
 
@@ -299,101 +260,9 @@ enum VehicleModel: String, CaseIterable, Identifiable {
 
 // MARK: - Applying to the loaded scene
 
-/// One roof slope, gathered from the round cell mesh so a single quad can cover it.
-private struct SolarSlope {
-    var points: [SIMD3<Float>] = []
-    var normals: [SIMD3<Float>] = []
-
-    mutating func add(_ point: SIMD3<Float>, normal n: SIMD3<Float>) {
-        let length = simd_length(n)
-        points.append(point)
-        normals.append(length > 1e-5 ? n / length : SIMD3<Float>(0, 1, 0))
-    }
-
-    func fillNodes() -> [SCNNode] {
-        guard points.count > 2 else { return [] }
-        // The cell rims tilt. The sheet uses the flat face, where the normal
-        // runs up the slope and has almost no ridge component.
-        var sum = SIMD3<Float>.zero
-        for normal in normals where abs(normal.z) < 0.08 && normal.y > 0.7 && normal.x > 0.3 {
-            sum += normal
-        }
-        guard simd_length(sum) > 1e-5 else { return [] }
-        let n = simd_normalize(sum)
-        let axis = simd_normalize(cross(n, SIMD3<Float>(0, 0, 1)))
-        let flat = points.indices.compactMap { index -> Float? in
-            let normal = normals[index]
-            guard abs(normal.z) < 0.08 && normal.y > 0.7 && normal.x > 0.3 else { return nil }
-            return simd_dot(n, points[index])
-        }.sorted()
-        guard let first = flat.first, let last = flat.last else { return [] }
-        var split = first
-        var gap: Float = 0
-        for index in 1..<flat.count {
-            let step = flat[index] - flat[index - 1]
-            if step > gap {
-                gap = step
-                split = (flat[index] + flat[index - 1]) * 0.5
-            }
-        }
-        // The two roofs are parallel and about 0.7 m apart along the normal.
-        let bands: [(Float, Float)] = gap > 0.05
-            ? [(first - 0.05, split), (split, last + 0.05)]
-            : [(first - 0.05, last + 0.05)]
-        return bands.compactMap { band in
-            sheet(normal: n, axis: axis, low: band.0, high: band.1)
-        }
-    }
-
-    private func sheet(normal n: SIMD3<Float>, axis: SIMD3<Float>, low: Float, high: Float) -> SCNNode? {
-        var height: Float = -.greatestFiniteMagnitude
-        var alongMin: Float = .greatestFiniteMagnitude
-        var alongMax: Float = -.greatestFiniteMagnitude
-        var ridgeMin: Float = .greatestFiniteMagnitude
-        var ridgeMax: Float = -.greatestFiniteMagnitude
-        var used = 0
-        for point in points {
-            let distance = simd_dot(n, point)
-            if distance < low || distance >= high { continue }
-            used += 1
-            height = max(height, distance)
-            let along = simd_dot(axis, point)
-            alongMin = min(alongMin, along)
-            alongMax = max(alongMax, along)
-            ridgeMin = min(ridgeMin, point.z)
-            ridgeMax = max(ridgeMax, point.z)
-        }
-        guard used > 2 else { return nil }
-        let ridge = SIMD3<Float>(0, 0, 1)
-        // A millimetre proud of the cells, so the quad clears the roof underneath.
-        let lift = height + 0.001
-        func point(_ along: Float, _ ridgePos: Float) -> SCNVector3 {
-            let p = n * lift + axis * along + ridge * ridgePos
-            return SCNVector3(p.x, p.y, p.z)
-        }
-        let verts = [
-            point(alongMin, ridgeMin),
-            point(alongMax, ridgeMin),
-            point(alongMax, ridgeMax),
-            point(alongMin, ridgeMax),
-        ]
-        let indices: [UInt32] = [0, 1, 2, 0, 2, 3]
-        let geometry = SCNGeometry(
-            sources: [SCNGeometrySource(vertices: verts)],
-            elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)]
-        )
-        geometry.firstMaterial = SCNMaterial()
-        let node = SCNNode(geometry: geometry)
-        node.name = "SolarFill"
-        return node
-    }
-}
-
 final class HouseLighting {
     let root: SCNNode
     private var buildingMaterials: [SCNMaterial] = []
-    private var windowMaterials: [SCNMaterial] = []
-    private var solarMaterials: [SCNMaterial] = []
     private var parkedVehicle: SCNNode?
     private(set) var solarOption: SolarOption = .panels
     private(set) var vehicleModel: VehicleModel = .generic
@@ -411,8 +280,12 @@ final class HouseLighting {
     private var skyAim = HouseCameraFraming.subject
     private var skyViewport = CGSize(width: 1280, height: 720)
     private var skyFieldOfView: Float = HouseCameraFraming.verticalFOVDegrees
+    /// Last sky-card half-width. Camera moves reuse it so the wisps are not repositioned.
+    private var skyHalfWidth: Float = -1
     /// Emitter volume relative to a 4,000 m³ reference, so a larger view stays the same density.
     private var coverageScale: CGFloat = 1
+    private var coverageCenter = SIMD3<Float>.zero
+    private var coverageSize = SIMD3<Float>.zero
 
     /// - Parameters:
     ///   - root: the node loaded from ResidentialClassic.usdz (or .glb fallback).
@@ -435,14 +308,8 @@ final class HouseLighting {
         configureBuilding(named: "Home", mask: houseMask, albedoLight: dayGrade, albedoDark: nightGrade, normalYSign: 1)
         // The door slats' normals tilt downward, so overhead light catches them from below.
         configureBuilding(named: "GarageDoor", mask: garageMask, albedoLight: dayGrade, albedoDark: nightGrade, normalYSign: -1)
-        squareWindowPanes(named: "Home")
-        installFilledWindows()
-        for material in materials(under: "Windows") {
-            material.lightingModel = .constant
-            material.isDoubleSided = true
-            material.shaderModifiers = [.fragment: HouseShaderModifiers.windowFragment]
-            windowMaterials.append(material)
-        }
+        // Windows and solar keep the imported meshes. Flat cards and a constant
+        // grid shader hid the cell rims and the recessed window openings.
 
         // These cards are torn alpha planes. SceneKit draws their black RGB as solid
         // wedges, which reads as damage, so they stay out of the view.
@@ -459,23 +326,6 @@ final class HouseLighting {
             }
         }
         installFillLights()
-
-        installSolidSolar(named: "SolarPanels")
-        for name in ["SolarPanels", "SolarRoof"] {
-            let isFill = name == "SolarPanels"
-            for material in materials(under: name) {
-                material.lightingModel = .constant
-                // The cell mesh stays single-sided. The fill sheet is drawn from either side.
-                material.isDoubleSided = isFill
-                material.diffuse.wrapS = .repeat
-                material.diffuse.wrapT = .repeat
-                material.shaderModifiers = [
-                    .geometry: HouseShaderModifiers.solarGeometry,
-                    .fragment: HouseShaderModifiers.solarFragment,
-                ]
-                solarMaterials.append(material)
-            }
-        }
         setSolar(.panels)
         // Stay closed until live wall-connector state says a car is home.
         showVehicle(false)
@@ -507,14 +357,6 @@ final class HouseLighting {
             material.setValue(NSValue(scnVector3: SCNVector3(p.nightLight.x, p.nightLight.y, p.nightLight.z)),
                               forKey: "nightLight")
         }
-        for material in solarMaterials {
-            material.setValue(NSNumber(value: p.theme), forKey: "solarTheme")
-        }
-        // Windows glow when the house is dark.
-        let windowBrightness = 0.25 + 0.75 * (1 - p.theme) * p.nightLightPower
-        for material in windowMaterials {
-            material.setValue(NSNumber(value: windowBrightness), forKey: "windowBrightness")
-        }
         let sun = simd_normalize(p.sunDirection)
         sunLight.simdPosition = sun
         sunLight.look(at: SCNVector3(0, 0.4, 0))
@@ -536,7 +378,9 @@ final class HouseLighting {
         skyAim = skyEye + forward
         skyViewport = viewport
         skyFieldOfView = Float(camera.camera?.fieldOfView ?? CGFloat(HouseCameraFraming.verticalFOVDegrees))
-        layoutSky(animated: false)
+        // Orbit and pan only move the sky card with the camera. Rewriting wisp
+        // opacity here restarts the clouds and they flash.
+        followSky(placeCards: false)
         let holder = root.parent ?? root
         if rainNode.parent !== holder {
             holder.addChildNode(rainNode)
@@ -565,16 +409,21 @@ final class HouseLighting {
         maxB.y += 2.5
         let size = simd_max(maxB - minB, SIMD3<Float>(repeating: 2))
         let center = (minB + maxB) * 0.5
-        let box = SCNBox(width: CGFloat(size.x), height: CGFloat(size.y), length: CGFloat(size.z), chamferRadius: 0)
-        rain.emitterShape = box
-        snow.emitterShape = box
-        let local = holder.convertPosition(SCNVector3(center.x, center.y, center.z), from: nil)
-        rainNode.position = local
-        snowNode.position = local
-        // 4,000 m³ ≈ the framed house view. Scale the count with volume and keep the spacing.
-        coverageScale = CGFloat((size.x * size.y * size.z) / 4000)
-        rain.birthRate = CGFloat(parameters.rainIntensity) * 90 * coverageScale
-        snow.birthRate = CGFloat(parameters.snowIntensity) * 22 * coverageScale
+        let moved = simd_length(center - coverageCenter) > 0.4 || simd_length(size - coverageSize) > 0.4
+        if moved || coverageSize == .zero {
+            coverageCenter = center
+            coverageSize = size
+            let box = SCNBox(width: CGFloat(size.x), height: CGFloat(size.y), length: CGFloat(size.z), chamferRadius: 0)
+            rain.emitterShape = box
+            snow.emitterShape = box
+            let local = holder.convertPosition(SCNVector3(center.x, center.y, center.z), from: nil)
+            rainNode.position = local
+            snowNode.position = local
+            // 4,000 m³ ≈ the framed house view. Scale the count with volume and keep the spacing.
+            coverageScale = CGFloat((size.x * size.y * size.z) / 4000)
+            rain.birthRate = CGFloat(parameters.rainIntensity) * 90 * coverageScale
+            snow.birthRate = CGFloat(parameters.snowIntensity) * 22 * coverageScale
+        }
     }
 
     // MARK: Solar & vehicle
@@ -703,6 +552,55 @@ final class HouseLighting {
         root.addChildNode(skyRig)
     }
 
+    /// Keeps the sky card in front of the camera. Card layout is left alone while
+    /// the view is only orbiting or panning, so the wisps keep their drift.
+    private func followSky(placeCards: Bool) {
+        guard skyViewport.width > 1, skyViewport.height > 1 else { return }
+        let holder = root.parent ?? root
+        if skyRig.parent !== holder {
+            holder.addChildNode(skyRig)
+        }
+        let forward = simd_normalize(skyAim - skyEye)
+        let right = simd_normalize(cross(forward, SIMD3<Float>(0, 1, 0)))
+        let up = simd_normalize(cross(right, forward))
+        let distance: Float = 22
+        let center = skyEye + forward * distance + up * (0.52 * tan(skyFieldOfView * .pi / 180 / 2) * distance)
+        let halfHeight = tan(skyFieldOfView * .pi / 180 / 2) * distance
+        let aspect = Float(skyViewport.width / max(skyViewport.height, 1))
+        let halfWidth = halfHeight * max(aspect, 0.01)
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        var basis = matrix_identity_float4x4
+        basis.columns.0 = SIMD4<Float>(right.x, right.y, right.z, 0)
+        basis.columns.1 = SIMD4<Float>(up.x, up.y, up.z, 0)
+        // Plane faces +Z. Point that axis back at the camera.
+        basis.columns.2 = SIMD4<Float>(-forward.x, -forward.y, -forward.z, 0)
+        basis.columns.3 = SIMD4<Float>(center.x, center.y, center.z, 1)
+        skyRig.simdWorldTransform = basis
+        if placeCards || abs(halfWidth - skyHalfWidth) > 0.01 {
+            skyHalfWidth = halfWidth
+            let sky = HouseSky.placement(
+                altitude: parameters.sunAltitude,
+                azimuth: parameters.sunAzimuth,
+                heading: parameters.houseHeading,
+                cloudCover: parameters.cloudCover,
+                eye: skyEye,
+                target: skyAim,
+                viewport: skyViewport,
+                fieldOfView: skyFieldOfView
+            )
+            let localSun = SIMD3<Float>(sky.screenX * halfWidth, (sky.screenY - 0.52) * halfHeight, 0)
+            sunDisc.simdPosition = localSun
+            sunHalo.simdPosition = localSun
+            sunDisc.scale = SCNVector3(sky.discRadius, sky.discRadius, 1)
+            sunHalo.scale = SCNVector3(sky.haloRadius, sky.haloRadius, 1)
+            for (card, wisp) in zip(cloudCards, HouseSky.wisps) {
+                card.simdPosition = SIMD3<Float>(wisp.x * halfWidth * 0.92, (wisp.y - 0.52) * halfHeight, wisp.depth)
+            }
+        }
+        SCNTransaction.commit()
+    }
+
     /// Moves the sun along the visible arc and shows the wisps for the current cover.
     /// Positions are applied without the lighting fade so a viewport change does not slide the sky.
     private func layoutSky(animated: Bool) {
@@ -717,36 +615,7 @@ final class HouseLighting {
             viewport: skyViewport,
             fieldOfView: skyFieldOfView
         )
-        let holder = root.parent ?? root
-        if skyRig.parent !== holder {
-            holder.addChildNode(skyRig)
-        }
-        let forward = simd_normalize(skyAim - skyEye)
-        let right = simd_normalize(cross(forward, SIMD3<Float>(0, 1, 0)))
-        let up = simd_normalize(cross(right, forward))
-        let center = skyEye + forward * 22 + up * (0.52 * tan(skyFieldOfView * .pi / 180 / 2) * 22)
-        SCNTransaction.begin()
-        SCNTransaction.disableActions = true
-        var basis = matrix_identity_float4x4
-        basis.columns.0 = SIMD4<Float>(right.x, right.y, right.z, 0)
-        basis.columns.1 = SIMD4<Float>(up.x, up.y, up.z, 0)
-        // Plane faces +Z. Point that axis back at the camera.
-        basis.columns.2 = SIMD4<Float>(-forward.x, -forward.y, -forward.z, 0)
-        basis.columns.3 = SIMD4<Float>(center.x, center.y, center.z, 1)
-        skyRig.simdWorldTransform = basis
-
-        let halfHeight = tan(skyFieldOfView * .pi / 180 / 2) * 22
-        let aspect = Float(skyViewport.width / max(skyViewport.height, 1))
-        let halfWidth = halfHeight * max(aspect, 0.01)
-        let localSun = SIMD3<Float>(sky.screenX * halfWidth, (sky.screenY - 0.52) * halfHeight, 0)
-        sunDisc.simdPosition = localSun
-        sunHalo.simdPosition = localSun
-        sunDisc.scale = SCNVector3(sky.discRadius, sky.discRadius, 1)
-        sunHalo.scale = SCNVector3(sky.haloRadius, sky.haloRadius, 1)
-        for (holder, wisp) in zip(cloudCards, HouseSky.wisps) {
-            holder.simdPosition = SIMD3<Float>(wisp.x * halfWidth * 0.92, (wisp.y - 0.52) * halfHeight, wisp.depth)
-        }
-        SCNTransaction.commit()
+        followSky(placeCards: true)
 
         SCNTransaction.begin()
         SCNTransaction.animationDuration = animated ? 1.5 : 0
@@ -808,88 +677,6 @@ final class HouseLighting {
         }
     }
 
-    /// The street windows are octagonal holes in the side wall, and the glass sits
-    /// behind them, so the corners stay dark. A card on each pane covers the hole
-    /// out to a rectangle. Bounds are the opening lips on the wall at x ≈ 0.
-    private func installFilledWindows() {
-        guard let windows = root.childNode(withName: "Windows", recursively: true) else { return }
-        windows.enumerateHierarchy { child, _ in
-            if child.geometry != nil { child.isHidden = true }
-        }
-        let x: Float = 0.014
-        // A few millimetres past the lip, so the card covers the chamfered corners.
-        let panes: [(Float, Float, Float, Float)] = [
-            (0.221, 0.407, -1.100, -0.813),
-            (0.432, 0.618, -1.100, -0.813),
-            (0.221, 0.407, -0.787, -0.502),
-            (0.432, 0.618, -0.787, -0.502),
-        ]
-        var verts: [SCNVector3] = []
-        var indices: [UInt32] = []
-        for pane in panes {
-            let base = UInt32(verts.count)
-            // +X faces the camera. This winding points the front at +X.
-            verts += [
-                SCNVector3(x, pane.0, pane.2),
-                SCNVector3(x, pane.1, pane.2),
-                SCNVector3(x, pane.1, pane.3),
-                SCNVector3(x, pane.0, pane.3),
-            ]
-            indices += [base, base + 1, base + 2, base, base + 2, base + 3]
-        }
-        let geometry = SCNGeometry(
-            sources: [SCNGeometrySource(vertices: verts)],
-            elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)]
-        )
-        geometry.firstMaterial = SCNMaterial()
-        let node = SCNNode(geometry: geometry)
-        node.name = "WindowPanes"
-        windows.addChildNode(node)
-    }
-
-    /// The panel mesh is a field of round cells, so the roof shows through between them.
-    /// Replace each camera-facing slope with one quad across the cell footprint.
-    private func installSolidSolar(named name: String) {
-        guard let solar = root.childNode(withName: name, recursively: true) else { return }
-        var slope = SolarSlope()
-        solar.enumerateHierarchy { child, _ in
-            guard let geometry = child.geometry,
-                  let positions = geometry.sources(for: .vertex).first,
-                  let normals = geometry.sources(for: .normal).first else { return }
-            let pos = HouseLighting.components(positions)
-            let nor = HouseLighting.components(normals)
-            let count = min(pos.count, nor.count) / 3
-            for i in 0..<count {
-                let n = SIMD3(nor[i * 3], nor[i * 3 + 1], nor[i * 3 + 2])
-                if n.y < 0.55 || n.x < 0.2 { continue }
-                let p = SIMD3(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2])
-                slope.add(p, normal: n)
-            }
-            child.isHidden = true
-        }
-        for node in slope.fillNodes() {
-            solar.addChildNode(node)
-        }
-    }
-
-    /// The street windows are four rounded cutouts in the home atlas. Fill each one
-    /// out to a rectangle of lit glass, which is how they read in home.png.
-    /// Rects are top-left pixels of the 1024² day atlas.
-    private func squareWindowPanes(named name: String) {
-        // Cover the rounded frame as well as the dark glass, so each opening
-        // reads as a rectangle. A gap is left for the mullion.
-        let panes = [
-            CGRect(x: 612, y: 588, width: 80, height: 124),
-            CGRect(x: 700, y: 588, width: 80, height: 124),
-            CGRect(x: 612, y: 712, width: 80, height: 116),
-            CGRect(x: 700, y: 712, width: 80, height: 116),
-        ]
-        for material in materials(under: name) {
-            guard let painted = HouseTexture.squarePanes(material.diffuse.contents, panes: panes) else { continue }
-            material.diffuse.contents = painted
-        }
-    }
-
     /// Fans a cap across boundary loops that are long in one direction and only a few
     /// centimetres in the other two. Window holes, the garage mouth, the open underside
     /// and the solar rims are larger than that and stay open.
@@ -900,25 +687,6 @@ final class HouseLighting {
                   let sealed = HouseMeshSeam.sealThinCracks(geometry) else { return }
             child.geometry = sealed
         }
-    }
-
-    /// Packed float components of a geometry source. Positions and normals are three floats.
-    fileprivate static func components(_ source: SCNGeometrySource) -> [Float] {
-        let count = source.vectorCount * source.componentsPerVector
-        var out = [Float](repeating: 0, count: count)
-        source.data.withUnsafeBytes { raw in
-            guard let base = raw.baseAddress else { return }
-            for i in 0..<source.vectorCount {
-                let start = base.advanced(by: i * source.dataStride + source.dataOffset)
-                for c in 0..<source.componentsPerVector {
-                    out[i * source.componentsPerVector + c] = start
-                        .advanced(by: c * source.bytesPerComponent)
-                        .assumingMemoryBound(to: Float.self)
-                        .pointee
-                }
-            }
-        }
-        return out
     }
 
     private func materials(under name: String) -> [SCNMaterial] {
@@ -1084,24 +852,26 @@ enum HouseSkyArt {
     static let sunCore = radialImage(size: 128, inner: 0.16, outer: 0.62, peak: 1)
     static let sunGlow = radialImage(size: 128, inner: 0.0, outer: 0.92, peak: 0.45)
     static let cirrus = cloudImage(
-        width: 512, height: 64,
+        width: 512, height: 256,
         blobs: [
-            Blob(x: -0.55, y: 0.05, rx: 0.28, ry: 0.08, amp: 0.55),
-            Blob(x: -0.18, y: -0.02, rx: 0.22, ry: 0.05, amp: 0.4),
-            Blob(x: 0.16, y: 0.04, rx: 0.26, ry: 0.06, amp: 0.5),
-            Blob(x: 0.52, y: -0.03, rx: 0.24, ry: 0.05, amp: 0.35),
+            Blob(x: -0.55, y: 0.18, rx: 0.34, ry: 0.30, amp: 0.55),
+            Blob(x: -0.22, y: -0.10, rx: 0.30, ry: 0.26, amp: 0.48),
+            Blob(x: 0.12, y: 0.22, rx: 0.32, ry: 0.28, amp: 0.52),
+            Blob(x: 0.48, y: -0.16, rx: 0.30, ry: 0.24, amp: 0.42),
+            Blob(x: 0.02, y: 0.00, rx: 0.46, ry: 0.20, amp: 0.28),
         ],
-        shred: 14
+        shred: 9
     )
     static let puff = cloudImage(
-        width: 320, height: 140,
+        width: 384, height: 256,
         blobs: [
-            Blob(x: -0.28, y: 0.02, rx: 0.34, ry: 0.16, amp: 0.55),
-            Blob(x: 0.05, y: 0.08, rx: 0.28, ry: 0.12, amp: 0.45),
-            Blob(x: 0.32, y: -0.04, rx: 0.30, ry: 0.14, amp: 0.4),
-            Blob(x: -0.02, y: -0.10, rx: 0.18, ry: 0.08, amp: 0.3),
+            Blob(x: -0.28, y: 0.12, rx: 0.38, ry: 0.32, amp: 0.55),
+            Blob(x: 0.08, y: 0.20, rx: 0.32, ry: 0.28, amp: 0.48),
+            Blob(x: 0.34, y: -0.06, rx: 0.34, ry: 0.30, amp: 0.42),
+            Blob(x: -0.04, y: -0.18, rx: 0.28, ry: 0.24, amp: 0.36),
+            Blob(x: 0.16, y: 0.02, rx: 0.22, ry: 0.18, amp: 0.28),
         ],
-        shred: 7
+        shred: 5
     )
 
     static func material(_ image: CGImage, additive: Bool) -> SCNMaterial {
@@ -1443,59 +1213,6 @@ enum HouseMeshSeam {
             }
         }
         return values
-    }
-}
-
-// MARK: - Textures matched to home.png
-
-enum HouseTexture {
-    /// `panes` are top-left rectangles in a 1024² atlas. They are scaled to the image.
-    static func squarePanes(_ contents: Any?, panes: [CGRect]) -> Any? {
-        guard let source = cgImage(from: contents) else { return nil }
-        let width = source.width
-        let height = source.height
-        let scale = CGFloat(width) / 1024
-        return image(width: width, height: height) { context in
-            context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
-            context.setFillColor(CGColor(red: 0.86, green: 0.87, blue: 0.88, alpha: 1))
-            for pane in panes {
-                let paneWidth = pane.width * scale
-                let paneHeight = pane.height * scale
-                let x = pane.origin.x * scale
-                let y = CGFloat(height) - pane.origin.y * scale - paneHeight
-                context.fill(CGRect(x: x, y: y, width: paneWidth, height: paneHeight))
-            }
-        }
-    }
-
-    private static func image(width: Int, height: Int, draw: (CGContext) -> Void) -> Any {
-        let space = CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(
-            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-            space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return CGColor(gray: 0.2, alpha: 1) as Any }
-        draw(context)
-        guard let rendered = context.makeImage() else { return CGColor(gray: 0.2, alpha: 1) as Any }
-        #if canImport(UIKit)
-        return UIImage(cgImage: rendered)
-        #elseif canImport(AppKit)
-        return NSImage(cgImage: rendered, size: NSSize(width: width, height: height))
-        #else
-        return rendered
-        #endif
-    }
-
-    private static func cgImage(from contents: Any?) -> CGImage? {
-        #if canImport(AppKit)
-        if let image = contents as? NSImage {
-            var proposed = CGRect(origin: .zero, size: image.size)
-            return image.cgImage(forProposedRect: &proposed, context: nil, hints: nil)
-        }
-        #endif
-        #if canImport(UIKit)
-        if let image = contents as? UIImage { return image.cgImage }
-        #endif
-        return nil
     }
 }
 

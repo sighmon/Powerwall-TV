@@ -130,8 +130,10 @@ struct GaragePresentation: Equatable {
     ) -> GaragePresentation {
         let connectors = data?.wallConnectors ?? []
         let showWallConnector = !connectors.isEmpty
+        let connectorPower = connectors.reduce(0.0) { $0 + ($1.wallConnectorPower ?? 0) }
+        // The cable animates for charging and for vehicle-to-home. Either one parks a car.
         let showVehicle = showWallConnector && (
-            connectors.reduce(0.0) { $0 + ($1.wallConnectorPower ?? 0) } > 10
+            abs(connectorPower) > 10
                 || connectors.contains { $0.wallConnectorState == 1.0 }
                 || connectors.contains(where: \.isVehicleConnected)
         )

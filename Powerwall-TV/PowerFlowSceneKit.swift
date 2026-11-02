@@ -86,6 +86,7 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
     private var snapshot: PowerFlowSnapshot?
     private var camera = SIMD3<Float>(7.55, 5.7, 9.75)
     private var clearances: [PowerFlowClearance] = []
+    private var connectorPlug: SIMD3<Float>?
 
     func attach(house: SCNNode, cameraPosition: SIMD3<Float>) {
         lock.lock()
@@ -94,6 +95,7 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
         self.house = house
         camera = cameraPosition
         clearances = PowerFlowObstacles.clearances(house: house)
+        connectorPlug = PowerFlowObstacles.wallConnectorPlug(house: house)
         installLocked()
     }
 
@@ -126,7 +128,7 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
         guard let house else { return }
         let next = PowerFlowSceneKitRenderer(
             house: house,
-            animator: PowerFlowAnimator(solarTerminateAt: solarTerminate, camera: camera, clearances: clearances)
+            animator: PowerFlowAnimator(solarTerminateAt: solarTerminate, camera: camera, clearances: clearances, connectorPlug: connectorPlug)
         )
         if let snapshot { next.update(snapshot) }
         renderer = next
@@ -157,6 +159,29 @@ enum PowerFlowObstacles {
             // No pad. Solar meets the top face and the grid meets the bottom face.
             return PowerFlowClearance(lower: minBound, upper: maxBound, inset: 0)
         }
+    }
+
+    /// Front-bottom centre of the wall connector, in the house's ribbon space.
+    /// The charger cable leaves that face.
+    static func wallConnectorPlug(house: SCNNode) -> SIMD3<Float>? {
+        guard let node = house.childNode(withName: "WallConnector", recursively: true) else { return nil }
+        let box = node.boundingBox
+        let lo = SIMD3<Float>(Float(box.min.x), Float(box.min.y), Float(box.min.z))
+        let hi = SIMD3<Float>(Float(box.max.x), Float(box.max.y), Float(box.max.z))
+        let intoHouse = house.simdWorldTransform.inverse * node.simdWorldTransform
+        var minBound = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var maxBound = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        for x in [lo.x, hi.x] {
+            for y in [lo.y, hi.y] {
+                for z in [lo.z, hi.z] {
+                    let point = intoHouse * SIMD4<Float>(x, y, z, 1)
+                    let corner = SIMD3<Float>(point.x, point.y, point.z)
+                    minBound = min(minBound, corner)
+                    maxBound = max(maxBound, corner)
+                }
+            }
+        }
+        return SIMD3((minBound.x + maxBound.x) * 0.5, minBound.y, maxBound.z)
     }
 
     /// Drawn after the ribbons so the units cover the cables that run through them.

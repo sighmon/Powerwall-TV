@@ -31,10 +31,16 @@ struct PowerFlowColor: Equatable, Hashable, Sendable {
 }
 
 enum PowerFlowStyle {
-    /// WireDisplay.gd base_color = Color8(56, 56, 56)
-    /// Idle wires were Tesla's #383838, which disappears on this dark house.
-    /// 0x5C5C5C keeps the pulse colours and sits a step darker than the previous grey.
-    static let baseColor = PowerFlowColor(hex: 0x5C5C5C)
+    /// Idle track behind the pulse. Tesla's #383838 disappears on this house.
+    /// Graded walls render near RGB(52, 52, 55). Matching 75% of that was too dark.
+    /// The track now shows near RGB(60, 60, 63). The pipe multiplies by the baked
+    /// shade (0.5 on the home and Powerwall runs) and by `brightness` (2.2), so the
+    /// stored colour is the shown grey divided by that gain.
+    static let baseColor = PowerFlowColor(
+        r: (60.0 / 255) / 1.1,
+        g: (60.0 / 255) / 1.1,
+        b: (63.0 / 255) / 1.1
+    )
     /// WireDisplay.gd DEFAULT_WIRE_COLORS, keyed by the wire's *source* component.
     static let defaultWireColors: [PowerFlowComponent: PowerFlowColor] = [
         .solar: PowerFlowColor(hex: 0xFFC107),
@@ -179,6 +185,33 @@ struct PowerFlowPathPoint: Sendable {
     let alpha: Float
 }
 
+extension PowerFlowLayout {
+    /// Point `fraction` of the way along a baked ribbon, from the house end to the far end.
+    static func point(along name: String, fraction: Float) -> SIMD3<Float>? {
+        let points = paths[name] ?? []
+        guard let first = points.first?.position else { return nil }
+        guard points.count >= 2 else { return first }
+        var travelled: Float = 0
+        var spans: [Float] = []
+        spans.reserveCapacity(points.count - 1)
+        for index in 1..<points.count {
+            let span = simd_length(points[index].position - points[index - 1].position)
+            spans.append(span)
+            travelled += span
+        }
+        let target = travelled * min(max(fraction, 0), 1)
+        var cursor: Float = 0
+        for (index, span) in spans.enumerated() {
+            if cursor + span >= target || index == spans.count - 1 {
+                let t = span > 1e-5 ? min(max((target - cursor) / span, 0), 1) : 0
+                return simd_mix(points[index].position, points[index + 1].position, SIMD3(repeating: t))
+            }
+            cursor += span
+        }
+        return points.last?.position ?? first
+    }
+}
+
 struct PowerFlowPathGroup: Sendable {
     let name: String
     /// (path component, other component). A wire whose source is the first entry flows IN.
@@ -196,8 +229,7 @@ struct PowerFlowPathGroup: Sendable {
                            pairs: [(.load, .battery), (.load, .solar), (.load, .grid), (.load, .meter), (.load, .vehicle1)],
                            delegates: [["Home_1A"], ["Home_2A", "Home_2B"], ["Home_3A", "Home_3B", "Home_3C"]], terminateAt: 1000),
         PowerFlowPathGroup(name: "Powerwall",
-                           pairs: [(.battery, .meter), (.battery, .load), (.battery, .grid), (.battery, .solar),
-                                   (.vehicle1, .meter), (.vehicle1, .load), (.vehicle1, .grid)],
+                           pairs: [(.battery, .meter), (.battery, .load), (.battery, .grid), (.battery, .solar)],
                            delegates: [["Powerwall_1A"], ["Powerwall_2A", "Powerwall_2B"]], terminateAt: 1000),
         PowerFlowPathGroup(name: "Solar",
                            pairs: [(.solar, .meter), (.solar, .grid), (.solar, .load), (.solar, .battery)],
@@ -236,6 +268,13 @@ enum PowerFlowRemapper {
             }
             if drawn.isEmpty, let m = firstMatch { drawn = [(m.0, .idle)] }
             guard !drawn.isEmpty else { continue }
+            // The Powerwall has one cable on the wall. A second source (solar and the
+            // grid both charging, or the car's meter hop) used to add Powerwall_2B
+            // beside it, so the two ribbons ran to and from the unit at once.
+            if g.name == "Powerwall", drawn.count > 1,
+               let strongest = drawn.max(by: { abs($0.0.watts) < abs($1.0.watts) }) {
+                drawn = [strongest]
+            }
             // Tesla prints an error and draws nothing when there is no delegate for the count; we clamp.
             let names = g.delegates[min(drawn.count, g.delegates.count) - 1]
             for (name, (w, dir)) in zip(names, drawn) {
@@ -367,7 +406,9 @@ struct PowerFlowRibbon: Sendable {
     /// How far the pipe stands off the baked centreline, toward the camera.
     static let thickness: Float = 0.008
 
-    init?(name: String, points: [PowerFlowPathPoint], terminateAt: Float, step: Float = 0.1, widthScale: Float = 1, camera: SIMD3<Float>? = nil, clearances: [PowerFlowClearance] = []) {
+    init?(name: String, points: [PowerFlowPathPoint], terminateAt: Float, step: Float = 0.1, widthScale: Float = 1, camera: SIMD3<Float>? = nil, clearances: [PowerFlowClearance] = [], plug: SIMD3<Float>? = nil) {
+        let routed = Self.meeting(Self.centreline(points), plug: plug)
+        let points = plug == nil ? routed : Self.smoothed(routed)
         guard points.count >= 2 else { return nil }
         let uEnd = min(points[points.count - 1].u, terminateAt)
         func sample(_ u: Float) -> (SIMD3<Float>, SIMD3<Float>, Float, Float) {
@@ -487,6 +528,85 @@ struct PowerFlowRibbon: Sendable {
         self.name = name; self.corners = corners; self.midU = mid; self.shade = sh; self.alpha = al
     }
 
+    /// The baked charger run sits in front of the garage door, about 16 cm ahead of
+    /// the wall connector. Ease that correction out along the drop, which stays left
+    /// of the door, then leave the ground run on the baked path.
+    private static func meeting(_ points: [PowerFlowPathPoint], plug: SIMD3<Float>?) -> [PowerFlowPathPoint] {
+        guard let plug, let first = points.first else { return points }
+        let delta = plug - first.position
+        guard simd_length(delta) > 0.001 else { return points }
+        var lowIndex = 0
+        var lowY = points[0].position.y
+        for (index, point) in points.enumerated() where point.position.y < lowY {
+            lowY = point.position.y
+            lowIndex = index
+        }
+        var lengthToLow: Float = 0
+        if lowIndex > 0 {
+            for index in 1...lowIndex {
+                lengthToLow += simd_length(points[index].position - points[index - 1].position)
+            }
+        }
+        lengthToLow = max(lengthToLow, 0.05)
+        var travelled: Float = 0
+        return points.enumerated().map { index, point in
+            if index > 0 {
+                travelled += simd_length(point.position - points[index - 1].position)
+            }
+            let t = index >= lowIndex ? 1 : min(max(travelled / lengthToLow, 0), 1)
+            let fade = 1 - t * t * (3 - 2 * t)
+            return PowerFlowPathPoint(
+                u: point.u,
+                position: point.position + delta * fade,
+                side: point.side,
+                shade: point.shade,
+                alpha: point.alpha
+            )
+        }
+    }
+
+    /// Rounds interior bends. The ends stay put, so the cable still meets the connector and the car.
+    private static func smoothed(_ points: [PowerFlowPathPoint], passes: Int = 3) -> [PowerFlowPathPoint] {
+        guard points.count >= 4 else { return points }
+        var current = points
+        for _ in 0..<passes {
+            var next = current
+            for index in 1..<(current.count - 1) {
+                let position = (current[index - 1].position + current[index].position * 2 + current[index + 1].position) * 0.25
+                let side = (current[index - 1].side + current[index].side * 2 + current[index + 1].side) * 0.25
+                next[index] = PowerFlowPathPoint(
+                    u: current[index].u,
+                    position: position,
+                    side: side,
+                    shade: current[index].shade,
+                    alpha: current[index].alpha
+                )
+            }
+            current = next
+        }
+        return current
+    }
+
+    /// The cable bake recorded both edges of the ribbon as well as its centre. Those
+    /// extra samples have almost no width and sit a centimetre off the run, which
+    /// pinches the pipe. Other paths already sit on the centreline.
+    private static func centreline(_ points: [PowerFlowPathPoint]) -> [PowerFlowPathPoint] {
+        guard points.count >= 3 else { return points }
+        var kept: [PowerFlowPathPoint] = []
+        kept.reserveCapacity(points.count)
+        for (index, point) in points.enumerated() {
+            let isEnd = index == 0 || index == points.count - 1
+            if !isEnd && simd_length(point.side) < 0.01 { continue }
+            if let previous = kept.last, !isEnd {
+                let deltaU = point.u - previous.u
+                let speed = deltaU > 1e-4 ? simd_length(point.position - previous.position) / deltaU : 0
+                if speed > 1.2 { continue }
+            }
+            kept.append(point)
+        }
+        return kept.count >= 2 ? kept : points
+    }
+
     /// Drops a segment that sits inside a clearance box, and trims one that only enters it.
     private static func clip(_ start: SIMD3<Float>, _ end: SIMD3<Float>, _ boxes: [PowerFlowClearance], camera: SIMD3<Float>?) -> (SIMD3<Float>, SIMD3<Float>)? {
         var start = start, end = end
@@ -534,9 +654,6 @@ final class PowerFlowAnimator {
     /// Tesla's per-vertex shade is about 0.5, which halves the pulse. 2.2 puts the
     /// moving colour back near the authored hex on this dark house.
     var brightness: Float = 2.2
-    /// Show the vehicle's METER->VEHICLE_1 wire on the Powerwall path (Tesla pairs allow it).
-    var showVehicleOnPowerwallPath = true
-
     private(set) var snapshot = PowerFlowSnapshot()
     private(set) var wires: [PowerFlowWire] = []
     private(set) var states: [String: PowerFlowPathState] = [:]
@@ -544,12 +661,13 @@ final class PowerFlowAnimator {
 
     /// `solarTerminateAt` is 2.2 for rooftop panels and 1000 for a solar roof, matching Tesla's shader.
     /// `clearances` are the Powerwall and gateway, expanded so a pipe cannot enter them.
-    init(layout: [String: [PowerFlowPathPoint]] = PowerFlowLayout.paths, step: Float = 0.1, solarTerminateAt: Float = 2.2, camera: SIMD3<Float>? = nil, clearances: [PowerFlowClearance] = []) {
+    init(layout: [String: [PowerFlowPathPoint]] = PowerFlowLayout.paths, step: Float = 0.1, solarTerminateAt: Float = 2.2, camera: SIMD3<Float>? = nil, clearances: [PowerFlowClearance] = [], connectorPlug: SIMD3<Float>? = nil) {
         var rs: [PowerFlowRibbon] = []
         for g in PowerFlowPathGroup.all {
             let terminateAt = g.name == "Solar" ? solarTerminateAt : g.terminateAt
             for name in Set(g.delegates.flatMap { $0 }).sorted() {
-                if let pts = layout[name], let r = PowerFlowRibbon(name: name, points: pts, terminateAt: terminateAt, step: step, camera: camera, clearances: clearances) { rs.append(r) }
+                let plug = name.hasPrefix("Vehicle") ? connectorPlug : nil
+                if let pts = layout[name], let r = PowerFlowRibbon(name: name, points: pts, terminateAt: terminateAt, step: step, camera: camera, clearances: clearances, plug: plug) { rs.append(r) }
             }
         }
         ribbons = rs
@@ -558,12 +676,7 @@ final class PowerFlowAnimator {
     func update(_ s: PowerFlowSnapshot) {
         snapshot = s
         wires = PowerFlowSolver.wires(for: s, thresholdW: thresholdW)
-        var groups = PowerFlowPathGroup.all
-        if !showVehicleOnPowerwallPath, let i = groups.firstIndex(where: { $0.name == "Powerwall" }) {
-            let g = groups[i]
-            groups[i] = PowerFlowPathGroup(name: g.name, pairs: g.pairs.filter { $0.0 != .vehicle1 }, delegates: g.delegates, terminateAt: g.terminateAt)
-        }
-        states = PowerFlowRemapper.remap(wires, groups: groups)
+        states = PowerFlowRemapper.remap(wires)
     }
 
     /// Per-quad RGBA for `ribbon` at absolute time `seconds`, or nil if the path is hidden.

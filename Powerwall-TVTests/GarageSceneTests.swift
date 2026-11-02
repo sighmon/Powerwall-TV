@@ -83,6 +83,15 @@ struct GarageSceneTests {
         let empty = GaragePresentation.make(data: idle, fallbackVIN: modelY, appearances: [:], solar: .hidden)
         #expect(empty.showWallConnector)
         #expect(!empty.showVehicle)
+
+        let exporting = PowerwallData(
+            battery: charging.battery,
+            load: charging.load,
+            solar: charging.solar,
+            site: charging.site,
+            wallConnectors: [.init(vin: nil, din: "1", wallConnectorState: nil, wallConnectorPower: -4000)]
+        )
+        #expect(GaragePresentation.make(data: exporting, fallbackVIN: "", appearances: [:], solar: .panels).showVehicle)
         #expect(empty.solar == .hidden)
         #expect(GaragePresentation.make(data: nil, fallbackVIN: "", appearances: [:], solar: .panels).showWallConnector == false)
     }
@@ -171,6 +180,7 @@ struct GarageSceneTests {
         let thick = HouseSky.wisps.filter { !$0.cirrus && HouseSky.wispOpacity(threshold: $0.threshold, cloudCover: 0.5, cirrus: false) > 0.2 }
         #expect(!thin.isEmpty)
         #expect(thick.isEmpty)
+        #expect(HouseSky.wisps.allSatisfy { $0.height >= 2.6 && $0.width > $0.height })
     }
 
     @Test func clockSunRisesOnTheLeftAndSetsOnTheRight() {
@@ -214,6 +224,19 @@ struct GarageSceneTests {
         #expect(vehicle.response.vehicleConfig?.exteriorColor == "StealthGrey")
         #expect(vehicle.response.vehicleConfig?.carType == "modely")
         #expect(vehicle.response.vehicleState?.colorizerPaintRemapEnabled == false)
+    }
+
+    @Test func powerwallKeepsASingleRibbon() {
+        let bothWays = PowerFlowSnapshot(solarW: 1000, batteryW: -3000, gridW: 2500, homeW: 500)
+        let charging = PowerFlowRemapper.remap(PowerFlowSolver.wires(for: bothWays))
+        #expect(charging.keys.filter { $0.hasPrefix("Powerwall") } == ["Powerwall_1A"])
+
+        let withCar = PowerFlowSnapshot(
+            solarW: 2000, batteryW: 2000, gridW: 0, homeW: 4000, vehicleW: 3000, hasVehicle: true
+        )
+        let states = PowerFlowRemapper.remap(PowerFlowSolver.wires(for: withCar))
+        #expect(states.keys.filter { $0.hasPrefix("Powerwall") } == ["Powerwall_1A"])
+        #expect(states["Vehicle_1A"] != nil)
     }
 
     @Test func powerFlowFollowsGaragePresence() {
@@ -326,6 +349,86 @@ struct GarageSceneTests {
         let gridY = grid?.corners.map(\.y).max() ?? -1
         #expect(abs(solarY - 0.47) < 0.004)
         #expect(abs(gridY - 0.23) < 0.004)
+    }
+
+    @Test func idleFlowTrackSitsJustAboveTheHouseGrey() {
+        // Home and Powerwall samples use shade 0.5, then brightness. That is the grey on screen.
+        let gain = 0.5 * PowerFlowAnimator().brightness
+        #expect(abs(PowerFlowStyle.baseColor.r * gain - 60.0 / 255) < 0.004)
+        #expect(abs(PowerFlowStyle.baseColor.b * gain - 63.0 / 255) < 0.004)
+    }
+
+    @Test func offGridMarkSitsHalfwayAlongTheGridLine() {
+        let points = PowerFlowLayout.paths["Grid_1A"] ?? []
+        let mid = PowerFlowLayout.point(along: "Grid_1A", fraction: 0.5) ?? .zero
+        var travelled: Float = 0
+        var lengths: [Float] = [0]
+        for index in 1..<points.count {
+            travelled += simd_length(points[index].position - points[index - 1].position)
+            lengths.append(travelled)
+        }
+        var cursor: Float = 0
+        var along: Float = 0
+        for index in 1..<points.count {
+            let span = points[index].position - points[index - 1].position
+            let length = simd_length(span)
+            let delta = mid - points[index - 1].position
+            let t = length > 1e-5 ? simd_dot(delta, span) / (length * length) : 0
+            if t >= -0.01 && t <= 1.01 {
+                along = lengths[index - 1] + length * min(max(t, 0), 1)
+                cursor = simd_length(mid - (points[index - 1].position + span * min(max(t, 0), 1)))
+                break
+            }
+        }
+        #expect(cursor < 0.01)
+        #expect(abs(along - travelled * 0.5) < 0.02)
+        #expect(mid.y < 0.05)
+        #expect(mid.x > points[0].position.x && mid.x < points[points.count - 1].position.x)
+    }
+
+    @Test func chargerCableStaysOnItsCentreline() {
+        let plug = SIMD3<Float>(-1.6734, 0.3460, 1.0880)
+        let ribbon = PowerFlowRibbon(
+            name: "Vehicle_1A",
+            points: PowerFlowLayout.paths["Vehicle_1A"] ?? [],
+            terminateAt: 1000,
+            step: 0.1,
+            camera: SIMD3(7.55, 5.7, 9.75),
+            plug: plug
+        )
+        let corners = ribbon?.corners ?? []
+        var centres: [SIMD3<Float>] = []
+        let quads = corners.count / 8
+        for quad in 0..<quads {
+            let base = quad * 8
+            centres.append((corners[base] + corners[base + 1]) * 0.5)
+        }
+        if quads > 0 {
+            let base = (quads - 1) * 8
+            centres.append((corners[base + 4] + corners[base + 5]) * 0.5)
+        }
+        #expect(centres.count > 10)
+        let start = centres.first ?? .zero
+        let end = centres.last ?? .zero
+        #expect(simd_length(start - plug) < 0.02)
+        #expect(end.x > start.x + 0.2)
+        #expect(end.z > 1.20)
+        #expect(centres.contains { $0.y < 0.05 })
+        if let scene = ResidentialClassicScene.load() {
+            let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+            if let measured = PowerFlowObstacles.wallConnectorPlug(house: house) {
+                #expect(simd_length(measured - plug) < 0.01)
+            }
+        }
+        for index in 1..<(centres.count - 1) {
+            let previous = centres[index - 1]
+            let next = centres[index + 1]
+            let span = next - previous
+            let length = simd_length(span)
+            let along = length > 1e-5 ? simd_dot(centres[index] - previous, span) / (length * length) : 0
+            let closest = previous + span * min(max(along, 0), 1)
+            #expect(simd_length(centres[index] - closest) < 0.012)
+        }
     }
 
     @Test func sceneStaysCentredWithoutTurning() {

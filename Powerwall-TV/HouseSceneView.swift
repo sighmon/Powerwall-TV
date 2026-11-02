@@ -78,7 +78,8 @@ enum HouseCameraFraming {
             home: place(PowerFlowLayout.anchors["FlowAnchor_Home"] ?? .zero),
             battery: place(SIMD3(0.050, 0.17, 0.92)),
             vehicle: place(PowerFlowLayout.anchors["FlowAnchor_WallConnector"] ?? .zero),
-            grid: place(PowerFlowLayout.anchors["FlowAnchor_Gateway"] ?? .zero)
+            grid: place(PowerFlowLayout.anchors["FlowAnchor_Gateway"] ?? .zero),
+            gridRibbon: place(PowerFlowLayout.point(along: "Grid_1A", fraction: 0.5) ?? .zero)
         )
     }
 }
@@ -240,6 +241,8 @@ struct HouseCalloutPoints: Equatable {
     var battery: CGPoint
     var vehicle: CGPoint
     var grid: CGPoint
+    /// Halfway along the grid ribbon, in the same window space as the other callouts.
+    var gridRibbon: CGPoint
 }
 
 struct HouseCalloutKey: PreferenceKey {
@@ -668,7 +671,10 @@ final class HouseCameraControlView: SCNView {
     @objc private func orbitPan(_ gesture: UIPanGestureRecognizer) {
         let delta = gesture.translation(in: self)
         gesture.setTranslation(.zero, in: self)
-        orbit(deltaX: delta.x, deltaY: -delta.y)
+        // UIKit Y grows downward. Passing it through matches the orbit the
+        // device wants: a finger moving down raises the camera. Two-finger
+        // pan still flips Y so the house follows the finger.
+        orbit(deltaX: delta.x, deltaY: delta.y)
     }
 
     @objc private func twoFingerPan(_ gesture: UIPanGestureRecognizer) {
@@ -693,8 +699,10 @@ final class HouseCameraControlView: SCNView {
 
     override func mouseDragged(with event: NSEvent) {
         if event.modifierFlags.contains(.option) {
-            pan(deltaX: event.deltaX, deltaY: event.deltaY)
+            pan(with: event)
         } else {
+            // Drag deltaY is device space, so it is positive when the pointer moves down.
+            // Adding it raises the camera, which is the same orbit iOS uses.
             orbit(deltaX: event.deltaX, deltaY: event.deltaY)
         }
     }
@@ -702,7 +710,12 @@ final class HouseCameraControlView: SCNView {
     override func rightMouseDown(with event: NSEvent) {}
 
     override func rightMouseDragged(with event: NSEvent) {
-        pan(deltaX: event.deltaX, deltaY: event.deltaY)
+        pan(with: event)
+    }
+
+    /// `pan` treats a positive deltaY as pointer-up. AppKit's drag deltaY grows downward.
+    private func pan(with event: NSEvent) {
+        pan(deltaX: event.deltaX, deltaY: -event.deltaY)
     }
 
     override func rightMouseUp(with event: NSEvent) {}
