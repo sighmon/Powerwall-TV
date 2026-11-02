@@ -567,6 +567,35 @@ struct GarageSceneTests {
         if let png = rep.representation(using: .png, properties: [:]) {
             try png.write(to: URL(fileURLWithPath: "/tmp/house-graded.png"))
         }
+        let frame = CGSize(width: 1280, height: 720)
+        let doorTop = HouseCameraFraming.project(SIMD3(-0.9, 0.70, 1.20), viewport: frame)
+        let doorBottom = HouseCameraFraming.project(SIMD3(-0.9, 0.02, 1.20), viewport: frame)
+        var doorLuma: [CGFloat] = []
+        let yStart = Int(min(doorTop.y, doorBottom.y))
+        let yEnd = Int(max(doorTop.y, doorBottom.y))
+        if yEnd > yStart {
+            for y in yStart...yEnd {
+                let t = CGFloat(y - yStart) / CGFloat(yEnd - yStart)
+                let x = Int(doorTop.x + (doorBottom.x - doorTop.x) * t)
+                guard x >= 0, x < rep.pixelsWide, y >= 0, y < rep.pixelsHigh,
+                      let color = rep.colorAt(x: x, y: y) else { continue }
+                doorLuma.append((color.redComponent + color.greenComponent + color.blueComponent) / 3)
+            }
+        }
+        let doorMean = doorLuma.isEmpty ? 0 : doorLuma.reduce(0, +) / CGFloat(doorLuma.count)
+        var ribs = 0
+        if doorLuma.count > 4 {
+            for i in 2..<(doorLuma.count - 2) {
+                let sample = doorLuma[i]
+                let brighterThanNeighbours = sample > doorLuma[i - 2] + 0.025 && sample >= doorLuma[i + 2]
+                let falling = doorLuma[i - 1] <= sample && sample > doorLuma[i + 1]
+                if brighterThanNeighbours && falling { ribs += 1 }
+            }
+        }
+        // A shut door is a grey ribbed panel. Four bright shelves over a black opening is not.
+        #expect(doorMean > 0.08)
+        #expect(doorMean < 0.22)
+        #expect(ribs >= 10)
         // home.png walls sit near 50/255. The ungraded atlas rendered near 151.
         var wall: CGFloat = 0
         var wallCount = 0
@@ -594,5 +623,76 @@ struct GarageSceneTests {
     @Test func headingLabelUsesCompassNames() {
         #expect(HouseHeading.label(180) == "south (180°)")
         #expect(HouseHeading.label(0) == "north (0°)")
+    }
+
+    @Test func litSolarAndWindowsStayRectangular() {
+        guard let scene = ResidentialClassicScene.load() else { return }
+        let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+        _ = HouseLighting(root: house)
+        func subdivision(prefix: String) -> Int {
+            var level = -1
+            house.enumerateHierarchy { child, _ in
+                guard child.name?.hasPrefix(prefix) == true, let geometry = child.geometry else { return }
+                level = max(level, geometry.subdivisionLevel)
+            }
+            return level
+        }
+        #expect(subdivision(prefix: "SolarPanel") == 0)
+        #expect(subdivision(prefix: "SolarRoof") == 0)
+        #expect(subdivision(prefix: "Windows") == 0)
+        #expect(subdivision(prefix: "Home") == 0)
+        #expect(subdivision(prefix: "GarageDoor") == 0)
+        #expect(subdivision(prefix: "Powerwall") == 1)
+    }
+
+    @Test func garageDoorSlatsStayOverlappedAndShut() {
+        guard let scene = ResidentialClassicScene.load() else { return }
+        let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+        _ = HouseLighting(root: house)
+        guard let door = house.childNode(withName: "GarageDoor_0", recursively: true),
+              let source = door.geometry?.sources(for: .vertex).first else { return }
+        #expect(door.geometry?.subdivisionLevel == 0)
+        var lowZ: Float = -.greatestFiniteMagnitude
+        var highZ: Float = .greatestFiniteMagnitude
+        source.data.withUnsafeBytes { raw in
+            for index in 0..<source.vectorCount {
+                let base = source.dataOffset + index * source.dataStride
+                let y = raw.load(fromByteOffset: base + 4, as: Float.self)
+                let z = raw.load(fromByteOffset: base + 8, as: Float.self)
+                if y < 0.02 { lowZ = max(lowZ, z) }
+                if y > 0.02, y < 0.05 { highZ = min(highZ, z) }
+            }
+        }
+        // The bottom edge of a slat sits toward the street and covers the slat below.
+        #expect(lowZ > highZ)
+    }
+
+    @Test func cabinCapsCloseAnUpperOpeningAndLeaveTheUndersideOpen() {
+        let upper = HouseMeshSeam.cabinCaps(for: openCabinBox(missingTop: true))
+        #expect((upper?.elements.first?.primitiveCount ?? 0) >= 2)
+        #expect(HouseMeshSeam.cabinCaps(for: openCabinBox(missingTop: false)) == nil)
+    }
+
+    private func openCabinBox(missingTop: Bool) -> SCNGeometry {
+        let vertices = [
+            SCNVector3(0, 0, 0), SCNVector3(2, 0, 0), SCNVector3(2, 0, 4), SCNVector3(0, 0, 4),
+            SCNVector3(0, 1, 0), SCNVector3(2, 1, 0), SCNVector3(2, 1, 4), SCNVector3(0, 1, 4),
+        ]
+        var indices: [UInt32] = []
+        func quad(_ a: UInt32, _ b: UInt32, _ c: UInt32, _ d: UInt32) {
+            indices.append(contentsOf: [a, b, c, a, c, d])
+        }
+        quad(0, 1, 5, 4)
+        quad(1, 2, 6, 5)
+        quad(2, 3, 7, 6)
+        quad(3, 0, 4, 7)
+        if missingTop {
+            quad(0, 1, 2, 3)
+        } else {
+            quad(4, 5, 6, 7)
+        }
+        let source = SCNGeometrySource(vertices: vertices)
+        let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
+        return SCNGeometry(sources: [source], elements: [element])
     }
 }

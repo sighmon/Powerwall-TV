@@ -176,18 +176,22 @@ enum HouseShaderModifiers {
 
     #pragma varyings
     float ambientLight;
-    float doorRib;
+    float doorHeight;
 
     #pragma body
     float3 sunDir = normalize(sunDirection);
     float3 normal = normalize(_geometry.normal);
-    normal.y *= normalYSign;
+    if (normalYSign < 0.0) {
+        // Each slat's face tilts up toward the street, so the high camera sees a few
+        // open shelves. A shut door presents one face to the street, tipped down.
+        normal = normalize(float3(0.0, -0.35, 1.0));
+    }
     float ambientStrength = mix(0.35, 0.81, geometryTheme);
     float sunLight = dot(normal, sunDir) * 0.5 + 0.5;
     out.ambientLight = ((sunLight * (1.0 - ambientStrength)) + ambientStrength + mix(0.0, 0.06, geometryTheme)) * ambientScale;
-    // Garage slats are 4 cm apart and their normals point down, so the mask never
-    // paints the bright lip home.png has along the top of each rib.
-    out.doorRib = normalYSign < 0.0 ? fract(_geometry.position.y * 25.0) : 0.0;
+    // Raw height. The rib is folded in the fragment: doing it here collapses every
+    // slat to the same value, because both of its edges land on the same fraction.
+    out.doorHeight = normalYSign < 0.0 ? _geometry.position.y : -1.0;
     """
 
     /// Use with `lightingModel = .constant` so SceneKit lights don't double-light the house.
@@ -231,8 +235,18 @@ enum HouseShaderModifiers {
     // Window glass in the atlas stays bright while the walls take the dark grade.
     float glass = smoothstep(0.80, 0.84, _surface.diffuse.r);
     colour = mix(colour, _surface.diffuse.rgb, glass);
-    float lip = smoothstep(0.55, 0.92, in.doorRib);
-    colour += lip * float3(0.07, 0.07, 0.075);
+    if (in.doorHeight >= 0.0) {
+        // Eighteen slats, 4 cm apart. The baked ribs sit in a UV band this mesh
+        // never samples, and the grade crushes what's left to a black opening
+        // with only the top few shelves still visible. Paint the same closed rib
+        // on every slat: dark in the groove, light along the top edge.
+        float rib = fract(in.doorHeight * 25.0);
+        float band = rib * rib * (3.0 - 2.0 * rib);
+        float luma = max(dot(colour, float3(0.333333)), 0.02);
+        float level = mix(0.055, 0.095, theme);
+        float3 flat = colour * (level / luma);
+        colour = mix(flat * 0.70, flat * 2.10, band);
+    }
     _output.color = float4(colour, 1.0);
     """
 }
@@ -306,10 +320,14 @@ final class HouseLighting {
         let dayGrade = SIMD3<Float>(0.27, 0.27, 0.28)
         let nightGrade = SIMD3<Float>(0.20, 0.21, 0.24)
         configureBuilding(named: "Home", mask: houseMask, albedoLight: dayGrade, albedoDark: nightGrade, normalYSign: 1)
-        // The door slats' normals tilt downward, so overhead light catches them from below.
+        // The slats already overlap with the bottom edge toward the street. Subdivision
+        // pulled them apart into a few open horizontal boards, so it is turned off below.
         configureBuilding(named: "GarageDoor", mask: garageMask, albedoLight: dayGrade, albedoDark: nightGrade, normalYSign: -1)
         // Windows and solar keep the imported meshes. Flat cards and a constant
         // grid shader hid the cell rims and the recessed window openings.
+        // The USD cage is Catmull-Clark. One tessellation level chamfers every
+        // separate cell and pane into an octagon and pulls the corners apart.
+        keepLitCellsRectangular()
 
         // These cards are torn alpha planes. SceneKit draws their black RGB as solid
         // wedges, which reads as damage, so they stay out of the view.
@@ -327,6 +345,9 @@ final class HouseLighting {
         }
         installFillLights()
         setSolar(.panels)
+        if let vehicle = root.childNode(withName: "Vehicle", recursively: true) {
+            repairVehicleShell(vehicle)
+        }
         // Stay closed until live wall-connector state says a car is home.
         showVehicle(false)
 
@@ -475,12 +496,37 @@ final class HouseLighting {
         car.scale = SCNVector3(0.35, 0.35, 0.35)
         vehicle.addChildNode(car)
         parkedVehicle = car
-        // v2 shells are closed from the outside, but several cards are single-sided.
-        // Draw both sides so a window or wheel well does not read as a hole.
-        car.enumerateHierarchy { node, _ in
-            node.geometry?.materials.forEach { $0.isDoubleSided = true }
-        }
+        repairVehicleShell(car)
         if let paint { setVehiclePaint(paint) }
+    }
+
+    /// The baked body uses an occlusion atlas as its colour, so the windows and panel
+    /// gaps render black. Exported shells leave openings where the glass does not meet
+    /// the frame. Solid paint plus caps across the cabin openings close both.
+    private func repairVehicleShell(_ vehicle: SCNNode) {
+        vehicle.enumerateHierarchy { node, _ in
+            guard let geometry = node.geometry else { return }
+            for material in geometry.materials {
+                material.isDoubleSided = true
+                if material.name == "Glass" {
+                    material.transparent.contents = HouseColor.white
+                    material.transparency = 1
+                }
+                if material.name == "vehicle" {
+                    material.lightingModel = .physicallyBased
+                    material.diffuse.contents = HouseColor(white: 0.78, alpha: 1)
+                    material.metalness.contents = 0.35
+                    material.roughness.contents = 0.25
+                }
+            }
+            let name = geometry.materials.first?.name ?? ""
+            guard name == "Paint" || name == "Glass" || name == "vehicle",
+                  node.childNode(withName: "CabinCaps", recursively: false) == nil,
+                  let caps = HouseMeshSeam.cabinCaps(for: geometry) else { return }
+            let capNode = SCNNode(geometry: caps)
+            capNode.name = "CabinCaps"
+            node.addChildNode(capNode)
+        }
     }
 
     /// Paint is the material named "Paint" (for Cybertruck it is the stainless body, so use a grey or a wrap colour).
@@ -674,6 +720,24 @@ final class HouseLighting {
                 .fragment: HouseShaderModifiers.fragment,
             ]
             buildingMaterials.append(material)
+        }
+    }
+
+    /// Leaves the authored quads in place. SceneKit otherwise tessellates the imported
+    /// cage, and each lit solar cell and window pane renders as an octagon.
+    private func keepLitCellsRectangular() {
+        root.enumerateHierarchy { child, _ in
+            guard let name = child.name else { return }
+            let lit = name.hasPrefix("SolarPanel") || name.hasPrefix("SolarRoof")
+                || name.hasPrefix("Windows") || name.hasPrefix("Home") || name.hasPrefix("GarageDoor")
+            guard lit, let geometry = child.geometry else { return }
+            geometry.subdivisionLevel = 0
+            // SceneKit keeps the tessellator object. Level 0 stops the Catmull-Clark
+            // pass; a smoothing mode would still pull the corners in.
+            geometry.tessellator?.smoothingMode = .none
+            geometry.tessellator?.edgeTessellationFactor = 1
+            geometry.tessellator?.insideTessellationFactor = 1
+            geometry.tessellator?.isAdaptive = false
         }
     }
 
@@ -1144,6 +1208,139 @@ enum HouseMeshSeam {
         sealed.materials = geometry.materials
         sealed.name = geometry.name
         return sealed
+    }
+
+    /// Fans across closed openings in the upper body. The underside, wheel rings, and the
+    /// outer shell of the glass stay open. Returns nil when there is nothing to add.
+    static func cabinCaps(for geometry: SCNGeometry) -> SCNGeometry? {
+        guard let vertex = geometry.sources(for: .vertex).first,
+              let element = geometry.elements.first(where: { $0.primitiveType == .triangles }) else { return nil }
+        let positions = vectors3(vertex)
+        guard positions.count > 3 else { return nil }
+        var minPoint = positions[0]
+        var maxPoint = positions[0]
+        for point in positions {
+            minPoint = simd_min(minPoint, point)
+            maxPoint = simd_max(maxPoint, point)
+        }
+        let bounds = maxPoint - minPoint
+        let longest = max(bounds.x, max(bounds.y, bounds.z))
+        guard longest > 0.01 else { return nil }
+        let indices = triangles(element)
+        let weldScale: Float = longest > 2.5 ? 400 : 800
+        var weldOf: [SIMD3<Int>: Int] = [:]
+        var weld = [Int](repeating: 0, count: positions.count)
+        var representative: [Int] = []
+        for index in positions.indices {
+            let point = positions[index]
+            let key = SIMD3(Int((point.x * weldScale).rounded()),
+                            Int((point.y * weldScale).rounded()),
+                            Int((point.z * weldScale).rounded()))
+            if let existing = weldOf[key] {
+                weld[index] = existing
+            } else {
+                let id = representative.count
+                weldOf[key] = id
+                weld[index] = id
+                representative.append(index)
+            }
+        }
+        struct Edge: Hashable { var a, b: Int }
+        var edgeCount: [Edge: Int] = [:]
+        for triangle in stride(from: 0, to: indices.count, by: 3) {
+            let corners = [weld[indices[triangle]], weld[indices[triangle + 1]], weld[indices[triangle + 2]]]
+            if Set(corners).count < 3 { continue }
+            for corner in 0..<3 {
+                let a = corners[corner]
+                let b = corners[(corner + 1) % 3]
+                edgeCount[Edge(a: min(a, b), b: max(a, b)), default: 0] += 1
+            }
+        }
+        var neighbors: [Int: [Int]] = [:]
+        var unused: Set<Edge> = []
+        for (edge, count) in edgeCount where count == 1 {
+            neighbors[edge.a, default: []].append(edge.b)
+            neighbors[edge.b, default: []].append(edge.a)
+            unused.insert(edge)
+        }
+        var capPoints: [SCNVector3] = []
+        var capIndices: [UInt32] = []
+        while let seed = unused.first {
+            var loop = [seed.a]
+            var current = seed.a
+            var previous = -1
+            var closed = false
+            var steps = 0
+            while steps < 6000 {
+                steps += 1
+                let options = (neighbors[current] ?? []).filter {
+                    unused.contains(Edge(a: min(current, $0), b: max(current, $0))) && $0 != previous
+                }
+                guard let step = options.min(by: { lhs, rhs in
+                    let here = positions[representative[current]]
+                    func score(_ next: Int) -> Float {
+                        guard previous >= 0 else { return 0 }
+                        let direction = here - positions[representative[previous]]
+                        let onward = positions[representative[next]] - here
+                        let directionLength = simd_length(direction)
+                        let onwardLength = simd_length(onward)
+                        if directionLength < 1e-6 || onwardLength < 1e-6 { return 0 }
+                        return -simd_dot(direction / directionLength, onward / onwardLength)
+                    }
+                    return score(lhs) < score(rhs)
+                }) else { break }
+                unused.remove(Edge(a: min(current, step), b: max(current, step)))
+                if step == loop[0] {
+                    closed = true
+                    break
+                }
+                loop.append(step)
+                previous = current
+                current = step
+            }
+            let points = loop.map { positions[representative[$0]] }
+            guard closed, points.count >= 3 else { continue }
+            var low = points[0]
+            var high = points[0]
+            for point in points {
+                low = simd_min(low, point)
+                high = simd_max(high, point)
+            }
+            let span = high - low
+            let ordered = [span.x, span.y, span.z].sorted()
+            let center = points.reduce(SIMD3<Float>.zero, +) / Float(points.count)
+            let underside = span.y == ordered[0]
+                && span.y < max(span.x, span.z) * 0.25
+                && high.y < minPoint.y + bounds.y * 0.35
+            let circular = ordered[1] > ordered[2] * 0.75 && ordered[0] < ordered[2] * 0.08
+            let wheel = circular && ordered[2] < longest * 0.22 && center.y < minPoint.y + bounds.y * 0.6
+            let shell = ordered[2] > longest * 0.55 && ordered[0] > ordered[2] * 0.12
+            let cabin = center.y > minPoint.y + bounds.y * 0.42
+            if underside || wheel || shell || points.count > 80 || !cabin { continue }
+            let centerIndex = UInt32(capPoints.count)
+            capPoints.append(SCNVector3(center.x, center.y, center.z))
+            for corner in points.indices {
+                let start = UInt32(capPoints.count)
+                let point = points[corner]
+                capPoints.append(SCNVector3(point.x, point.y, point.z))
+                let end = corner + 1 == points.count ? centerIndex + 1 : start + 1
+                capIndices.append(centerIndex)
+                capIndices.append(start)
+                capIndices.append(end)
+            }
+        }
+        guard !capIndices.isEmpty else { return nil }
+        let source = SCNGeometrySource(vertices: capPoints)
+        let capped = SCNGeometryElement(indices: capIndices, primitiveType: .triangles)
+        let caps = SCNGeometry(sources: [source], elements: [capped])
+        let material = SCNMaterial()
+        material.name = "CabinCap"
+        material.diffuse.contents = HouseColor(red: 0.15, green: 0.18, blue: 0.22, alpha: 1)
+        material.lightingModel = .constant
+        material.isDoubleSided = true
+        caps.materials = [material]
+        caps.name = "CabinCaps"
+        return caps
     }
 
     private static func source3(_ values: [SIMD3<Float>], semantic: SCNGeometrySource.Semantic) -> SCNGeometrySource {

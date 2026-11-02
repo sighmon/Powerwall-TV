@@ -499,6 +499,7 @@ struct GraphView: View {
 #if os(macOS)
         .defaultFocus($isGraphFocused, true, priority: .userInitiated)
 #endif
+        .preferredColorScheme(.dark)
     }
 }
 

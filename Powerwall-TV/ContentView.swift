@@ -308,6 +308,7 @@ struct ContentView: View {
                         .background(.regularMaterial)
                         .ignoresSafeArea()
                 )
+                .preferredColorScheme(.dark)
         }
         .sheet(isPresented: $showingScheduler) {
             SchedulerView(viewModel: viewModel)
@@ -364,6 +365,7 @@ struct ContentView: View {
                         .background(.regularMaterial)
                         .ignoresSafeArea()
                 )
+                .preferredColorScheme(.dark)
         }
         .fullScreenCover(isPresented: $showingScheduler) {
             SchedulerView(viewModel: viewModel)
