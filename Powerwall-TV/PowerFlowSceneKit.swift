@@ -183,8 +183,8 @@ enum PowerFlowObstacles {
         }
     }
 
-    /// Front-bottom centre of the wall connector, in the house's ribbon space.
-    /// The charger cable leaves that face.
+    /// Centre of the wall connector's underside, in the house's ribbon space.
+    /// The charger cable leaves that point.
     static func wallConnectorPlug(house: SCNNode) -> SIMD3<Float>? {
         guard let node = house.childNode(withName: "WallConnector", recursively: true) else { return nil }
         let box = node.boundingBox
@@ -203,7 +203,11 @@ enum PowerFlowObstacles {
                 }
             }
         }
-        return SIMD3((minBound.x + maxBound.x) * 0.5, minBound.y, maxBound.z)
+        return SIMD3(
+            (minBound.x + maxBound.x) * 0.5,
+            minBound.y,
+            (minBound.z + maxBound.z) * 0.5
+        )
     }
 
     /// Drawn after the ribbons so the units cover the cables that run through them.

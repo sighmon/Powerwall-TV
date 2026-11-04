@@ -73,14 +73,96 @@ enum HouseCameraFraming {
             let local = project(world, viewport: localSize, eye: eye, aim: aim)
             return CGPoint(x: origin.x + local.x, y: origin.y + local.y)
         }
+        let span = modelVerticalSpan(viewport: localSize, eye: eye, aim: aim)
         return HouseCalloutPoints(
             solar: place(SIMD3(-0.40, 1.145, 0)),
             home: place(PowerFlowLayout.anchors["FlowAnchor_Home"] ?? .zero),
             battery: place(SIMD3(0.050, 0.17, 0.92)),
             vehicle: place(PowerFlowLayout.anchors["FlowAnchor_WallConnector"] ?? .zero),
             grid: place(PowerFlowLayout.anchors["FlowAnchor_Gateway"] ?? .zero),
-            gridRibbon: place(PowerFlowLayout.point(along: "Grid_1A", fraction: 0.5) ?? .zero)
+            gridRibbon: place(PowerFlowLayout.point(along: "Grid_1A", fraction: 0.5) ?? .zero),
+            modelTop: origin.y + span.top,
+            modelBottom: origin.y + span.bottom
         )
+    }
+
+    /// Roof and walls the metric labels have to stay off. Ground plane to the solar-roof crown.
+    static let modelMin = SIMD3<Float>(-3.82, 0, -1.67)
+    static let modelMax = SIMD3<Float>(0.08, 1.76, 1.27)
+
+    /// Top and bottom of the house on screen. Y grows downward, matching `project`.
+    static func modelVerticalSpan(viewport: CGSize, eye: SIMD3<Float>, aim: SIMD3<Float>) -> (top: CGFloat, bottom: CGFloat) {
+        var top = CGFloat.greatestFiniteMagnitude
+        var bottom = -CGFloat.greatestFiniteMagnitude
+        for x in [modelMin.x, modelMax.x] {
+            for y in [modelMin.y, modelMax.y] {
+                for z in [modelMin.z, modelMax.z] {
+                    let point = project(SIMD3(x, y, z), viewport: viewport, eye: eye, aim: aim)
+                    top = min(top, point.y)
+                    bottom = max(bottom, point.y)
+                }
+            }
+        }
+        return (top, bottom)
+    }
+
+    /// Pulls a label centre above or below the house. A centre that is already clear stays put.
+    static func clearedLabelCenter(
+        windowY: CGFloat,
+        halfHeight: CGFloat,
+        spanTop: CGFloat,
+        spanBottom: CGFloat,
+        above: Bool,
+        screenMin: CGFloat,
+        screenMax: CGFloat
+    ) -> CGFloat {
+        let gap: CGFloat = 8
+        let desired = above
+            ? min(windowY, spanTop - halfHeight - gap)
+            : max(windowY, spanBottom + halfHeight + gap)
+        return min(max(desired, screenMin + halfHeight), screenMax - halfHeight)
+    }
+
+    /// Leader run that stays off the house. `innerY` is the label edge facing the callout.
+    /// `outerY` is the far edge. When the facing edge is already on the house, the line
+    /// still draws in the clear band so it does not disappear as the model grows.
+    static func leaderSegment(
+        innerY: CGFloat,
+        outerY: CGFloat,
+        calloutY: CGFloat,
+        length: CGFloat,
+        modelTop: CGFloat?,
+        modelBottom: CGFloat?
+    ) -> (start: CGFloat, end: CGFloat)? {
+        let full = calloutY - innerY
+        guard length > 2, abs(full) > 2 else { return nil }
+        let natural = innerY + copysign(min(length, abs(full)), full)
+        guard let modelTop, let modelBottom else {
+            guard abs(natural - innerY) > 8 else { return nil }
+            return (innerY, natural)
+        }
+        let gap: CGFloat = 10
+        let stub: CGFloat = 28
+        if full > 0 {
+            let limit = modelTop - gap
+            if innerY < limit - 2 {
+                let end = min(natural, limit)
+                if end > innerY + 2 { return (innerY, end) }
+            }
+            if outerY < limit - 2 { return (outerY, limit) }
+            let end = limit
+            let start = end - stub
+            return end > start + 2 ? (start, end) : nil
+        }
+        let limit = modelBottom + gap
+        if innerY > limit + 2 {
+            let end = max(natural, limit)
+            if end < innerY - 2 { return (innerY, end) }
+        }
+        if outerY > limit + 2 { return (outerY, limit) }
+        let end = limit
+        let start = end + stub
+        return start > end + 2 ? (start, end) : nil
     }
 }
 
@@ -243,6 +325,9 @@ struct HouseCalloutPoints: Equatable {
     var grid: CGPoint
     /// Halfway along the grid ribbon, in the same window space as the other callouts.
     var gridRibbon: CGPoint
+    /// Top and bottom of the house body, in the same window space. Y grows downward.
+    var modelTop: CGFloat
+    var modelBottom: CGFloat
 }
 
 struct HouseCalloutKey: PreferenceKey {

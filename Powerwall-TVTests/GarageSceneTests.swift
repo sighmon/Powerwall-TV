@@ -291,6 +291,55 @@ struct GarageSceneTests {
         #expect((core - mid) < (mid - edge))
     }
 
+    @Test func precipitationIsSoftAndRound() {
+        #expect(HouseSkyArt.precipitationFade(0) == 1)
+        #expect(HouseSkyArt.precipitationFade(1) == 0)
+        #expect(HouseSkyArt.precipitationFade(1.3) == 0)
+        let near = HouseSkyArt.precipitationFade(0.15)
+        let shoulder = HouseSkyArt.precipitationFade(0.5)
+        #expect(near > 0.9)
+        #expect(shoulder > 0.15)
+        #expect(shoulder < 0.55)
+
+        let sprite = HouseSkyArt.precipitation
+        #expect(sprite.width == sprite.height)
+        #expect(spriteAlpha(sprite, x: 0, y: 0) == 0)
+        #expect(spriteAlpha(sprite, x: sprite.width - 1, y: 0) == 0)
+        let centre = sprite.width / 2
+        #expect(spriteAlpha(sprite, x: centre, y: centre) > 240)
+        // Even sizes have no single centre pixel. Mirror across the far edge.
+        let eastX = centre + sprite.width / 5
+        let westX = sprite.width - 1 - eastX
+        let east = spriteAlpha(sprite, x: eastX, y: centre)
+        let west = spriteAlpha(sprite, x: westX, y: centre)
+        let north = spriteAlpha(sprite, x: centre, y: westX)
+        let south = spriteAlpha(sprite, x: centre, y: eastX)
+        #expect(east == west)
+        #expect(north == south)
+        #expect(east == north)
+        #expect(east > 20)
+        #expect(east < 180)
+
+        guard let scene = ResidentialClassicScene.load() else { return }
+        let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+        _ = HouseLighting(root: house)
+        for name in ["Rain", "Snow"] {
+            guard let system = house.childNode(withName: name, recursively: true)?.particleSystems?.first else {
+                #expect(Bool(false))
+                continue
+            }
+            #expect(system.stretchFactor == 0)
+            #expect(system.particleImage != nil)
+        }
+    }
+
+    private func spriteAlpha(_ image: CGImage, x: Int, y: Int) -> Int {
+        guard let data = image.dataProvider?.data as Data? else { return -1 }
+        let index = (y * image.bytesPerRow) + x * 4 + 3
+        guard data.indices.contains(index) else { return -1 }
+        return Int(data[index])
+    }
+
     @Test func loadedWeatherFadesInFromTheClockSky() {
         var clock = HouseLightingParameters()
         clock.cloudCover = 0.2
@@ -531,7 +580,7 @@ struct GarageSceneTests {
     }
 
     @Test func chargerCableStaysOnItsCentreline() {
-        let plug = SIMD3<Float>(-1.6734, 0.3460, 1.0880)
+        let plug = SIMD3<Float>(-1.6734, 0.3460, 1.0465)
         let ribbon = PowerFlowRibbon(
             name: "Vehicle_1A",
             points: PowerFlowLayout.paths["Vehicle_1A"] ?? [],
@@ -557,7 +606,26 @@ struct GarageSceneTests {
         #expect(simd_length(start - plug) < 0.02)
         #expect(end.x > start.x + 0.2)
         #expect(end.z > 1.20)
-        #expect(centres.contains { $0.y < 0.05 })
+        #expect(centres.contains { $0.y < 0.14 })
+        // Only the opening descent. The cable rises again at the car, and that end is not under the plug.
+        var lead: [SIMD3<Float>] = []
+        for centre in centres {
+            if let previous = lead.last, centre.y >= previous.y - 0.0005 { break }
+            if centre.y <= plug.y - 0.12 { break }
+            lead.append(centre)
+        }
+        #expect(lead.count >= 3)
+        #expect((lead.first?.y ?? 0) - (lead.last?.y ?? 0) > 0.08)
+        #expect(lead.allSatisfy { abs($0.x - plug.x) < 0.012 && abs($0.z - plug.z) < 0.012 })
+        // The front wall is about z 1.17…1.21, and the pier left of the door is x < −1.57.
+        let pastTheWall = centres.filter { $0.z > 1.17 && $0.y < 0.8 }
+        #expect(pastTheWall.count > 4)
+        #expect(pastTheWall.allSatisfy { $0.x > -1.50 })
+        let bow = centres.map(\.z).max() ?? 0
+        #expect(bow < 1.50)
+        #expect(bow < end.z + 0.08)
+        #expect(abs(end.x - (-1.18)) < 0.04)
+        #expect(abs(end.y - 0.36) < 0.05)
         if let scene = ResidentialClassicScene.load() {
             let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
             if let measured = PowerFlowObstacles.wallConnectorPlug(house: house) {
@@ -573,6 +641,67 @@ struct GarageSceneTests {
             let closest = previous + span * min(max(along, 0), 1)
             #expect(simd_length(centres[index] - closest) < 0.012)
         }
+    }
+
+    @Test func zoomedLabelsMoveAboveAndBelowTheHouse() {
+        let size = CGSize(width: 1280, height: 720)
+        let restingPose = HouseScenePose.identity
+        let resting = HouseCameraFraming.modelVerticalSpan(viewport: size, eye: restingPose.eye, aim: restingPose.target)
+        var closer = restingPose
+        closer.distanceScale = 0.5
+        let zoomed = HouseCameraFraming.modelVerticalSpan(viewport: size, eye: closer.eye, aim: closer.target)
+        #expect(zoomed.bottom - zoomed.top > resting.bottom - resting.top + 40)
+        #expect(zoomed.top < resting.top)
+
+        let inside = (zoomed.top + zoomed.bottom) * 0.5
+        let above = HouseCameraFraming.clearedLabelCenter(
+            windowY: inside,
+            halfHeight: 18,
+            spanTop: zoomed.top,
+            spanBottom: zoomed.bottom,
+            above: true,
+            screenMin: 0,
+            screenMax: size.height
+        )
+        let below = HouseCameraFraming.clearedLabelCenter(
+            windowY: inside,
+            halfHeight: 18,
+            spanTop: zoomed.top,
+            spanBottom: zoomed.bottom,
+            above: false,
+            screenMin: 0,
+            screenMax: size.height
+        )
+        #expect(above + 18 <= zoomed.top + 0.5 || above <= 18)
+        #expect(below - 18 >= zoomed.bottom - 0.5 || below >= size.height - 18)
+        #expect(above < inside)
+        #expect(below > inside)
+
+        let stayed = HouseCameraFraming.clearedLabelCenter(
+            windowY: 80,
+            halfHeight: 18,
+            spanTop: 200,
+            spanBottom: 500,
+            above: true,
+            screenMin: 0,
+            screenMax: size.height
+        )
+        #expect(abs(stayed - 80) < 0.5)
+
+        let open = HouseCameraFraming.leaderSegment(innerY: 30, outerY: 10, calloutY: 90, length: 40, modelTop: nil, modelBottom: nil)
+        #expect(open?.end == 70)
+        let throughTheHouse = HouseCameraFraming.leaderSegment(innerY: 40, outerY: 16, calloutY: 400, length: 240, modelTop: nil, modelBottom: nil)
+        #expect(throughTheHouse?.end == 280)
+        let stopped = HouseCameraFraming.leaderSegment(innerY: 40, outerY: 16, calloutY: 400, length: 240, modelTop: 120, modelBottom: 500)
+        #expect(stopped?.start == 40)
+        #expect(stopped?.end == 110)
+        let rising = HouseCameraFraming.leaderSegment(innerY: 640, outerY: 680, calloutY: 200, length: 300, modelTop: 120, modelBottom: 500)
+        #expect(rising?.start == 640)
+        #expect(rising?.end == 510)
+        let buried = HouseCameraFraming.leaderSegment(innerY: 160, outerY: 120, calloutY: 420, length: 180, modelTop: 100, modelBottom: 500)
+        #expect(buried != nil)
+        #expect((buried?.end ?? 999) < 100)
+        #expect((buried?.start ?? 0) < (buried?.end ?? 0))
     }
 
     @Test func sceneStaysCentredWithoutTurning() {
@@ -787,6 +916,40 @@ struct GarageSceneTests {
         #expect(subdivision(prefix: "Home") == 0)
         #expect(subdivision(prefix: "GarageDoor") == 0)
         #expect(subdivision(prefix: "Powerwall") == 1)
+    }
+
+    @Test func carSitsInTheMiddleOfTheGarageDoor() {
+        guard let scene = ResidentialClassicScene.load() else { return }
+        let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+        let lighting = HouseLighting(root: house)
+        guard let door = house.childNode(withName: "GarageDoor", recursively: true),
+              let vehicle = house.childNode(withName: "Vehicle", recursively: true) else { return }
+        // The vehicle node's own box stays empty. Measure the child meshes.
+        func centreX(_ node: SCNNode) -> Float {
+            var minX = Float.greatestFiniteMagnitude
+            var maxX = -Float.greatestFiniteMagnitude
+            func consider(_ owner: SCNNode) {
+                guard let geometry = owner.geometry else { return }
+                let box = geometry.boundingBox
+                for x in [box.min.x, box.max.x] {
+                    for y in [box.min.y, box.max.y] {
+                        for z in [box.min.z, box.max.z] {
+                            let world = owner.simdWorldTransform * SIMD4<Float>(Float(x), Float(y), Float(z), 1)
+                            minX = min(minX, world.x)
+                            maxX = max(maxX, world.x)
+                        }
+                    }
+                }
+            }
+            consider(node)
+            node.enumerateChildNodes { child, _ in consider(child) }
+            return (minX + maxX) * 0.5
+        }
+        #expect(abs(centreX(vehicle) - centreX(door)) < 0.02)
+        lighting.setVehicleModel(.modelY)
+        guard let parked = vehicle.childNode(withName: "VehicleModel_ModelY", recursively: false) else { return }
+        let parkedMid = parked.simdWorldTransform * SIMD4<Float>(-0, 0, 0, 1)
+        #expect(abs(parkedMid.x - centreX(door)) < 0.02)
     }
 
     @Test func garageDoorSlatsStayOverlappedAndShut() {

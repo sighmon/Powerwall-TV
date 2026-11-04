@@ -368,6 +368,7 @@ final class HouseLighting {
         setSolar(.panels)
         if let vehicle = root.childNode(withName: "Vehicle", recursively: true) {
             repairVehicleShell(vehicle)
+            centreVehicleInTheGarageDoor(vehicle)
         }
         // Stay closed until live wall-connector state says a car is home.
         showVehicle(false)
@@ -501,7 +502,8 @@ final class HouseLighting {
 
     /// Swaps the parked car for one of the exported Tesla models, painted `paint`.
     /// Car files are in metres, nose towards −Z, origin on the ground at the car's centre, matching
-    /// GenericVehicle; the app parks it at (−0.7, 0.02, 0.7) with scale 0.35.
+    /// GenericVehicle. The local park point is (−0.7, 0.02, 0.7) at scale 0.35. The vehicle
+    /// node is shifted so that point sits in the middle of the garage door.
     func setVehicleModel(_ model: VehicleModel, paint: HouseColor? = nil) {
         vehicleModel = model
         guard let vehicle = root.childNode(withName: "Vehicle", recursively: true) else { return }
@@ -528,6 +530,43 @@ final class HouseLighting {
         parkedVehicle = car
         repairVehicleShell(car)
         if let paint { setVehiclePaint(paint) }
+    }
+
+    /// The baked body is centred right of the opening. Slide the vehicle node so
+    /// the car's centre matches the door. Exported models use the same local origin.
+    /// Mesh bounds are read from the geometry. The node box is still empty here.
+    private func centreVehicleInTheGarageDoor(_ vehicle: SCNNode) {
+        guard let door = root.childNode(withName: "GarageDoor", recursively: true),
+              let doorMid = localCentreX(door),
+              let vehicleMid = localCentreX(vehicle) else { return }
+        vehicle.simdPosition.x += doorMid - vehicleMid
+    }
+
+    /// Horizontal centre of this node's meshes, in the node's own space.
+    /// simd keeps this independent of whether SceneKit's vector components are Float or CGFloat.
+    private func localCentreX(_ node: SCNNode) -> Float? {
+        var minX = Float.greatestFiniteMagnitude
+        var maxX = -Float.greatestFiniteMagnitude
+        func consider(_ owner: SCNNode) {
+            guard let geometry = owner.geometry else { return }
+            let box = geometry.boundingBox
+            for x in [box.min.x, box.max.x] {
+                for y in [box.min.y, box.max.y] {
+                    for z in [box.min.z, box.max.z] {
+                        let local = node.simdConvertPosition(
+                            SIMD3(Float(x), Float(y), Float(z)),
+                            from: owner
+                        )
+                        minX = min(minX, local.x)
+                        maxX = max(maxX, local.x)
+                    }
+                }
+            }
+        }
+        consider(node)
+        node.enumerateChildNodes { child, _ in consider(child) }
+        guard minX < maxX else { return nil }
+        return (minX + maxX) * 0.5
     }
 
     /// The baked body uses an occlusion atlas as its colour, so the windows and panel
@@ -838,8 +877,11 @@ final class HouseLighting {
         p.particleVelocityVariation = 0.4
         p.emittingDirection = SCNVector3(0, -1, 0)
         p.spreadingAngle = 4
-        p.particleSize = 0.012
-        p.stretchFactor = 0.05
+        // A little larger than the old hard square so the soft rim is visible.
+        // No stretch: a streak reads as a dash instead of a round drop.
+        p.particleSize = 0.028
+        p.stretchFactor = 0
+        p.particleImage = HouseSkyArt.precipitationContents
         p.particleColor = HouseColor(white: 0.85, alpha: 0.22)
         p.blendMode = .alpha
         p.isAffectedByGravity = false
@@ -858,8 +900,9 @@ final class HouseLighting {
         p.particleVelocityVariation = 0.15
         p.emittingDirection = SCNVector3(0, -1, 0)
         p.spreadingAngle = 18
-        p.particleSize = 0.014
-        p.particleSizeVariation = 0.006
+        p.particleSize = 0.04
+        p.particleSizeVariation = 0.016
+        p.particleImage = HouseSkyArt.precipitationContents
         p.particleColor = HouseColor(white: 1, alpha: 0.45)
         p.blendMode = .alpha
         p.isAffectedByGravity = false
@@ -963,6 +1006,16 @@ struct WeatherLighting {
 enum HouseSkyArt {
     static let sunCore = radialImage(size: 128, inner: 0.16, outer: 0.62, peak: 1)
     static let sunGlow = radialImage(size: 128, inner: 0.0, outer: 0.92, peak: 0.45)
+    /// Round falloff for rain and snow. `radius` is 0 at the centre and 1 at the rim.
+    static let precipitation = precipitationImage(size: 64)
+    static var precipitationContents: Any { platformImage(precipitation) }
+
+    /// Flat at the middle, zero at the rim, so a square billboard still reads as a soft disc.
+    static func precipitationFade(_ radius: Float) -> Float {
+        let t = min(max(radius, 0), 1)
+        let bell = 1 - t * t
+        return bell * bell * bell
+    }
     static let cirrus = cloudImage(
         width: 512, height: 256,
         blobs: [
@@ -1030,6 +1083,25 @@ enum HouseSkyArt {
                 pixels[index + 1] = channel
                 pixels[index + 2] = channel
                 pixels[index + 3] = channel
+            }
+        }
+        return image(pixels, width: size, height: size)
+    }
+
+    private static func precipitationImage(size: Int) -> CGImage {
+        var pixels = [UInt8](repeating: 0, count: size * size * 4)
+        let last = Float(size - 1)
+        for y in 0..<size {
+            for x in 0..<size {
+                let u = Float(x) / last * 2 - 1
+                let v = Float(y) / last * 2 - 1
+                let radius = sqrt(u * u + v * v)
+                let alpha = UInt8(min(max(precipitationFade(radius), 0), 1) * 255)
+                let index = (y * size + x) * 4
+                pixels[index] = 255
+                pixels[index + 1] = 255
+                pixels[index + 2] = 255
+                pixels[index + 3] = alpha
             }
         }
         return image(pixels, width: size, height: size)

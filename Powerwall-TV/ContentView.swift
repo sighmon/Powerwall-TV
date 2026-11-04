@@ -175,6 +175,12 @@ struct ContentView: View {
             let siteSummarySceneOverlap = detachSiteSummary
                 && frameIntersectsScene(detachedSiteSummaryFrame, sceneFrame: sceneFrame)
             let controlsSceneOverlap = frameIntersectsScene(controlsOverlayFrame, sceneFrame: sceneFrame)
+            let metricShift = metricSceneShift(
+                sceneSize: sceneSize,
+                sceneFrame: sceneFrame,
+                screenHeight: geometry.size.height,
+                callouts: houseCallouts
+            )
             ZStack {
                 Color(red: 22/255, green: 23/255, blue: 24/255)
                     .ignoresSafeArea()
@@ -185,6 +191,13 @@ struct ContentView: View {
                         .ignoresSafeArea()
                         .opacity(showBackground ? 1 : 0)
                         .scaleEffect(showBackground ? 1 : 1.04)
+                }
+
+                if showsHouseScene, viewModel.isOffGrid(), let houseCallouts {
+                    offGridImage(sceneSize: sceneSize)
+                        .position(houseCallouts.gridRibbon)
+                        .allowsHitTesting(false)
+                        .opacity(showMetrics ? 1 : 0)
                 }
 
                 if showsHouseScene, let data = viewModel.data, let houseCallouts {
@@ -209,10 +222,7 @@ struct ContentView: View {
                     sceneOverlay(
                         in: sceneSize,
                         showSiteSummaryInScene: !detachSiteSummary,
-                        offGridOnRibbon: offGridOnRibbon(
-                            callouts: houseCallouts,
-                            sceneFrame: sceneFrame
-                        )
+                        metricShift: metricShift
                     )
                         .frame(width: sceneSize.width, height: sceneSize.height)
                         .opacity(showMetrics ? 1 : 0)
@@ -581,17 +591,50 @@ struct ContentView: View {
         return presentation.model == .cybertruck ? "home-charger-cybertruck.png" : "home-charger.png"
     }
 
-    /// Window point of the grid-ribbon midpoint, in the fitted overlay's coordinates.
-    private func offGridOnRibbon(callouts: HouseCalloutPoints?, sceneFrame: CGRect) -> CGPoint? {
-        guard showsHouseScene, let callouts else { return nil }
-        return CGPoint(
-            x: callouts.gridRibbon.x - sceneFrame.minX,
-            y: callouts.gridRibbon.y - sceneFrame.minY
+    private struct MetricSceneShift {
+        var solar: CGFloat = 0
+        var home: CGFloat = 0
+        var vehicle: CGFloat = 0
+        var summary: CGFloat = 0
+        var lower: CGFloat = 0
+    }
+
+    /// While the camera is closer than the resting view, each metric moves on its own
+    /// so a tall roof cannot pull the home readout back down onto the house.
+    private func metricSceneShift(sceneSize: CGSize, sceneFrame: CGRect, screenHeight: CGFloat, callouts: HouseCalloutPoints?) -> MetricSceneShift {
+        guard showsHouseScene,
+              let callouts,
+              viewModel.houseScenePose.distanceScale < 0.98,
+              sceneSize.height > 1 else {
+            return MetricSceneShift()
+        }
+        let half = max(22, sceneHeight(0.05, in: sceneSize) * 0.5)
+        let screenMin: CGFloat = 8
+        let screenMax = screenHeight - 8
+        func lift(_ sceneY: CGFloat, above: Bool) -> CGFloat {
+            let anchor = sceneFrame.minY + sceneSize.height * (0.5 + sceneY)
+            let cleared = HouseCameraFraming.clearedLabelCenter(
+                windowY: anchor,
+                halfHeight: half + 28,
+                spanTop: callouts.modelTop,
+                spanBottom: callouts.modelBottom,
+                above: above,
+                screenMin: screenMin,
+                screenMax: screenMax
+            )
+            return (cleared - anchor) / sceneSize.height
+        }
+        return MetricSceneShift(
+            solar: lift(-0.40, above: true),
+            home: lift(-0.30, above: true),
+            vehicle: lift(-0.40, above: true),
+            summary: lift(-0.38, above: true),
+            lower: lift(0.40, above: false)
         )
     }
 
     @ViewBuilder
-    private func sceneOverlay(in sceneSize: CGSize, showSiteSummaryInScene: Bool, offGridOnRibbon: CGPoint?) -> some View {
+    private func sceneOverlay(in sceneSize: CGSize, showSiteSummaryInScene: Bool, metricShift: MetricSceneShift) -> some View {
         if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
             Text("Please configure the gateway settings.")
                 .foregroundColor(.gray)
@@ -600,7 +643,7 @@ struct ContentView: View {
                 data: data,
                 sceneSize: sceneSize,
                 showSiteSummaryInScene: showSiteSummaryInScene,
-                offGridOnRibbon: offGridOnRibbon
+                metricShift: metricShift
             )
                 .foregroundColor(.white)
         } else {
@@ -622,7 +665,7 @@ struct ContentView: View {
         }
     }
 
-    private func sceneDataOverlay(data: PowerwallData, sceneSize: CGSize, showSiteSummaryInScene: Bool, offGridOnRibbon: CGPoint?) -> some View {
+    private func sceneDataOverlay(data: PowerwallData, sceneSize: CGSize, showSiteSummaryInScene: Bool, metricShift: MetricSceneShift) -> some View {
         let batteryPercentage = max(0.0, min(1.0, (viewModel.batteryPercentage?.percentage ?? 0) / 100))
         let batteryIndicatorHeight = sceneHeight(0.076, in: sceneSize) * batteryPercentage
         let batteryIndicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0024, in: sceneSize))
@@ -643,27 +686,33 @@ struct ContentView: View {
 
         let showFlatPower = animations && !showsHouseScene
         return ZStack {
+            if viewModel.isOffGrid(), !showsHouseScene {
+                offGridImage(sceneSize: sceneSize)
+                    .position(scenePoint(x: 0.151, y: 0.234, in: sceneSize))
+                    .allowsHitTesting(false)
+            }
+
             if showSiteSummaryInScene {
                 siteSummaryView(data: data, valueFont: valueFont, labelFont: labelFont, messageWidth: summaryMessageWidth)
-                    .position(scenePoint(x: inlineSiteSummaryX, y: -0.38, in: sceneSize))
+                    .position(scenePoint(x: inlineSiteSummaryX, y: -0.38 + metricShift.summary, in: sceneSize))
             }
 
             solarMetricView(data: data, valueFont: valueFont, labelFont: labelFont)
                 .reportFrame(.metricSolar)
-                .position(scenePoint(x: 0.087, y: -0.40, in: sceneSize))
+                .position(scenePoint(x: 0.087, y: -0.40 + metricShift.solar, in: sceneSize))
 
             homeMetricView(data: data, valueFont: valueFont, labelFont: labelFont)
                 .reportFrame(.metricHome)
-                .position(scenePoint(x: homeAndGridXPosition, y: -0.30, in: sceneSize))
+                .position(scenePoint(x: homeAndGridXPosition, y: -0.30 + metricShift.home, in: sceneSize))
 
             batteryMetricView(data: data, valueFont: valueFont, labelFont: labelFont)
                 .reportFrame(.metricBattery)
-                .position(scenePoint(x: 0.03, y: 0.40, in: sceneSize))
+                .position(scenePoint(x: 0.03, y: 0.40 + metricShift.lower, in: sceneSize))
 
             if !data.wallConnectors.isEmpty {
                 wallConnectorMetricView(data: data, valueFont: valueFont, labelFont: labelFont)
                     .reportFrame(.metricVehicle)
-                    .position(scenePoint(x: -0.104, y: -0.40, in: sceneSize))
+                    .position(scenePoint(x: -0.104, y: -0.40 + metricShift.vehicle, in: sceneSize))
             }
 
             if !showsHouseScene {
@@ -681,7 +730,7 @@ struct ContentView: View {
 
             gridMetricView(data: data, valueFont: valueFont, labelFont: labelFont)
                 .reportFrame(.metricGrid)
-                .position(scenePoint(x: viewModel.gridFossilFuelPercentage != nil ? homeAndGridXPosition + gridCarbonXPosition : homeAndGridXPosition, y: 0.40, in: sceneSize))
+                .position(scenePoint(x: viewModel.gridFossilFuelPercentage != nil ? homeAndGridXPosition + gridCarbonXPosition : homeAndGridXPosition, y: 0.40 + metricShift.lower, in: sceneSize))
 
             if showFlatPower && wallConnectorEnergyTotal(data: data) > 10 {
                 PowerSurgeView(
@@ -765,17 +814,6 @@ struct ContentView: View {
                 .position(scenePoint(x: 0.152, y: 0.208, in: sceneSize))
                 .id("grid_\(data.site.instantPower < 0)_\(startAnimations)")
             }
-
-            if viewModel.isOffGrid() {
-                if let offGridOnRibbon {
-                    offGridImage(sceneSize: sceneSize)
-                        .position(offGridOnRibbon)
-                        .allowsHitTesting(false)
-                } else if !showsHouseScene {
-                    offGridImage(sceneSize: sceneSize)
-                        .position(scenePoint(x: 0.151, y: 0.234, in: sceneSize))
-                }
-            }
         }
         .frame(width: sceneSize.width, height: sceneSize.height)
     }
@@ -797,16 +835,27 @@ struct ContentView: View {
             for (kind, label, callout) in spots where label.width > 1 && label.height > 1 {
                 let onLeft = label.midX < screenMidX
                 let x = onLeft ? label.maxX + gap : label.minX - gap
-                let startY = callout.y >= label.midY ? label.maxY + 2 : label.minY - 2
-                let full = callout.y - startY
+                let goingDown = callout.y >= label.midY
+                let innerY = goingDown ? label.maxY + 2 : label.minY - 2
+                let outerY = goingDown ? label.minY : label.maxY
+                let full = callout.y - innerY
                 guard abs(full) > 8 else { continue }
                 var length = abs(full) * reach
                 if kind == .metricGrid, let powerwallReach, powerwallReach > 8 {
                     length = min(length, powerwallReach * 0.72)
                 }
-                let endY = startY + copysign(length, full)
-                path.move(to: CGPoint(x: x, y: startY))
-                path.addLine(to: CGPoint(x: x, y: endY))
+                // Solar, home, and vehicle leaders cross the house so they still aim at the callout.
+                let aimsThroughTheHouse = kind == .metricSolar || kind == .metricHome || kind == .metricVehicle
+                guard let segment = HouseCameraFraming.leaderSegment(
+                    innerY: innerY,
+                    outerY: outerY,
+                    calloutY: callout.y,
+                    length: length,
+                    modelTop: aimsThroughTheHouse ? nil : callouts.modelTop,
+                    modelBottom: aimsThroughTheHouse ? nil : callouts.modelBottom
+                ) else { continue }
+                path.move(to: CGPoint(x: x, y: segment.start))
+                path.addLine(to: CGPoint(x: x, y: segment.end))
             }
         }
         .stroke(Color(white: 0.62), style: StrokeStyle(lineWidth: max(1.25, sceneSize.height / 520), lineCap: .round))

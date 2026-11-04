@@ -408,7 +408,7 @@ struct PowerFlowRibbon: Sendable {
 
     init?(name: String, points: [PowerFlowPathPoint], terminateAt: Float, step: Float = 0.1, widthScale: Float = 1, camera: SIMD3<Float>? = nil, clearances: [PowerFlowClearance] = [], plug: SIMD3<Float>? = nil) {
         let routed = Self.meeting(Self.centreline(points), plug: plug)
-        let points = plug == nil ? routed : Self.smoothed(routed)
+        let points = plug == nil ? routed : Self.approached(Self.hung(Self.smoothed(routed)))
         guard points.count >= 2 else { return nil }
         let uEnd = min(points[points.count - 1].u, terminateAt)
         func sample(_ u: Float) -> (SIMD3<Float>, SIMD3<Float>, Float, Float) {
@@ -529,8 +529,8 @@ struct PowerFlowRibbon: Sendable {
     }
 
     /// The baked charger run sits in front of the garage door, about 16 cm ahead of
-    /// the wall connector. Ease that correction out along the drop, which stays left
-    /// of the door, then leave the ground run on the baked path.
+    /// the wall connector. Ease that correction out along the drop. `hung` keeps a
+    /// vertical lead, and `approached` replaces the lower run so it clears the wall.
     private static func meeting(_ points: [PowerFlowPathPoint], plug: SIMD3<Float>?) -> [PowerFlowPathPoint] {
         guard let plug, let first = points.first else { return points }
         let delta = plug - first.position
@@ -562,6 +562,118 @@ struct PowerFlowRibbon: Sendable {
                 shade: point.shade,
                 alpha: point.alpha
             )
+        }
+    }
+
+    /// Drops straight down from the wall connector, then eases onto the curve that
+    /// reaches the car. The ends stay put.
+    private static func hung(_ points: [PowerFlowPathPoint]) -> [PowerFlowPathPoint] {
+        guard let plug = points.first?.position, points.count >= 3 else { return points }
+        var lowIndex = 0
+        var lowY = plug.y
+        for (index, point) in points.enumerated() where point.position.y < lowY {
+            lowY = point.position.y
+            lowIndex = index
+        }
+        let drop = plug.y - lowY
+        guard drop > 0.08, lowIndex > 0 else { return points }
+        // A short lead reads as leaving the charger. The rest of the drop is the bend.
+        let hang = min(0.16, drop * 0.55)
+        let bend = max(drop - hang, 0.04)
+        return points.enumerated().map { index, point in
+            guard index > 0, index <= lowIndex else { return point }
+            let dropped = max(plug.y - point.position.y, 0)
+            let vertical = SIMD3<Float>(plug.x, point.position.y, plug.z)
+            let position: SIMD3<Float>
+            if dropped <= hang {
+                position = vertical
+            } else {
+                let t = min(max((dropped - hang) / bend, 0), 1)
+                let eased = t * t * (3 - 2 * t)
+                position = vertical + (point.position - vertical) * eased
+            }
+            return PowerFlowPathPoint(
+                u: point.u,
+                position: position,
+                side: point.side,
+                shade: point.shade,
+                alpha: point.alpha
+            )
+        }
+    }
+
+    /// The vertical lead stays. The lower cable steps into the garage opening, then
+    /// rises to the car's rear corner without looping out into the driveway.
+    private static func approached(_ points: [PowerFlowPathPoint]) -> [PowerFlowPathPoint] {
+        guard let plug = points.first?.position, let last = points.last, points.count >= 4 else { return points }
+        var lead = 0
+        for (index, point) in points.enumerated() {
+            let position = point.position
+            let onPlug = abs(position.x - plug.x) < 0.004 && abs(position.z - plug.z) < 0.004
+            if onPlug && position.y <= plug.y + 0.001 {
+                lead = index
+            } else if index > 0 {
+                break
+            }
+        }
+        guard lead >= 1 else { return points }
+        let anchor = points[lead].position
+        // Opening is x −1.57…−0.23. The front wall is about z 1.17…1.21.
+        // Stay inside that wall until the cable is in the opening, then go to the port.
+        let intoOpening = SIMD3<Float>(-1.36, 0.08, 1.10)
+        let throughDoor = SIMD3<Float>(-1.28, 0.16, 1.26)
+        let port = SIMD3<Float>(-1.18, 0.36, 1.40)
+        var positions = points[0...lead].map(\.position)
+        positions += curve(
+            anchor,
+            anchor + SIMD3<Float>(0, -0.10, 0),
+            intoOpening,
+            throughDoor,
+            steps: 14
+        )
+        positions += curve(
+            throughDoor,
+            SIMD3<Float>(-1.24, 0.20, 1.32),
+            SIMD3<Float>(-1.20, 0.30, 1.42),
+            port,
+            steps: 12
+        )
+        var cleaned: [SIMD3<Float>] = []
+        for position in positions {
+            if let previous = cleaned.last, simd_length(position - previous) < 0.004 { continue }
+            cleaned.append(position)
+        }
+        guard cleaned.count >= 2 else { return points }
+        var length: Float = 0
+        var travelled: [Float] = [0]
+        for index in 1..<cleaned.count {
+            length += simd_length(cleaned[index] - cleaned[index - 1])
+            travelled.append(length)
+        }
+        length = max(length, 0.05)
+        let u0 = points[0].u
+        let uSpan = max(last.u - u0, 0.05)
+        let shade0 = points[lead].shade
+        let shade1 = last.shade
+        let side = SIMD3<Float>(0, 0, -0.015)
+        return cleaned.enumerated().map { index, position in
+            let t = travelled[index] / length
+            return PowerFlowPathPoint(
+                u: u0 + uSpan * t,
+                position: position,
+                side: side,
+                shade: shade0 + (shade1 - shade0) * t,
+                alpha: 1
+            )
+        }
+    }
+
+    /// Cubic from `a` to `d`. The first point is omitted so it does not repeat `a`.
+    private static func curve(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, _ d: SIMD3<Float>, steps: Int) -> [SIMD3<Float>] {
+        (1...steps).map { step in
+            let t = Float(step) / Float(steps)
+            let u = 1 - t
+            return a * (u * u * u) + b * (3 * u * u * t) + c * (3 * u * t * t) + d * (t * t * t)
         }
     }
 
