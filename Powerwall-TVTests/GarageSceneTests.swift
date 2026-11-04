@@ -112,6 +112,106 @@ struct GarageSceneTests {
         #expect(dark < plain)
     }
 
+    @Test func demoTourCyclesEveryWeatherAndEveryCar() {
+        #expect(DemoHouseTour.vehicles.map(\.model) == VehicleModel.allCases)
+        #expect(DemoHouseTour.powerTicksPerScene >= 2)
+        for vehicle in DemoHouseTour.vehicles {
+            #expect(GarageVehicleModel.resolve(vin: vehicle.vin) == vehicle.model)
+            let parked = PowerwallData(
+                battery: .init(instantPower: 256, count: 1),
+                load: .init(instantPower: 2304),
+                solar: .init(instantPower: 2048, energyExported: 0),
+                site: .init(instantPower: 1024),
+                wallConnectors: [.init(vin: vehicle.vin, din: "def456", wallConnectorState: 1, wallConnectorPower: 512)]
+            )
+            let presentation = GaragePresentation.make(data: parked, fallbackVIN: "", appearances: [:], solar: .panels)
+            #expect(presentation.showVehicle)
+            #expect(presentation.model == vehicle.model)
+        }
+        #expect(DemoHouseTour.vehicle(at: DemoHouseTour.vehicles.count).model == .generic)
+        #expect(DemoHouseTour.vehicle(at: -1).model == .cybertruck)
+
+        let heading = 180.0
+        func sky(_ title: String) -> HouseLightingParameters {
+            DemoHouseTour.weather.first { $0.title == title }!.parameters(heading: heading)
+        }
+        let clear = sky("Clear")
+        #expect(clear.cloudCover < 0.2)
+        #expect(clear.rainIntensity == 0)
+        #expect(clear.snowIntensity == 0)
+        #expect(clear.theme > 0.5)
+
+        let partly = sky("Partly cloudy")
+        #expect(partly.cloudCover >= 0.42)
+        #expect(partly.cloudCover < 0.6)
+        #expect(partly.ambientScale > 0.95)
+        #expect(partly.rainIntensity == 0)
+
+        let cloudy = sky("Cloudy")
+        #expect(cloudy.cloudCover >= 0.88)
+        #expect(cloudy.rainIntensity == 0)
+        #expect(cloudy.snowIntensity == 0)
+        #expect(cloudy.theme > 0.05)
+
+        let drizzle = sky("Drizzle")
+        #expect(drizzle.rainIntensity > 0)
+        #expect(drizzle.rainIntensity <= 0.35)
+        #expect(drizzle.snowIntensity == 0)
+
+        let rain = sky("Rain")
+        #expect(rain.rainIntensity > 0.4)
+        #expect(rain.rainIntensity < 0.8)
+        #expect(rain.snowIntensity == 0)
+
+        let heavy = sky("Heavy rain")
+        #expect(heavy.rainIntensity >= 0.8)
+        #expect(heavy.snowIntensity == 0)
+        #expect(heavy.cloudCover >= 0.9)
+        #expect(heavy.theme > 0.05)
+
+        #expect(sky("Flurries").snowIntensity == 0.25)
+        #expect(sky("Flurries").rainIntensity == 0)
+        #expect(sky("Snow").snowIntensity == 0.5)
+        #expect(sky("Blizzard").snowIntensity == 1)
+        #expect(sky("Blizzard").cloudCover >= 0.9)
+        #expect(sky("Sleet").rainIntensity == 0.3)
+        #expect(sky("Sleet").snowIntensity == 0.3)
+
+        let night = sky("Night")
+        #expect(night.theme == 0)
+        #expect(night.rainIntensity == 0)
+        #expect(night.snowIntensity == 0)
+        #expect(night.sunAltitude < 0)
+
+        let rainyNight = sky("Rainy night")
+        #expect(rainyNight.theme == 0)
+        #expect(rainyNight.rainIntensity > 0.4)
+        #expect(rainyNight.snowIntensity == 0)
+
+        let signatures = DemoHouseTour.weather.map { scene -> String in
+            let parameters = scene.parameters(heading: heading)
+            let day = parameters.theme > 0.05 ? "day" : "night"
+            return "\(day)-\(parameters.rainIntensity)-\(parameters.snowIntensity)-\(parameters.cloudCover)"
+        }
+        #expect(Set(signatures).count == DemoHouseTour.weather.count)
+        #expect(DemoHouseTour.weather(at: DemoHouseTour.weather.count).title == "Clear")
+        #expect(DemoHouseTour.weather(at: -1).title == "Rainy night")
+    }
+
+    @Test @MainActor func demoSkyStaysPutWhenTheClockAdvances() {
+        let controller = HouseSceneController()
+        controller.prepareIfNeeded()
+        let rain = DemoHouseTour.weather.first { $0.title == "Rain" }!
+        controller.applyDemoSky(rain, heading: 180, fadeIn: false)
+        #expect(controller.rainIntensity > 0.4)
+        controller.advanceSkyClock()
+        #expect(controller.rainIntensity > 0.4)
+        controller.applyDemoSky(rain, heading: 180, fadeIn: true)
+        #expect(controller.rainIntensity > 0.4)
+        controller.clearWeather(heading: 180)
+        #expect(controller.rainIntensity == 0)
+    }
+
     @Test func weatherLightingDimsAtNightAndStartsRain() {
         let lighting = WeatherLighting(houseHeadingDegrees: 180)
         let night = lighting.parameters(
@@ -181,6 +281,37 @@ struct GarageSceneTests {
         #expect(!thin.isEmpty)
         #expect(thick.isEmpty)
         #expect(HouseSky.wisps.allSatisfy { $0.height >= 2.6 && $0.width > $0.height })
+
+        let edge = HouseSkyArt.cloudThickness(0.16)
+        let mid = HouseSkyArt.cloudThickness(0.55)
+        let core = HouseSkyArt.cloudThickness(1.8)
+        #expect(abs(edge - 0.16) < 0.001)
+        #expect(core > mid)
+        #expect(core < 0.5)
+        #expect((core - mid) < (mid - edge))
+    }
+
+    @Test func loadedWeatherFadesInFromTheClockSky() {
+        var clock = HouseLightingParameters()
+        clock.cloudCover = 0.2
+        clock.rainIntensity = 0
+        var forecast = clock
+        forecast.cloudCover = 0.8
+        forecast.rainIntensity = 0.6
+        let halfway = clock.interpolated(toward: forecast, fraction: Float(HouseWeatherFade.ease(0.5)))
+        #expect(abs(halfway.cloudCover - 0.5) < 0.001)
+        #expect(abs(halfway.rainIntensity - 0.3) < 0.001)
+        #expect(HouseWeatherFade.ease(0) == 0)
+        #expect(HouseWeatherFade.ease(1) == 1)
+
+        let view = HouseCameraControlView(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+        let idle = PowerFlowSnapshot()
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: idle, interacting: false, revealingWeather: true)
+        #expect(view.rendersContinuously == true)
+        #expect(view.isPlaying == true)
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: idle, revealingWeather: false)
+        #expect(view.rendersContinuously == false)
+        #expect(view.isPlaying == false)
     }
 
     @Test func clockSunRisesOnTheLeftAndSetsOnTheRight() {
@@ -349,6 +480,19 @@ struct GarageSceneTests {
         let gridY = grid?.corners.map(\.y).max() ?? -1
         #expect(abs(solarY - 0.47) < 0.004)
         #expect(abs(gridY - 0.23) < 0.004)
+
+        let gridCorners = grid?.corners ?? []
+        let exit = gridCorners.filter { $0.y > 0.20 && $0.y < 0.24 && $0.x < 0.08 }
+        let drop = gridCorners.filter { $0.y > 0.12 && $0.y < 0.18 && $0.x < 0.08 }
+        #expect(!exit.isEmpty)
+        #expect(!drop.isEmpty)
+        if let exitMin = exit.map(\.x).min(), let exitMax = exit.map(\.x).max(),
+           let dropMin = drop.map(\.x).min(), let dropMax = drop.map(\.x).max() {
+            let exitX = (exitMin + exitMax) / 2
+            let dropX = (dropMin + dropMax) / 2
+            #expect(abs(exitX - dropX) < 0.004)
+            #expect(exitMax < 0.035)
+        }
     }
 
     @Test func idleFlowTrackSitsJustAboveTheHouseGrey() {
@@ -667,6 +811,153 @@ struct GarageSceneTests {
         #expect(lowZ > highZ)
     }
 
+    @Test func idleHouseViewDoesNotRenderEveryFrame() {
+        let view = HouseCameraControlView(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+        let idle = PowerFlowSnapshot()
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: idle, interacting: false)
+        #expect(view.rendersContinuously == false)
+        #expect(view.isPlaying == false)
+
+        // Exactly the solver threshold is not "above" it, so the house stays still.
+        let atThreshold = PowerFlowSnapshot(solarW: 10, homeW: 10)
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: atThreshold, interacting: false)
+        #expect(view.rendersContinuously == false)
+        #expect(view.isPlaying == false)
+    }
+
+    @Test func idlePausePaintsTheRibbonBaseColour() {
+        guard let scene = ResidentialClassicScene.load() else { return }
+        let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+        let camera = HouseScenePose.identity.eye
+        let driver = HousePowerFlowDriver()
+        driver.attach(house: house, cameraPosition: camera)
+        let view = HouseCameraControlView(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+        view.scene = scene
+        view.delegate = driver
+
+        let flowing = PowerFlowSnapshot(solarW: 11, homeW: 11)
+        driver.update(flowing)
+        driver.renderer(view, updateAtTime: 0)
+        guard let material = house.childNode(withName: "PowerFlowWire_Solar_1A", recursively: true)?.geometry?.materials.first else {
+            #expect(Bool(false))
+            return
+        }
+
+        let animator = PowerFlowAnimator(
+            solarTerminateAt: 2.2,
+            camera: camera,
+            clearances: PowerFlowObstacles.clearances(house: house),
+            connectorPlug: PowerFlowObstacles.wallConnectorPlug(house: house)
+        )
+        guard let solar = animator.ribbons.first(where: { $0.name == "Solar_1A" }) else {
+            #expect(Bool(false))
+            return
+        }
+        animator.update(flowing)
+        let pulse = animator.colors(for: solar, at: 0)?.first
+        #expect(pulse != nil)
+        #expect(ribbonColor(material, matches: pulse))
+
+        let idle = PowerFlowSnapshot()
+        let idleDirection = PowerFlowRemapper.remap(PowerFlowSolver.wires(for: idle))["Solar_1A"]?.direction
+        #expect(idleDirection == .idle)
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: idle, interacting: false)
+        #expect(view.rendersContinuously == false)
+        #expect(view.isPlaying == false)
+        animator.update(idle)
+        let settled = animator.colors(for: solar, at: 0)?.first
+        #expect(settled != nil)
+        #expect(ribbonColor(material, matches: settled))
+        if let pulse, let settled {
+            let gap = abs(pulse.r - settled.r) + abs(pulse.g - settled.g) + abs(pulse.b - settled.b)
+            #expect(gap > 0.05)
+        }
+    }
+
+    /// Live order: the view pauses before the house attaches, then `applyPowerFlow`
+    /// stores the snapshot. A later solar-roof change rebuilds the ribbons while
+    /// the view is still paused. Both have to show the idle base colour.
+    @Test @MainActor func pausedViewPaintsIdleRibbonsAfterTheRendererIsInstalled() {
+        let controller = HouseSceneController()
+        let view = HouseCameraControlView(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+        view.scene = controller.scene
+        view.delegate = controller.powerFlow
+        let idle = PowerFlowSnapshot()
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: idle, interacting: false)
+        #expect(view.rendersContinuously == false)
+        #expect(view.isPlaying == false)
+
+        controller.prepareIfNeeded()
+        controller.applyPowerFlow(idle, solar: .panels)
+        let camera = SIMD3<Float>(
+            Float(controller.camera.position.x),
+            Float(controller.camera.position.y),
+            Float(controller.camera.position.z)
+        )
+        expectIdleSolarRibbon(in: controller.scene, camera: camera, solarTerminateAt: 2.2, view: view)
+
+        controller.applyPowerFlow(idle, solar: .roof)
+        expectIdleSolarRibbon(in: controller.scene, camera: camera, solarTerminateAt: 1000, view: view)
+    }
+
+    @Test func movingHouseViewKeepsRendering() {
+        let view = HouseCameraControlView(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+        let idle = PowerFlowSnapshot()
+        view.applyPlayback(rainIntensity: 0.4, snowIntensity: 0, snapshot: idle, interacting: false)
+        #expect(view.rendersContinuously == true)
+        #expect(view.isPlaying == true)
+
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0.4, snapshot: idle, interacting: false)
+        #expect(view.rendersContinuously == true)
+        #expect(view.isPlaying == true)
+
+        let flowing = PowerFlowSnapshot(solarW: 11, homeW: 11)
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: flowing, interacting: false)
+        let ribbonIsFlowing = PowerFlowSolver.wires(for: flowing).contains { $0.isFlowing }
+        #expect(ribbonIsFlowing)
+        #expect(view.rendersContinuously == true)
+        #expect(view.isPlaying == true)
+
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: idle, interacting: true)
+        #expect(view.rendersContinuously == true)
+        #expect(view.isPlaying == true)
+
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: idle, interacting: false)
+        #expect(view.rendersContinuously == false)
+        #expect(view.isPlaying == false)
+    }
+
+    @Test func hiddenCloudsDoNotDriftAndOrbitLeavesThemAlone() {
+        guard let scene = ResidentialClassicScene.load() else { return }
+        let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+        let lighting = HouseLighting(root: house)
+        // followSky parks the sky rig on the house's parent so it can face the camera.
+        func driftingClouds() -> Int {
+            var count = 0
+            scene.rootNode.enumerateHierarchy { node, _ in
+                if node.name?.hasPrefix("HouseCloud") == true, node.action(forKey: "cloudDrift") != nil {
+                    count += 1
+                }
+            }
+            return count
+        }
+        #expect(driftingClouds() == 0)
+
+        var covered = HouseLightingParameters()
+        covered.cloudCover = 1
+        lighting.apply(covered, animated: false)
+        let drifting = driftingClouds()
+        #expect(drifting == HouseSky.wisps.count)
+
+        let camera = SCNNode()
+        camera.camera = SCNCamera()
+        camera.simdTransform = HouseScenePose.identity.levelTransform
+        let size = CGSize(width: 1280, height: 720)
+        lighting.updateWeatherCoverage(camera: camera, viewport: size)
+        lighting.updateWeatherCoverage(camera: camera, viewport: size)
+        #expect(driftingClouds() == drifting)
+    }
+
     @Test func cabinCapsCloseAnUpperOpeningAndLeaveTheUndersideOpen() {
         let upper = HouseMeshSeam.cabinCaps(for: openCabinBox(missingTop: true))
         #expect((upper?.elements.first?.primitiveCount ?? 0) >= 2)
@@ -694,5 +985,40 @@ struct GarageSceneTests {
         let source = SCNGeometrySource(vertices: vertices)
         let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
         return SCNGeometry(sources: [source], elements: [element])
+    }
+
+    private func expectIdleSolarRibbon(in scene: SCNScene, camera: SIMD3<Float>, solarTerminateAt: Float, view: HouseCameraControlView) {
+        let idle = PowerFlowSnapshot()
+        let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+        let node = house.childNode(withName: "PowerFlowWire_Solar_1A", recursively: true)
+        #expect(node?.isHidden == false)
+        let direction = PowerFlowRemapper.remap(PowerFlowSolver.wires(for: idle))["Solar_1A"]?.direction
+        #expect(direction == .idle)
+        let animator = PowerFlowAnimator(
+            solarTerminateAt: solarTerminateAt,
+            camera: camera,
+            clearances: PowerFlowObstacles.clearances(house: house),
+            connectorPlug: PowerFlowObstacles.wallConnectorPlug(house: house)
+        )
+        animator.update(idle)
+        let settled = animator.ribbons.first { $0.name == "Solar_1A" }.flatMap { animator.colors(for: $0, at: 0)?.first }
+        #expect(settled != nil)
+        if let material = node?.geometry?.materials.first {
+            #expect(ribbonColor(material, matches: settled))
+        } else {
+            #expect(Bool(false))
+        }
+        #expect(view.rendersContinuously == false)
+        #expect(view.isPlaying == false)
+    }
+
+    private func ribbonColor(_ material: SCNMaterial, matches color: PowerFlowColor?) -> Bool {
+        guard let color, let painted = material.diffuse.contents as? HouseColor else { return false }
+        let resolved = painted.usingColorSpace(.sRGB) ?? painted
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return abs(Float(red) - color.r) < 0.02
+            && abs(Float(green) - color.g) < 0.02
+            && abs(Float(blue) - color.b) < 0.02
     }
 }

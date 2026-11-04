@@ -324,13 +324,13 @@ struct PowerFlowClearance: Sendable {
             && point.z >= lower.z && point.z <= upper.z
     }
 
-    /// Moves a point that already lies on the top or bottom face out to the front lip.
+    /// Moves a point on the top face out to the camera-side lip, so the solar
+    /// cable meets the front of the meter. The bottom face stays on the baked
+    /// drop: sliding it out hooks the grid cable sideways under the gateway.
     func frontLip(_ point: SIMD3<Float>, camera: SIMD3<Float>) -> SIMD3<Float> {
         guard inset == 0 else { return point }
         let eps: Float = 0.0015
-        let onTop = abs(point.y - upper.y) <= eps
-        let onBottom = abs(point.y - lower.y) <= eps
-        guard onTop || onBottom else { return point }
+        guard abs(point.y - upper.y) <= eps else { return point }
         var presented = point
         presented.x = camera.x >= point.x ? upper.x : lower.x
         return presented

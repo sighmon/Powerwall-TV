@@ -260,6 +260,9 @@ struct HouseSceneView: View {
     @AppStorage("houseHeadingDegrees") private var houseHeadingDegrees = 180.0
     @State private var controller = HouseSceneController()
     @State private var weatherMark: HouseWeatherMark?
+    @State private var skyRain: Float = 0
+    @State private var skySnow: Float = 0
+    @State private var revealingWeather = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -292,7 +295,11 @@ struct HouseSceneView: View {
                 pointOfView: controller.camera,
                 powerFlow: controller.powerFlow,
                 pose: viewModel.houseScenePose,
-                onPose: { viewModel.houseScenePose = $0 }
+                onPose: { viewModel.houseScenePose = $0 },
+                rainIntensity: skyRain,
+                snowIntensity: skySnow,
+                powerSnapshot: powerFlowSnapshot,
+                revealingWeather: revealingWeather
             )
                 .frame(width: size.width, height: size.height)
                 .focusable(false)
@@ -312,14 +319,21 @@ struct HouseSceneView: View {
                 .buttonStyle(.plain)
                 .padding(10)
                 .accessibilityLabel("Apple Weather legal attribution")
+                .transition(.opacity)
             }
         }
+        .animation(.easeInOut(duration: HouseWeatherFade.duration), value: weatherMark?.markURL)
         .onAppear {
+            controller.onRevealChange = { revealing in
+                revealingWeather = revealing
+                noteSky()
+            }
             controller.apply(pose: viewModel.houseScenePose)
             controller.prepareIfNeeded()
             controller.apply(viewModel.garagePresentation, heading: houseHeadingDegrees)
             controller.applyPowerFlow(powerFlowSnapshot, solar: viewModel.garagePresentation.solar)
             controller.setBatteryLevel(viewModel.batteryPercentage?.percentage)
+            noteSky()
         }
         .onChange(of: viewModel.batteryPercentage?.percentage) { percentage in
             controller.setBatteryLevel(percentage)
@@ -334,6 +348,13 @@ struct HouseSceneView: View {
         .onChange(of: houseHeadingDegrees) { heading in
             controller.applyHeading(heading)
         }
+        .onChange(of: viewModel.demoSceneIndex) { _ in
+            guard viewModel.isDemoMode else { return }
+            showDemoSky()
+        }
+        .onDisappear {
+            controller.cancelWeatherFade()
+        }
         .task(id: weatherIdentity) {
             // The sun steps with the clock. WeatherKit is read again every 15 minutes
             // so the wisps follow the current hour without a forecast call every tick.
@@ -343,6 +364,7 @@ struct HouseSceneView: View {
                     await loadWeather()
                 } else {
                     controller.advanceSkyClock()
+                    noteSky()
                 }
                 step += 1
                 do {
@@ -374,12 +396,17 @@ struct HouseSceneView: View {
     }
 
     private func loadWeather() async {
-        guard !viewModel.isDemoMode,
-              viewModel.loginMode == .fleetAPI,
+        guard !viewModel.isDemoMode else {
+            weatherMark = nil
+            showDemoSky()
+            return
+        }
+        guard viewModel.loginMode == .fleetAPI,
               let siteID = viewModel.energySiteId,
               !viewModel.accessToken.isEmpty else {
             weatherMark = nil
             controller.clearWeather(heading: houseHeadingDegrees)
+            noteSky()
             return
         }
 
@@ -391,7 +418,8 @@ struct HouseSceneView: View {
         do {
             let sample = try await service.houseWeather()
             guard !Task.isCancelled else { return }
-            controller.apply(sample: sample, heading: houseHeadingDegrees)
+            controller.apply(sample: sample, heading: houseHeadingDegrees, fadeIn: true)
+            noteSky()
             weatherMark = HouseWeatherMark(
                 legalPageURL: sample.legalPageURL,
                 markURL: sample.combinedMarkDarkURL
@@ -400,7 +428,22 @@ struct HouseSceneView: View {
             guard !Task.isCancelled else { return }
             weatherMark = nil
             controller.clearWeather(heading: houseHeadingDegrees)
+            noteSky()
         }
+    }
+
+    private func showDemoSky() {
+        controller.applyDemoSky(
+            DemoHouseTour.weather(at: viewModel.demoSceneIndex),
+            heading: houseHeadingDegrees,
+            fadeIn: true
+        )
+        noteSky()
+    }
+
+    private func noteSky() {
+        skyRain = controller.rainIntensity
+        skySnow = controller.snowIntensity
     }
 }
 
@@ -415,9 +458,18 @@ final class HouseSceneController {
     private var appliedModel: VehicleModel?
     private var appliedPaint: String?
     private var sample: HouseWeatherSample?
+    private var demoSky: DemoWeatherScene?
+    /// Set when a demo sky was stored before the house lights existed.
+    private var demoSkyNeedsApply = false
     private var heading = 180.0
     private var viewport: CGSize = .zero
     private var pose = HouseScenePose.identity
+    private var fadeTask: Task<Void, Never>?
+    private var fadeTarget: HouseLightingParameters?
+    private var fadeGeneration = 0
+    private var isRevealingWeather = false
+    /// Tells the scene view to keep drawing while a forecast is blending in.
+    var onRevealChange: ((Bool) -> Void)?
     /// Tesla's paint albedos assume a skybox. This lift keeps them readable under SceneKit lights.
     private let paintDisplayBoost: CGFloat = 4
 
@@ -465,10 +517,12 @@ final class HouseSceneController {
         let cameraPosition = SIMD3<Float>(Float(camera.position.x), Float(camera.position.y), Float(camera.position.z))
         batteryBar = PowerwallLevelBar(house: house, cameraPosition: cameraPosition)
         powerFlow.attach(house: house, cameraPosition: cameraPosition)
-        if let sample {
-            apply(sample: sample, heading: heading)
+        if let demoSky {
+            applyDemoSky(demoSky, heading: heading, fadeIn: true)
+        } else if let sample {
+            apply(sample: sample, heading: heading, fadeIn: true)
         } else {
-            applyClockLighting(heading: heading)
+            applyClockLighting(heading: heading, animated: false)
         }
         if viewport.width > 1 {
             lighting?.updateWeatherCoverage(camera: camera, viewport: viewport)
@@ -517,14 +571,61 @@ final class HouseSceneController {
         powerFlow.update(snapshot)
     }
 
-    func apply(sample: HouseWeatherSample, heading: Double, animated: Bool = true) {
+    func apply(sample: HouseWeatherSample, heading: Double, animated: Bool = true, fadeIn: Bool = false) {
+        demoSky = nil
+        demoSkyNeedsApply = false
         self.sample = sample
         self.heading = heading
         guard lighting != nil else { return }
+        present(weatherParameters(sample, heading: heading), animated: animated, fadeIn: fadeIn)
+    }
+
+    /// Shows a scripted demo sky. Repeating the scene that is already up does
+    /// not restart the fade. The clock does not move this sun.
+    func applyDemoSky(_ scene: DemoWeatherScene, heading: Double, fadeIn: Bool) {
+        let changed = demoSky != scene || sample != nil || demoSkyNeedsApply
+        demoSky = scene
+        sample = nil
+        self.heading = heading
+        guard lighting != nil else {
+            demoSkyNeedsApply = true
+            return
+        }
+        demoSkyNeedsApply = false
+        guard changed || !fadeIn else { return }
+        present(scene.parameters(heading: heading), animated: false, fadeIn: fadeIn && changed)
+    }
+
+    private func present(_ parameters: HouseLightingParameters, animated: Bool, fadeIn: Bool) {
+        guard lighting != nil else { return }
+        if fadeIn {
+            // The forecast replaces the clock sky. Blend it in so clouds and
+            // precipitation don't pop on when WeatherKit returns.
+            startWeatherFade(to: parameters)
+            return
+        }
+        if fadeTask != nil {
+            fadeTarget = parameters
+            return
+        }
+        lighting?.apply(parameters, animated: animated)
+    }
+
+    /// Stops a forecast blend. The next lighting apply owns the sky.
+    func cancelWeatherFade() {
+        fadeTask?.cancel()
+        fadeTask = nil
+        fadeTarget = nil
+        guard isRevealingWeather else { return }
+        isRevealingWeather = false
+        onRevealChange?(false)
+    }
+
+    private func weatherParameters(_ sample: HouseWeatherSample, heading: Double) -> HouseLightingParameters {
         // The hourly sample carries cloud cover. The disc follows the actual time,
         // so a display left on keeps the sun moving between forecast refreshes.
         let sun = SolarPosition.compute(date: Date(), coordinate: sample.location.coordinate)
-        let parameters = WeatherLighting(houseHeadingDegrees: heading).parameters(
+        return WeatherLighting(houseHeadingDegrees: heading).parameters(
             sunAltitude: sun.altitude,
             sunAzimuth: sun.azimuth,
             isDaylight: sun.altitude > -6,
@@ -532,11 +633,46 @@ final class HouseSceneController {
             condition: sample.condition,
             precipitationMillimetresPerHour: sample.precipitationMillimetresPerHour
         )
-        lighting?.apply(parameters, animated: animated)
+    }
+
+    private func startWeatherFade(to target: HouseLightingParameters) {
+        fadeTarget = target
+        guard let lighting else { return }
+        let from = lighting.currentParameters
+        fadeGeneration += 1
+        let generation = fadeGeneration
+        fadeTask?.cancel()
+        if !isRevealingWeather {
+            isRevealingWeather = true
+            onRevealChange?(true)
+        }
+        let task = Task { @MainActor in
+            let started = Date()
+            while !Task.isCancelled, fadeGeneration == generation {
+                let elapsed = Date().timeIntervalSince(started)
+                let t = min(1, elapsed / HouseWeatherFade.duration)
+                let goal = fadeTarget ?? target
+                lighting.apply(from.interpolated(toward: goal, fraction: Float(HouseWeatherFade.ease(t))), animated: false)
+                if t >= 1 { break }
+                do {
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled, fadeGeneration == generation else { return }
+            lighting.apply(fadeTarget ?? target, animated: false)
+            fadeTask = nil
+            fadeTarget = nil
+            isRevealingWeather = false
+            onRevealChange?(false)
+        }
+        fadeTask = task
     }
 
     /// Repositions the sun from the clock without fetching WeatherKit again.
     func advanceSkyClock() {
+        if demoSky != nil { return }
         if let sample {
             apply(sample: sample, heading: heading, animated: false)
         } else {
@@ -546,7 +682,9 @@ final class HouseSceneController {
 
     func applyHeading(_ heading: Double) {
         self.heading = heading
-        if let sample {
+        if let demoSky {
+            applyDemoSky(demoSky, heading: heading, fadeIn: false)
+        } else if let sample {
             apply(sample: sample, heading: heading)
         } else {
             applyClockLighting(heading: heading)
@@ -555,8 +693,14 @@ final class HouseSceneController {
 
     func clearWeather(heading: Double) {
         sample = nil
+        demoSky = nil
+        demoSkyNeedsApply = false
+        cancelWeatherFade()
         applyClockLighting(heading: heading)
     }
+
+    var rainIntensity: Float { lighting?.rainIntensity ?? 0 }
+    var snowIntensity: Float { lighting?.snowIntensity ?? 0 }
 
     private func applyClockLighting(heading: Double, animated: Bool = true) {
         self.heading = heading
@@ -581,13 +725,50 @@ private struct HouseMetalScene: View {
     let powerFlow: HousePowerFlowDriver
     let pose: HouseScenePose
     let onPose: (HouseScenePose) -> Void
+    let rainIntensity: Float
+    let snowIntensity: Float
+    let powerSnapshot: PowerFlowSnapshot
+    let revealingWeather: Bool
 
     var body: some View {
         #if os(macOS)
-        HouseMetalSceneMac(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose)
+        HouseMetalSceneMac(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose, rainIntensity: rainIntensity, snowIntensity: snowIntensity, powerSnapshot: powerSnapshot, revealingWeather: revealingWeather)
         #else
-        HouseMetalSceneIOS(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose)
+        HouseMetalSceneIOS(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose, rainIntensity: rainIntensity, snowIntensity: snowIntensity, powerSnapshot: powerSnapshot, revealingWeather: revealingWeather)
         #endif
+    }
+}
+
+/// How long a loaded forecast takes to replace the clock sky.
+enum HouseWeatherFade {
+    static let duration: TimeInterval = 5
+
+    static func ease(_ t: Double) -> Double {
+        let x = min(max(t, 0), 1)
+        return x * x * (3 - 2 * x)
+    }
+}
+
+/// Idle house frames stay still. Dragging, rain, snow, a ribbon above the
+/// solver's 10 W threshold, or a forecast still fading in is what keeps
+/// SceneKit on the display refresh.
+enum HouseSceneRenderPolicy {
+    static func needsContinuousRendering(interacting: Bool, rainIntensity: Float, snowIntensity: Float, snapshot: PowerFlowSnapshot, revealingWeather: Bool = false) -> Bool {
+        let precipitation = rainIntensity > 0 || snowIntensity > 0
+        let flowing = PowerFlowSolver.wires(for: snapshot).contains { $0.isFlowing }
+        return interacting || precipitation || flowing || revealingWeather
+    }
+
+    static func apply(to view: SCNView, interacting: Bool, rainIntensity: Float, snowIntensity: Float, snapshot: PowerFlowSnapshot, revealingWeather: Bool = false) {
+        let continuous = needsContinuousRendering(
+            interacting: interacting,
+            rainIntensity: rainIntensity,
+            snowIntensity: snowIntensity,
+            snapshot: snapshot,
+            revealingWeather: revealingWeather
+        )
+        view.rendersContinuously = continuous
+        view.isPlaying = continuous
     }
 }
 
@@ -598,6 +779,11 @@ final class HouseCameraControlView: SCNView {
     var onPose: (HouseScenePose) -> Void = { _ in }
     private var revision = 0
     private var syncedRevision = 0
+    private var isAdjustingCamera = false
+    private var rainIntensity: Float = 0
+    private var snowIntensity: Float = 0
+    private var powerSnapshot = PowerFlowSnapshot()
+    private var revealingWeather = false
 
     override init(frame frameRect: CGRect, options: [String: Any]? = nil) {
         super.init(frame: frameRect, options: options)
@@ -615,6 +801,50 @@ final class HouseCameraControlView: SCNView {
             pose = incoming
         }
         syncedRevision = revision
+    }
+
+    /// The same call `HouseMetalScene` uses when it binds the live view.
+    func applyPlayback(rainIntensity: Float, snowIntensity: Float, snapshot: PowerFlowSnapshot, interacting: Bool? = nil, revealingWeather: Bool? = nil) {
+        if let interacting { isAdjustingCamera = interacting }
+        if let revealingWeather { self.revealingWeather = revealingWeather }
+        self.rainIntensity = rainIntensity
+        self.snowIntensity = snowIntensity
+        powerSnapshot = snapshot
+        let continuous = HouseSceneRenderPolicy.needsContinuousRendering(
+            interacting: isAdjustingCamera,
+            rainIntensity: rainIntensity,
+            snowIntensity: snowIntensity,
+            snapshot: snapshot,
+            revealingWeather: self.revealingWeather
+        )
+        // The SwiftUI binding reaches this before `onChange` pushes the snapshot.
+        // Give the driver that snapshot and, when the view is about to pause,
+        // paint it. A paused view never ticks, so the last pulse would stick.
+        if let driver = delegate as? HousePowerFlowDriver {
+            // Record the pause before the snapshot. Attach and later solar-roof
+            // rebuilds paint from this flag, because they run after the view has
+            // already stopped.
+            driver.setPlaybackContinuous(continuous)
+            driver.update(snapshot)
+        }
+        rendersContinuously = continuous
+        isPlaying = continuous
+    }
+
+    private func beginCameraAdjustment() {
+        guard !isAdjustingCamera else { return }
+        isAdjustingCamera = true
+        refreshPlayback()
+    }
+
+    private func endCameraAdjustment() {
+        guard isAdjustingCamera else { return }
+        isAdjustingCamera = false
+        refreshPlayback()
+    }
+
+    private func refreshPlayback() {
+        applyPlayback(rainIntensity: rainIntensity, snowIntensity: snowIntensity, snapshot: powerSnapshot)
     }
 
     fileprivate func publish(_ next: HouseScenePose) {
@@ -669,6 +899,7 @@ final class HouseCameraControlView: SCNView {
 
     #if os(iOS)
     @objc private func orbitPan(_ gesture: UIPanGestureRecognizer) {
+        noteCameraGesture(gesture.state)
         let delta = gesture.translation(in: self)
         gesture.setTranslation(.zero, in: self)
         // UIKit Y grows downward. Passing it through matches the orbit the
@@ -678,6 +909,7 @@ final class HouseCameraControlView: SCNView {
     }
 
     @objc private func twoFingerPan(_ gesture: UIPanGestureRecognizer) {
+        noteCameraGesture(gesture.state)
         let delta = gesture.translation(in: self)
         gesture.setTranslation(.zero, in: self)
         pan(deltaX: delta.x, deltaY: -delta.y)
@@ -690,12 +922,25 @@ final class HouseCameraControlView: SCNView {
         guard factor > 0 else { return }
         zoom(multiplier: 1 / Double(factor))
     }
+
+    private func noteCameraGesture(_ state: UIGestureRecognizer.State) {
+        switch state {
+        case .began, .changed:
+            beginCameraAdjustment()
+        case .ended, .cancelled, .failed:
+            endCameraAdjustment()
+        default:
+            break
+        }
+    }
     #endif
 
     #if os(macOS)
     override var acceptsFirstResponder: Bool { false }
 
-    override func mouseDown(with event: NSEvent) {}
+    override func mouseDown(with event: NSEvent) {
+        beginCameraAdjustment()
+    }
 
     override func mouseDragged(with event: NSEvent) {
         if event.modifierFlags.contains(.option) {
@@ -707,7 +952,9 @@ final class HouseCameraControlView: SCNView {
         }
     }
 
-    override func rightMouseDown(with event: NSEvent) {}
+    override func rightMouseDown(with event: NSEvent) {
+        beginCameraAdjustment()
+    }
 
     override func rightMouseDragged(with event: NSEvent) {
         pan(with: event)
@@ -718,7 +965,13 @@ final class HouseCameraControlView: SCNView {
         pan(deltaX: event.deltaX, deltaY: -event.deltaY)
     }
 
-    override func rightMouseUp(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {
+        endCameraAdjustment()
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        endCameraAdjustment()
+    }
 
     override func menu(for event: NSEvent) -> NSMenu? { nil }
 
@@ -742,6 +995,10 @@ private struct HouseMetalSceneMac: NSViewRepresentable {
     let powerFlow: HousePowerFlowDriver
     let pose: HouseScenePose
     let onPose: (HouseScenePose) -> Void
+    let rainIntensity: Float
+    let snowIntensity: Float
+    let powerSnapshot: PowerFlowSnapshot
+    let revealingWeather: Bool
 
     func makeCoordinator() -> HousePowerFlowDriver { powerFlow }
     func makeNSView(context: Context) -> HouseCameraControlView { configured(context.coordinator) }
@@ -758,12 +1015,11 @@ private struct HouseMetalSceneMac: NSViewRepresentable {
         if view.pointOfView !== pointOfView { view.pointOfView = pointOfView }
         view.antialiasingMode = .multisampling4X
         view.allowsCameraControl = false
-        view.rendersContinuously = true
-        view.isPlaying = true
         view.focusRingType = .none
         view.sync(from: pose)
         view.onPose = onPose
         if view.delegate !== delegate { view.delegate = delegate }
+        view.applyPlayback(rainIntensity: rainIntensity, snowIntensity: snowIntensity, snapshot: powerSnapshot, revealingWeather: revealingWeather)
     }
 }
 #else
@@ -773,6 +1029,10 @@ private struct HouseMetalSceneIOS: UIViewRepresentable {
     let powerFlow: HousePowerFlowDriver
     let pose: HouseScenePose
     let onPose: (HouseScenePose) -> Void
+    let rainIntensity: Float
+    let snowIntensity: Float
+    let powerSnapshot: PowerFlowSnapshot
+    let revealingWeather: Bool
 
     func makeCoordinator() -> HousePowerFlowDriver { powerFlow }
     func makeUIView(context: Context) -> HouseCameraControlView { configured(context.coordinator) }
@@ -789,11 +1049,10 @@ private struct HouseMetalSceneIOS: UIViewRepresentable {
         if view.pointOfView !== pointOfView { view.pointOfView = pointOfView }
         view.antialiasingMode = .multisampling4X
         view.allowsCameraControl = false
-        view.rendersContinuously = true
-        view.isPlaying = true
         view.sync(from: pose)
         view.onPose = onPose
         if view.delegate !== delegate { view.delegate = delegate }
+        view.applyPlayback(rainIntensity: rainIntensity, snowIntensity: snowIntensity, snapshot: powerSnapshot, revealingWeather: revealingWeather)
     }
 }
 #endif

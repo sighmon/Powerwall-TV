@@ -55,6 +55,27 @@ struct HouseLightingParameters: Equatable {
     /// 0 clear … 1 overcast. Veils the sun disc and fills in the cloud wisps.
     /// Ambient dimming still uses the measured cover inside `WeatherLighting`.
     var cloudCover: Float = 0
+
+    func interpolated(toward other: HouseLightingParameters, fraction: Float) -> HouseLightingParameters {
+        let t = min(max(fraction, 0), 1)
+        func mix(_ from: Float, _ to: Float) -> Float { from + (to - from) * t }
+        func mix3(_ from: SIMD3<Float>, _ to: SIMD3<Float>) -> SIMD3<Float> { from + (to - from) * t }
+        var copy = self
+        copy.theme = mix(theme, other.theme)
+        copy.sunDirection = mix3(sunDirection, other.sunDirection)
+        copy.ambientScale = mix(ambientScale, other.ambientScale)
+        copy.nightLightPower = mix(nightLightPower, other.nightLightPower)
+        copy.albedoLight = mix3(albedoLight, other.albedoLight)
+        copy.albedoDark = mix3(albedoDark, other.albedoDark)
+        copy.nightLight = mix3(nightLight, other.nightLight)
+        copy.rainIntensity = mix(rainIntensity, other.rainIntensity)
+        copy.snowIntensity = mix(snowIntensity, other.snowIntensity)
+        copy.sunAltitude = mix(sunAltitude, other.sunAltitude)
+        copy.sunAzimuth = mix(sunAzimuth, other.sunAzimuth)
+        copy.houseHeading = mix(houseHeading, other.houseHeading)
+        copy.cloudCover = mix(cloudCover, other.cloudCover)
+        return copy
+    }
 }
 
 // MARK: - Visible sky
@@ -386,8 +407,15 @@ final class HouseLighting {
 
         rain.birthRate = CGFloat(p.rainIntensity) * 90 * coverageScale
         snow.birthRate = CGFloat(p.snowIntensity) * 22 * coverageScale
+        // A paused view would otherwise leave the last drops hanging in the air.
+        rainNode.isHidden = p.rainIntensity <= 0
+        snowNode.isHidden = p.snowIntensity <= 0
         layoutSky(animated: animated)
     }
+
+    var rainIntensity: Float { parameters.rainIntensity }
+    var snowIntensity: Float { parameters.snowIntensity }
+    var currentParameters: HouseLightingParameters { parameters }
 
     /// Sizes the rain and snow volume to the camera frustum so precipitation covers the
     /// whole view, including the sky around the house, at a light density.
@@ -444,6 +472,8 @@ final class HouseLighting {
             coverageScale = CGFloat((size.x * size.y * size.z) / 4000)
             rain.birthRate = CGFloat(parameters.rainIntensity) * 90 * coverageScale
             snow.birthRate = CGFloat(parameters.snowIntensity) * 22 * coverageScale
+            rainNode.isHidden = parameters.rainIntensity <= 0
+            snowNode.isHidden = parameters.snowIntensity <= 0
         }
     }
 
@@ -579,11 +609,6 @@ final class HouseLighting {
             let card = SCNNode(geometry: plane)
             card.name = "HouseCloud\(index)"
             card.renderingOrder = 4
-            let drift = SCNAction.sequence([
-                SCNAction.moveBy(x: 0.7, y: 0.05, z: 0, duration: 42 + Double(index) * 5),
-                SCNAction.moveBy(x: -0.7, y: -0.05, z: 0, duration: 42 + Double(index) * 5),
-            ])
-            card.runAction(.repeatForever(drift))
             let holder = SCNNode()
             holder.opacity = 0
             holder.isHidden = true
@@ -596,6 +621,16 @@ final class HouseLighting {
         sunDisc.isHidden = true
         sunHalo.isHidden = true
         root.addChildNode(skyRig)
+    }
+
+    private static let cloudDriftKey = "cloudDrift"
+
+    private static func cloudDrift(index: Int) -> SCNAction {
+        let drift = SCNAction.sequence([
+            SCNAction.moveBy(x: 0.7, y: 0.05, z: 0, duration: 42 + Double(index) * 5),
+            SCNAction.moveBy(x: -0.7, y: -0.05, z: 0, duration: 42 + Double(index) * 5),
+        ])
+        return .repeatForever(drift)
     }
 
     /// Keeps the sky card in front of the camera. Card layout is left alone while
@@ -684,6 +719,19 @@ final class HouseLighting {
             holder.isHidden = opacity < 0.02
         }
         SCNTransaction.commit()
+        // runAction inside a transaction with actions disabled never attaches.
+        // A hidden or fully transparent card must not keep a forever action.
+        for (index, (holder, wisp)) in zip(cloudCards, HouseSky.wisps).enumerated() {
+            let opacity = HouseSky.wispOpacity(threshold: wisp.threshold, cloudCover: p.cloudCover, cirrus: wisp.cirrus)
+            let card = holder.childNodes.first
+            if opacity >= 0.02 {
+                if card?.action(forKey: Self.cloudDriftKey) == nil {
+                    card?.runAction(Self.cloudDrift(index: index), forKey: Self.cloudDriftKey)
+                }
+            } else {
+                card?.removeAction(forKey: Self.cloudDriftKey)
+            }
+        }
     }
 
     private func installFillLights() {
@@ -950,6 +998,17 @@ enum HouseSkyArt {
         return material
     }
 
+    /// Thin edges stay as drawn. Past a light shoulder the core keeps gaining
+    /// density slowly, instead of slamming into a flat opaque middle.
+    static func cloudThickness(_ body: Float) -> Float {
+        let clamped = max(body, 0)
+        let shoulder: Float = 0.22
+        guard clamped > shoulder else { return clamped }
+        let excess = clamped - shoulder
+        let core = shoulder + excess / (1 + excess * 5)
+        return min(core, 0.62)
+    }
+
     private struct Blob {
         var x, y, rx, ry, amp: Float
     }
@@ -991,7 +1050,7 @@ enum HouseSkyArt {
                 let strands = 0.55 + 0.45 * sin(u * shred + v * 2.5) * sin(u * shred * 0.37 - 1.3)
                 let edge = max(abs(u) / 0.98, abs(v) / 0.9)
                 let window = 1 - HouseSky.smoothstep(0.45, 1, edge)
-                let alpha = min(max(amount * strands * window, 0), 0.62)
+                let alpha = cloudThickness(amount * strands * window)
                 let index = (y * width + x) * 4
                 // Cool white. Alpha carries the wisp so stacked clouds stay soft.
                 pixels[index] = 226

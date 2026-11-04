@@ -147,6 +147,7 @@ struct ContentView: View {
     @State private var showPowerwallRuntimeEstimate = false
     @State private var powerwallRuntimeEstimateTask: DispatchWorkItem?
     @State private var powerwallRuntimeEstimateTimerCycle = 0
+    @State private var demoTourTick = 0
     @State private var lastPowerwallRuntimeEstimateTimerCycle: Int?
     @State private var houseCallouts: HouseCalloutPoints?
     @FocusState private var hasKeyboardFocus: Bool
@@ -394,7 +395,11 @@ struct ContentView: View {
 #endif
         .onChange(of: viewModel.isDemoMode) { isDemo in
             exportAdvisor.invalidate()
-            if isDemo { queueInitialDemoData() }
+            if isDemo {
+                viewModel.demoSceneIndex = 0
+                demoTourTick = 0
+                queueInitialDemoData()
+            }
         }
         .onChange(of: showingSettings) { isShowing in
             if !isShowing && viewModel.isDemoMode { queueInitialDemoData() }
@@ -415,6 +420,10 @@ struct ContentView: View {
                 PowerwallScheduleManager.shared.applyDueSchedules(using: viewModel)
             }
             if viewModel.isDemoMode {
+                demoTourTick += 1
+                if demoTourTick.isMultiple(of: DemoHouseTour.powerTicksPerScene) {
+                    viewModel.demoSceneIndex += 1
+                }
                 let homeLoad = Double(arc4random_uniform(4096)) + 256
                 queueDemoPowerwallData(
                     batteryPower: homeLoad * 0.2,
@@ -1324,12 +1333,11 @@ struct ContentView: View {
         return "\(name) \(batteryDisplay)"
     }
 
-    private func configureDemoVehicleData(batteryLevel: Double) {
-        let demoVIN = "abc123"
+    private func configureDemoVehicleData(batteryLevel: Double, vehicle: DemoVehicle) {
         viewModel.vehicles = [
-            FleetVehicle(vin: demoVIN, displayName: "Demo Tesla", state: "online")
+            FleetVehicle(vin: vehicle.vin, displayName: vehicle.displayName, state: "online")
         ]
-        viewModel.vehicleChargeStates[demoVIN] = VehicleChargeSnapshot(
+        viewModel.vehicleChargeStates[vehicle.vin] = VehicleChargeSnapshot(
             batteryLevel: batteryLevel,
             chargingState: "Charging",
             minutesToFullCharge: 45
@@ -1369,6 +1377,7 @@ struct ContentView: View {
         vehicleBatteryLevel: Double,
         siteName: String? = nil
     ) {
+        let vehicle = DemoHouseTour.vehicle(at: viewModel.demoSceneIndex)
         DispatchQueue.main.async {
             guard viewModel.isDemoMode else { return }
             viewModel.data = PowerwallData(
@@ -1379,7 +1388,7 @@ struct ContentView: View {
                     energyExported: solarEnergyExported
                 ),
                 site: PowerwallData.Site(instantPower: sitePower),
-                wallConnectors: [WallConnector(vin: "abc123", din: "def456", wallConnectorState: 1.0, wallConnectorPower: wallConnectorPower)]
+                wallConnectors: [WallConnector(vin: vehicle.vin, din: "def456", wallConnectorState: 1.0, wallConnectorPower: wallConnectorPower)]
             )
             viewModel.batteryPercentage = BatteryPercentage(percentage: batteryPercentage)
             viewModel.gridStatus = GridStatus(status: gridStatus)
@@ -1389,7 +1398,7 @@ struct ContentView: View {
             if let siteName {
                 viewModel.siteName = siteName
             }
-            configureDemoVehicleData(batteryLevel: vehicleBatteryLevel)
+            configureDemoVehicleData(batteryLevel: vehicleBatteryLevel, vehicle: vehicle)
             configureDemoElectricityGridData()
         }
     }

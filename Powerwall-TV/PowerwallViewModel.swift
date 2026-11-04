@@ -44,6 +44,9 @@ class PowerwallViewModel: ObservableObject {
 
     var isDemoMode: Bool { ipAddress.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "demo" }
 
+    /// Which `DemoHouseTour` sky and car demo mode is showing. Not saved.
+    @Published var demoSceneIndex: Int = 0
+
     // Local login
     @Published var loginMode: LoginMode = LoginMode(rawValue: UserDefaults.standard.string(forKey: "loginMode") ?? LoginMode.fleetAPI.rawValue) ?? .fleetAPI
     @Published var ipAddress: String = UserDefaults.standard.string(forKey: "gatewayIP") ?? "" {

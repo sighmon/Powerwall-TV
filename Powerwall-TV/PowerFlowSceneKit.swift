@@ -84,6 +84,10 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
     private var renderer: PowerFlowSceneKitRenderer?
     private var solarTerminate: Float = 2.2
     private var snapshot: PowerFlowSnapshot?
+    /// False until the house view says it is rendering continuously. Install and
+    /// snapshot updates paint immediately while this stays false, because a paused
+    /// view never calls `renderer(_:updateAtTime:)`.
+    private var playbackContinuous = false
     private var camera = SIMD3<Float>(7.55, 5.7, 9.75)
     private var clearances: [PowerFlowClearance] = []
     private var connectorPlug: SIMD3<Float>?
@@ -111,11 +115,22 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
         installLocked()
     }
 
+    /// The house view sets this before pushing a snapshot. While it is false, `update`
+    /// paints the ribbons itself.
+    func setPlaybackContinuous(_ continuous: Bool) {
+        lock.lock()
+        playbackContinuous = continuous
+        lock.unlock()
+    }
+
     func update(_ snapshot: PowerFlowSnapshot) {
         lock.lock()
         defer { lock.unlock() }
         self.snapshot = snapshot
         renderer?.update(snapshot)
+        // The view may already be paused. `applyPlayback` runs before the house
+        // attaches, and `setSolarTerminate` rebuilds hidden ribbons afterwards.
+        paintLockedIfPaused()
     }
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
@@ -132,6 +147,13 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
         )
         if let snapshot { next.update(snapshot) }
         renderer = next
+        paintLockedIfPaused()
+    }
+
+    /// New ribbon nodes start hidden. A paused view will not tick them later.
+    private func paintLockedIfPaused() {
+        guard !playbackContinuous, snapshot != nil else { return }
+        renderer?.tick(at: 0)
     }
 }
 
