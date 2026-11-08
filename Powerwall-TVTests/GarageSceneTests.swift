@@ -1184,6 +1184,13 @@ struct GarageSceneTests {
         lighting.apply(covered, animated: false)
         let drifting = driftingClouds()
         #expect(drifting == HouseSky.wisps.count)
+        var cloudMaterials = 0
+        scene.rootNode.enumerateHierarchy { node, _ in
+            guard node.name?.hasPrefix("HouseCloud") == true else { return }
+            cloudMaterials += node.geometry?.materials.count ?? 0
+            #expect(node.geometry?.materials.allSatisfy { $0.readsFromDepthBuffer == false } == true)
+        }
+        #expect(cloudMaterials == HouseSky.wisps.count)
 
         let camera = SCNNode()
         camera.camera = SCNCamera()

@@ -737,7 +737,9 @@ final class HouseLighting {
 
         for (index, wisp) in HouseSky.wisps.enumerated() {
             let plane = SCNPlane(width: CGFloat(wisp.width), height: CGFloat(wisp.height))
-            plane.materials = [HouseSkyArt.material(wisp.cirrus ? HouseSkyArt.cirrus : HouseSkyArt.puff, additive: false)]
+            // The house and the ground plate write a depth mask. A low wisp crosses
+            // both, so it ignores that mask and stays whole above the roof.
+            plane.materials = [HouseSkyArt.material(wisp.cirrus ? HouseSkyArt.cirrus : HouseSkyArt.puff, additive: false, readsDepth: false)]
             let card = SCNNode(geometry: plane)
             card.name = "HouseCloud\(index)"
             card.renderingOrder = 4
@@ -1147,14 +1149,14 @@ enum HouseSkyArt {
         shred: 5
     )
 
-    static func material(_ image: CGImage, additive: Bool) -> SCNMaterial {
+    static func material(_ image: CGImage, additive: Bool, readsDepth: Bool = true) -> SCNMaterial {
         let material = SCNMaterial()
         material.lightingModel = .constant
         material.isDoubleSided = true
         material.diffuse.contents = platformImage(image)
         material.blendMode = additive ? .add : .alpha
         material.writesToDepthBuffer = false
-        material.readsFromDepthBuffer = true
+        material.readsFromDepthBuffer = readsDepth
         material.transparencyMode = additive ? .rgbZero : .aOne
         return material
     }
