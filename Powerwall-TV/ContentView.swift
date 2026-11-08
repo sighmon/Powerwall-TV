@@ -734,9 +734,7 @@ struct ContentView: View {
 
             if showFlatPower && wallConnectorEnergyTotal(data: data) > 10 {
                 PowerSurgeView(
-                    color: data.solar.instantPower + wiggleWatts > data.battery.instantPower
-                        ? .yellow
-                        : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
+                    color: leadingSupplyColor(data: data),
                     isForward: wallConnectorEnergyTotal(data: data) < 0,
                     duration: 2,
                     lineWidth: surgeLineWidth,
@@ -764,9 +762,7 @@ struct ContentView: View {
 
             if showFlatPower && data.load.instantPower > 10 {
                 PowerSurgeView(
-                    color: data.solar.instantPower + wiggleWatts > data.battery.instantPower
-                        ? .yellow
-                        : data.battery.instantPower + wiggleWatts > data.site.instantPower ? .green : .gray,
+                    color: leadingSupplyColor(data: data),
                     isForward: true,
                     duration: 2,
                     startOffset: 1,
@@ -1816,6 +1812,20 @@ struct ContentView: View {
 
     private func homeEnergyToDisplay(data: PowerwallData) -> Double {
         return data.load.instantPower - self.wallConnectorEnergyTotal(data: data)
+    }
+
+    /// Same solar / Powerwall / grid choice as the 3D wall-connector cable.
+    private func leadingSupplyColor(data: PowerwallData) -> Color {
+        switch PowerFlowSupply.dominant(
+            solarW: data.solar.instantPower,
+            batteryW: data.battery.instantPower,
+            gridW: data.site.instantPower,
+            biasW: wiggleWatts
+        ) {
+        case .solar: return .yellow
+        case .battery: return .green
+        case .grid: return .gray
+        }
     }
 
     private func wallConnectorEnergyTotal(data: PowerwallData?) -> Double {

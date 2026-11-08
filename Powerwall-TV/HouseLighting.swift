@@ -29,6 +29,94 @@ import UIKit
 import AppKit
 #endif
 
+// MARK: - Ground plate
+
+/// Black plate under the house. SceneKit mirrors the house into it and fades
+/// that mirror out, the way the flat home image does.
+enum HouseGroundPlate {
+    static let name = "HouseGroundPlate"
+    /// Nodes that keep this bit are drawn in the reflection.
+    static let reflectionBit = 1 << 3
+
+    /// The house shell, the Powerwall, and the windows. The garage door is part of the shell.
+    private static let includedPrefixes = ["Home", "GarageDoor", "Powerwall", "Windows"]
+    /// Solar, the gateway, ribbons, cars, and overlays stay out even when they sit under an included node.
+    private static let excludedPrefixes = [
+        "Solar", "Meter", "Gateway", "WallConnector", "Vehicle",
+        "PowerFlow", "PowerwallLevel", "HouseSky", "Rain", "Snow",
+        "Shadow", "GarageVehicleShadow", "GroundReflection", "HouseGroundPlate",
+        "HouseFill", "HouseSun", "HouseCloud", "SunHalo", "SunDisc",
+    ]
+
+    static func install(on root: SCNNode) {
+        guard root.childNode(withName: name, recursively: false) == nil else { return }
+        let floor = SCNFloor()
+        floor.reflectivity = 0.22
+        // Height above the plate, in metres. A negative start means the fade is
+        // already underway at the floor. It finishes a little above the old 0.2 m
+        // cutoff, so the drop is earlier and slightly longer.
+        floor.reflectionFalloffStart = -0.08
+        floor.reflectionFalloffEnd = 0.32
+        floor.reflectionCategoryBitMask = reflectionBit
+        // A Core Image filter on this node skips the reflection pass entirely, so the
+        // mirror stays full size. A smaller buffer only pixelates it.
+        #if os(macOS)
+        floor.reflectionResolutionScaleFactor = 1
+        #endif
+        let footprint = HouseCameraFraming.modelMax - HouseCameraFraming.modelMin
+        let margin: Float = 2.4
+        floor.width = CGFloat(footprint.x + margin * 2)
+        floor.length = CGFloat(footprint.z + margin * 2)
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.diffuse.contents = HouseColor(red: 22 / 255, green: 23 / 255, blue: 24 / 255, alpha: 1)
+        floor.materials = [material]
+        let node = SCNNode(geometry: floor)
+        node.name = name
+        let centre = (HouseCameraFraming.modelMin + HouseCameraFraming.modelMax) * 0.5
+        node.simdPosition = SIMD3(centre.x, -0.01, centre.z)
+        root.addChildNode(node)
+        assignReflection(on: root)
+    }
+
+    /// Clears the reflection bit on everything, then sets it on the house, Powerwall, and windows.
+    static func assignReflection(on root: SCNNode) {
+        func visit(_ node: SCNNode, ancestorIncluded: Bool) {
+            let name = node.name ?? ""
+            let excluded = excludedPrefixes.contains { name.hasPrefix($0) }
+            let included = includedPrefixes.contains { name.hasPrefix($0) }
+            let reflect = !excluded && (included || ancestorIncluded)
+            if reflect {
+                node.categoryBitMask |= reflectionBit
+            } else {
+                node.categoryBitMask &= ~reflectionBit
+            }
+            for child in node.childNodes {
+                visit(child, ancestorIncluded: !excluded && (included || ancestorIncluded))
+            }
+        }
+        visit(root, ancestorIncluded: false)
+    }
+
+    static func omitFromReflection(_ node: SCNNode) {
+        node.categoryBitMask &= ~reflectionBit
+        for child in node.childNodes {
+            omitFromReflection(child)
+        }
+    }
+
+    /// SceneKit's floor mirror uses a camera under the plate, so its view matrix
+    /// has a negative determinant. The live camera does not. Discarding there
+    /// removes the reflection without hiding the node on the house.
+    static let reflectedFragment = """
+    #pragma body
+    float reflected = determinant(float3x3(scn_frame.viewTransform[0].xyz, scn_frame.viewTransform[1].xyz, scn_frame.viewTransform[2].xyz));
+    if (reflected < 0.0) {
+        discard_fragment();
+    }
+    """
+}
+
 // MARK: - Lighting parameters
 
 struct HouseLightingParameters: Equatable {
@@ -356,14 +444,17 @@ final class HouseLighting {
         root.childNode(withName: "GarageVehicleShadow", recursively: true)?.isHidden = true
         root.childNode(withName: "GroundReflection", recursively: true)?.isHidden = true
 
-        // Powerwall, meter and connector have no shader. Left on the imported
-        // physically based materials they render black, like holes in the wall.
+        // Left on the imported physically based materials these render black,
+        // like holes in the wall. The gateway then gets its own material copy.
         for name in ["Powerwall", "Meter", "WallConnector"] {
             for material in materials(under: name) {
                 material.lightingModel = .constant
                 material.isDoubleSided = true
             }
         }
+        // The gateway's grey material is also on the wall connector. Copy it first
+        // so only the gateway drops out of the floor mirror.
+        dropFromReflection(named: "Meter")
         installFillLights()
         setSolar(.panels)
         if let vehicle = root.childNode(withName: "Vehicle", recursively: true) {
@@ -382,6 +473,7 @@ final class HouseLighting {
         root.addChildNode(rainNode)
         root.addChildNode(snowNode)
         installSky()
+        HouseGroundPlate.install(on: root)
 
         apply(HouseLightingParameters())
     }
@@ -529,6 +621,7 @@ final class HouseLighting {
         vehicle.addChildNode(car)
         parkedVehicle = car
         repairVehicleShell(car)
+        HouseGroundPlate.omitFromReflection(car)
         if let paint { setVehiclePaint(paint) }
     }
 
@@ -837,6 +930,21 @@ final class HouseLighting {
             guard let geometry = child.geometry,
                   let sealed = HouseMeshSeam.sealThinCracks(geometry) else { return }
             child.geometry = sealed
+        }
+    }
+
+    /// Copies the node's materials and discards them in the floor's mirrored camera.
+    private func dropFromReflection(named name: String) {
+        guard let node = root.childNode(withName: name, recursively: true) else { return }
+        node.enumerateHierarchy { child, _ in
+            guard let geometry = child.geometry, !geometry.materials.isEmpty else { return }
+            geometry.materials = geometry.materials.map { source in
+                let material = (source.copy() as? SCNMaterial) ?? source
+                var modifiers = material.shaderModifiers ?? [:]
+                modifiers[.fragment] = HouseGroundPlate.reflectedFragment
+                material.shaderModifiers = modifiers
+                return material
+            }
         }
     }
 

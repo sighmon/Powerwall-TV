@@ -56,6 +56,27 @@ enum PowerFlowStyle {
     static let fallbackColor = PowerFlowColor(hex: 0xAAAAAA)
 }
 
+/// Leading supply for the charger cable and the flat charger and home surges.
+/// Solar wins while it is within `biasW` of the Powerwall. The grid wins only
+/// when it leads the Powerwall by more than `biasW` and solar does not.
+enum PowerFlowSupply: Equatable, Sendable {
+    case solar, battery, grid
+
+    static func dominant(solarW: Double, batteryW: Double, gridW: Double, biasW: Double = 40) -> PowerFlowSupply {
+        if solarW + biasW > batteryW { return .solar }
+        if batteryW + biasW > gridW { return .battery }
+        return .grid
+    }
+
+    var wireColor: PowerFlowColor {
+        switch self {
+        case .solar: return PowerFlowStyle.defaultWireColors[.solar] ?? PowerFlowStyle.fallbackColor
+        case .battery: return PowerFlowStyle.defaultWireColors[.battery] ?? PowerFlowStyle.fallbackColor
+        case .grid: return PowerFlowStyle.defaultWireColors[.grid] ?? PowerFlowStyle.fallbackColor
+        }
+    }
+}
+
 /// PowerflowWire.shader uniforms (material defaults in the ResidentialClassic scene).
 struct PowerFlowShaderParameters: Sendable {
     var pulseLength: Float = 9        // UV units per pulse
@@ -158,7 +179,10 @@ enum PowerFlowSolver {
         }
         if toVehicle > 0 {
             add(.meter, .vehicle1, toVehicle)
-            add(.wallConnector1, .vehicle1, toVehicle)
+            // The cable's source is the wall connector, whose default colour is grey.
+            // Match the flat charger: yellow solar, green Powerwall, grey grid.
+            let supply = PowerFlowSupply.dominant(solarW: s.solarW, batteryW: s.batteryW, gridW: s.gridW)
+            add(.wallConnector1, .vehicle1, toVehicle, supply.wireColor)
         }
         // Idle wires so present-but-quiet components still show a wire (Tesla's IDLE state: base colour).
         func idle(_ c: PowerFlowComponent, _ a: PowerFlowComponent, _ b: PowerFlowComponent) {

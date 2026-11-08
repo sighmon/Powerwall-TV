@@ -32,6 +32,11 @@ final class PowerFlowSceneKitRenderer {
                 material.readsFromDepthBuffer = !overRoof
                 material.blendMode = .alpha
                 material.diffuse.contents = HouseColor.clear
+                // The floor's category mask does not drop these ribbons. The grid
+                // runs along the ground, so discard it only in the mirrored pass.
+                if ribbon.name.hasPrefix("Grid") {
+                    material.shaderModifiers = [.fragment: HouseGroundPlate.reflectedFragment]
+                }
                 materials.append(material)
             }
             let geometry = SCNGeometry(sources: [source], elements: elements)
@@ -43,6 +48,7 @@ final class PowerFlowSceneKitRenderer {
             node.castsShadow = false
             node.isHidden = true
             parent.addChildNode(node)
+            HouseGroundPlate.omitFromReflection(node)
             nodes[ribbon.name] = (node, materials)
         }
     }
@@ -258,6 +264,7 @@ final class PowerwallLevelBar {
         root.addChildNode(trackNode)
         root.addChildNode(fillNode)
         powerwall.addChildNode(root)
+        HouseGroundPlate.omitFromReflection(root)
         root.isHidden = true
     }
 
@@ -298,11 +305,13 @@ struct PowerwallLevelFace {
         normal[end] = sign
         let upAxis = end == 1 ? 2 : 1
         let sideAxis = 3 - end - upAxis
-        let inset: Float = 0.86
+        // The bar runs the full height of the unit. A little is held in from
+        // the sides so it stays on the flat end instead of the rounded corners.
+        let sideInset: Float = 0.86
         var side = SIMD3<Float>.zero
-        side[sideAxis] = (maxBound[sideAxis] - minBound[sideAxis]) * 0.5 * inset
+        side[sideAxis] = (maxBound[sideAxis] - minBound[sideAxis]) * 0.5 * sideInset
         var up = SIMD3<Float>.zero
-        up[upAxis] = (maxBound[upAxis] - minBound[upAxis]) * 0.5 * inset
+        up[upAxis] = (maxBound[upAxis] - minBound[upAxis]) * 0.5
         faceCenter += normal * 0.003
         return PowerwallLevelFace(normal: normal, center: faceCenter, side: side, up: up)
     }

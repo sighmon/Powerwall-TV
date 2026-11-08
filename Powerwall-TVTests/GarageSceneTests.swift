@@ -406,6 +406,57 @@ struct GarageSceneTests {
         #expect(vehicle.response.vehicleState?.colorizerPaintRemapEnabled == false)
     }
 
+    @Test func groundPlateMirrorsTheHouseAndLeavesTheSkyOut() {
+        guard let scene = ResidentialClassicScene.load() else { return }
+        let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+        _ = HouseLighting(root: house)
+        let plate = house.childNode(withName: HouseGroundPlate.name, recursively: false)
+        let floor = plate?.geometry as? SCNFloor
+        #expect(floor != nil)
+        #expect((floor?.reflectivity ?? 0) > 0.05)
+        #expect((floor?.reflectivity ?? 1) < 0.5)
+        #expect(abs((floor?.reflectionFalloffStart ?? 1) - (-0.08)) < 0.001)
+        #expect(abs((floor?.reflectionFalloffEnd ?? 0) - 0.32) < 0.001)
+        #if os(macOS)
+        #expect(abs((floor?.reflectionResolutionScaleFactor ?? 0) - 1) < 0.01)
+        #expect(plate?.filters?.isEmpty != false)
+        #endif
+        let bit = HouseGroundPlate.reflectionBit
+        func tally(prefix: String) -> (on: Int, off: Int) {
+            var on = 0
+            var off = 0
+            house.enumerateHierarchy { child, _ in
+                guard child.name?.hasPrefix(prefix) == true else { return }
+                if child.categoryBitMask & bit != 0 { on += 1 } else { off += 1 }
+            }
+            return (on, off)
+        }
+        #expect((plate?.categoryBitMask ?? bit) & bit == 0)
+        #expect(tally(prefix: "HouseSky").on == 0)
+        #expect(tally(prefix: "Home").on > 0)
+        #expect(tally(prefix: "Home").off == 0)
+        #expect(tally(prefix: "GarageDoor").on > 0)
+        #expect(tally(prefix: "GarageDoor").off == 0)
+        #expect(tally(prefix: "Powerwall").on > 0)
+        #expect(tally(prefix: "Powerwall").off == 0)
+        #expect(tally(prefix: "Windows").on > 0)
+        #expect(tally(prefix: "Windows").off == 0)
+        #expect(tally(prefix: "Solar").off > 0)
+        #expect(tally(prefix: "Solar").on == 0)
+        #expect(tally(prefix: "Meter").off > 0)
+        #expect(tally(prefix: "Meter").on == 0)
+        let gateway = house.childNode(withName: "Meter3_0", recursively: true)
+        let connector = house.childNode(withName: "WC_Faceplate_0", recursively: true)
+        #expect(gateway?.geometry?.materials.isEmpty == false)
+        #expect(gateway?.geometry?.materials.allSatisfy {
+            $0.shaderModifiers?[.fragment]?.contains("discard_fragment") == true
+        } == true)
+        #expect(connector?.geometry?.materials.allSatisfy { $0.shaderModifiers?[.fragment] == nil } == true)
+        #expect(gateway?.geometry?.materials.first !== connector?.geometry?.materials.first)
+        #expect(tally(prefix: "WallConnector").on == 0)
+        #expect(house.childNode(withName: "GroundReflection", recursively: true)?.isHidden == true)
+    }
+
     @Test func powerwallKeepsASingleRibbon() {
         let bothWays = PowerFlowSnapshot(solarW: 1000, batteryW: -3000, gridW: 2500, homeW: 500)
         let charging = PowerFlowRemapper.remap(PowerFlowSolver.wires(for: bothWays))
@@ -417,6 +468,20 @@ struct GarageSceneTests {
         let states = PowerFlowRemapper.remap(PowerFlowSolver.wires(for: withCar))
         #expect(states.keys.filter { $0.hasPrefix("Powerwall") } == ["Powerwall_1A"])
         #expect(states["Vehicle_1A"] != nil)
+    }
+
+    @Test func chargerRibbonUsesTheLeadingSupplyColour() {
+        func cable(_ snapshot: PowerFlowSnapshot) -> PowerFlowColor? {
+            PowerFlowRemapper.remap(PowerFlowSolver.wires(for: snapshot))["Vehicle_1A"]?.flowColor
+        }
+        let solar = PowerFlowStyle.defaultWireColors[.solar]
+        let battery = PowerFlowStyle.defaultWireColors[.battery]
+        let grid = PowerFlowStyle.defaultWireColors[.grid]
+        #expect(cable(.init(solarW: 4000, batteryW: 500, gridW: 100, homeW: 1000, vehicleW: 2000, hasVehicle: true)) == solar)
+        #expect(cable(.init(solarW: 100, batteryW: 3000, gridW: 200, homeW: 1000, vehicleW: 2000, hasVehicle: true)) == battery)
+        #expect(cable(.init(solarW: 0, batteryW: 2000, gridW: 5000, homeW: 1000, vehicleW: 2000, hasVehicle: true)) == grid)
+        // Idle Powerwall (0 W) still yields solar, matching the flat surge: solar + 40 W beats the battery.
+        #expect(cable(.init(solarW: 0, batteryW: 0, gridW: 5000, homeW: 1000, vehicleW: 2000, hasVehicle: true)) == solar)
     }
 
     @Test func powerFlowFollowsGaragePresence() {
@@ -460,6 +525,13 @@ struct GarageSceneTests {
         #expect(solar?.geometry?.materials.allSatisfy { $0.readsFromDepthBuffer == false } == true)
         #expect(grid?.renderingOrder == 10)
         #expect(grid?.geometry?.materials.first?.readsFromDepthBuffer == true)
+        #expect(grid?.geometry?.materials.allSatisfy {
+            $0.shaderModifiers?[.fragment]?.contains("discard_fragment") == true
+        } == true)
+        #expect(solar?.geometry?.materials.allSatisfy { $0.shaderModifiers?[.fragment] == nil } == true)
+        let bit = HouseGroundPlate.reflectionBit
+        #expect((solar?.categoryBitMask ?? bit) & bit == 0)
+        #expect((grid?.categoryBitMask ?? bit) & bit == 0)
     }
 
     @Test func pipesKeepTheRouteAndStayOffThePowerwall() {
@@ -491,6 +563,7 @@ struct GarageSceneTests {
         )
         #expect(face?.normal == SIMD3<Float>(0, 0, 1))
         #expect(abs(face?.side.x ?? 0) > abs(face?.side.z ?? 0))
+        #expect(abs((face?.up.y ?? 0) * 2 - 0.33) < 0.001)
 
         let restored = PowerFlowRibbon(
             name: "Powerwall_2A",
