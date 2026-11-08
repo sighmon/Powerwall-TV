@@ -335,9 +335,12 @@ struct SettingsView: View {
                 Toggle("Show schedule (beta)", isOn: $showSchedulerButton)
                 // For debugging vehicles on accounts without a v3 wall connector
                 // Toggle("Show vehicles", isOn: $showVehicles)
-                Stepper(value: $houseHeadingDegrees, in: 0...345, step: 15) {
-                    Text("Garage faces \(HouseHeading.label(houseHeadingDegrees))")
-                }
+                adjustableValue(
+                    "Garage faces \(HouseHeading.label(houseHeadingDegrees))",
+                    value: $houseHeadingDegrees,
+                    in: 0...345,
+                    step: 15
+                )
                 Text("Points the street side of the 3D house so the sun matches this site. South is 180°.")
                     .font(.footnote)
                     .foregroundColor(.gray)
@@ -371,24 +374,12 @@ struct SettingsView: View {
                     Text(houseSceneGestureHelp)
                         .font(.footnote)
                         .foregroundColor(.gray)
-                    Stepper(value: $viewModel.houseScenePose.yawDegrees, in: HouseScenePose.yawRange, step: 1) {
-                        Text("Yaw: \(houseSceneDegrees(viewModel.houseScenePose.yawDegrees))")
-                    }
-                    Stepper(value: $viewModel.houseScenePose.pitchDegrees, in: HouseScenePose.pitchRange, step: 1) {
-                        Text("Pitch: \(houseSceneDegrees(viewModel.houseScenePose.pitchDegrees))")
-                    }
-                    Stepper(value: $viewModel.houseScenePose.distanceScale, in: HouseScenePose.distanceRange, step: 0.05) {
-                        Text("Distance: \(Int((viewModel.houseScenePose.distanceScale * 100).rounded()))%")
-                    }
-                    Stepper(value: $viewModel.houseScenePose.panRight, in: HouseScenePose.panRange, step: 0.05) {
-                        Text("Pan right: \(houseSceneMetres(viewModel.houseScenePose.panRight))")
-                    }
-                    Stepper(value: $viewModel.houseScenePose.panUp, in: HouseScenePose.panRange, step: 0.05) {
-                        Text("Pan up: \(houseSceneMetres(viewModel.houseScenePose.panUp))")
-                    }
-                    Stepper(value: $viewModel.houseScenePose.panForward, in: HouseScenePose.panRange, step: 0.05) {
-                        Text("Pan forward: \(houseSceneMetres(viewModel.houseScenePose.panForward))")
-                    }
+                    adjustableValue("Yaw: \(houseSceneDegrees(viewModel.houseScenePose.yawDegrees))", value: $viewModel.houseScenePose.yawDegrees, in: HouseScenePose.yawRange, step: 1)
+                    adjustableValue("Pitch: \(houseSceneDegrees(viewModel.houseScenePose.pitchDegrees))", value: $viewModel.houseScenePose.pitchDegrees, in: HouseScenePose.pitchRange, step: 1)
+                    adjustableValue("Distance: \(Int((viewModel.houseScenePose.distanceScale * 100).rounded()))%", value: $viewModel.houseScenePose.distanceScale, in: HouseScenePose.distanceRange, step: 0.05)
+                    adjustableValue("Pan right: \(houseSceneMetres(viewModel.houseScenePose.panRight))", value: $viewModel.houseScenePose.panRight, in: HouseScenePose.panRange, step: 0.05)
+                    adjustableValue("Pan up: \(houseSceneMetres(viewModel.houseScenePose.panUp))", value: $viewModel.houseScenePose.panUp, in: HouseScenePose.panRange, step: 0.05)
+                    adjustableValue("Pan forward: \(houseSceneMetres(viewModel.houseScenePose.panForward))", value: $viewModel.houseScenePose.panForward, in: HouseScenePose.panRange, step: 0.05)
                     Button("Reset 3D view") {
                         viewModel.houseScenePose = .identity
                     }
@@ -538,6 +529,44 @@ struct SettingsView: View {
         #else
         "Use the controls below to frame the house. These values are saved as you change them."
         #endif
+    }
+
+    /// `Stepper` is unavailable on tvOS. The remote uses a minus and a plus instead.
+    private func adjustableValue(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double) -> some View {
+        #if os(tvOS)
+        HStack(spacing: 20) {
+            Text(title)
+            Spacer(minLength: 16)
+            Button {
+                value.wrappedValue = stepped(value.wrappedValue, by: -step, in: range)
+            } label: {
+                Image(systemName: "minus")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!canStep(value.wrappedValue, by: -step, in: range))
+            .accessibilityLabel("Decrease \(title)")
+            Button {
+                value.wrappedValue = stepped(value.wrappedValue, by: step, in: range)
+            } label: {
+                Image(systemName: "plus")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!canStep(value.wrappedValue, by: step, in: range))
+            .accessibilityLabel("Increase \(title)")
+        }
+        #else
+        Stepper(value: value, in: range, step: step) {
+            Text(title)
+        }
+        #endif
+    }
+
+    private func stepped(_ value: Double, by step: Double, in range: ClosedRange<Double>) -> Double {
+        min(range.upperBound, max(range.lowerBound, value + step))
+    }
+
+    private func canStep(_ value: Double, by step: Double, in range: ClosedRange<Double>) -> Bool {
+        abs(stepped(value, by: step, in: range) - value) > abs(step) * 0.001
     }
 
     private func houseSceneDegrees(_ value: Double) -> String {
