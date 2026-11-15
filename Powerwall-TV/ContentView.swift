@@ -618,23 +618,26 @@ struct ContentView: View {
         var lower: CGFloat = 0
     }
 
-    /// While the camera is closer than the resting view, each metric moves on its own
+    /// While the camera is closer than the resting view, each upper metric moves on its own
     /// so a tall roof cannot pull the home readout back down onto the house.
+    /// Lower labels keep the house bottom at least `lowerStandOff` away at any distance.
     private func metricSceneShift(sceneSize: CGSize, sceneFrame: CGRect, screenHeight: CGFloat, callouts: HouseCalloutPoints?) -> MetricSceneShift {
         guard showsHouseScene,
               let callouts,
-              viewModel.houseScenePose.distanceScale < 0.98,
               sceneSize.height > 1 else {
             return MetricSceneShift()
         }
+        let zoomedCloser = viewModel.houseScenePose.distanceScale < 0.98
         let half = max(22, sceneHeight(0.05, in: sceneSize) * 0.5)
         let screenMin: CGFloat = 8
         let screenMax = screenHeight - 8
-        func lift(_ sceneY: CGFloat, above: Bool) -> CGFloat {
+        // Previous lower clearance was 28pt plus the 8pt gap inside clearedLabelCenter.
+        let lowerStandOff: CGFloat = 64
+        func lift(_ sceneY: CGFloat, above: Bool, standOff: CGFloat) -> CGFloat {
             let anchor = sceneFrame.minY + sceneSize.height * (0.5 + sceneY)
             let cleared = HouseCameraFraming.clearedLabelCenter(
                 windowY: anchor,
-                halfHeight: half + 28,
+                halfHeight: half + standOff,
                 spanTop: callouts.modelTop,
                 spanBottom: callouts.modelBottom,
                 above: above,
@@ -644,11 +647,11 @@ struct ContentView: View {
             return (cleared - anchor) / sceneSize.height
         }
         return MetricSceneShift(
-            solar: lift(-0.40, above: true),
-            home: lift(-0.30, above: true),
-            vehicle: lift(-0.40, above: true),
-            summary: lift(-0.38, above: true),
-            lower: lift(0.40, above: false)
+            solar: zoomedCloser ? lift(-0.40, above: true, standOff: 28) : 0,
+            home: zoomedCloser ? lift(-0.30, above: true, standOff: 28) : 0,
+            vehicle: zoomedCloser ? lift(-0.40, above: true, standOff: 28) : 0,
+            summary: zoomedCloser ? lift(-0.38, above: true, standOff: 28) : 0,
+            lower: lift(0.40, above: false, standOff: lowerStandOff)
         )
     }
 
@@ -849,7 +852,7 @@ struct ContentView: View {
             for (kind, label, callout) in spots where label.width > 1 && label.height > 1 {
                 let x = label.midX
                 let goingDown = callout.y >= label.midY
-                let innerY = goingDown ? label.maxY + 2 : label.minY - 2
+                let innerY = goingDown ? label.maxY + labelToLeaderPadding : label.minY - labelToLeaderPadding
                 let outerY = goingDown ? label.minY : label.maxY
                 let full = callout.y - innerY
                 guard abs(full) > 8 else { continue }
@@ -875,8 +878,11 @@ struct ContentView: View {
         .allowsHitTesting(false)
     }
 
+    /// Space between a metric label's facing edge and the start of its grey leader.
+    private var labelToLeaderPadding: CGFloat { 4 }
+
     private func lineReach(_ label: CGRect, to callout: CGPoint) -> CGFloat {
-        let startY = callout.y >= label.midY ? label.maxY + 2 : label.minY - 2
+        let startY = callout.y >= label.midY ? label.maxY + labelToLeaderPadding : label.minY - labelToLeaderPadding
         return abs(callout.y - startY)
     }
 
@@ -1214,7 +1220,6 @@ struct ContentView: View {
                 }
                 .overlayControlButtonStyle()
                 .accessibilityLabel("Settings")
-                .environment(\.colorScheme, .dark)
 
                 if viewModel.isDemoMode || viewModel.loginMode == .fleetAPI {
                     if viewModel.loginMode == .fleetAPI && !viewModel.isDemoMode && viewModel.showSchedulerButton {
@@ -1242,7 +1247,6 @@ struct ContentView: View {
                         }
                         .overlayControlButtonStyle()
                         .accessibilityLabel("Scheduler")
-                        .environment(\.colorScheme, .dark)
                     }
 
                     Button(action: {
@@ -1268,7 +1272,6 @@ struct ContentView: View {
                     }
                     .overlayControlButtonStyle()
                     .accessibilityLabel("Chart")
-                    .environment(\.colorScheme, .dark)
                     if showHomeEnergyAdvisorButton || viewModel.isDemoMode {
                         Button {
                             revealAutoHiddenOverlays()
@@ -1294,7 +1297,6 @@ struct ContentView: View {
                         .accessibilityLabel("Home Energy Advisor")
                         .accessibilityHint("Open again to ask follow-up questions")
                         .accessibilityIdentifier("homeEnergyAdvisorButton")
-                        .environment(\.colorScheme, .dark)
                     }
                 }
             }
@@ -1307,6 +1309,7 @@ struct ContentView: View {
             .opacity(hideControlsOverlay ? 0 : 1)
             .overlayHideInteraction(hidden: hideControlsOverlay)
             .reportFrame(.controlsOverlay)
+            .overlayDarkChrome()
 
             Spacer()
 
@@ -1323,6 +1326,7 @@ struct ContentView: View {
                 .compositingGroup()
                 .opacity(hideControlsOverlay ? 0 : 1)
                 .overlayHideInteraction(hidden: hideControlsOverlay)
+                .overlayDarkChrome()
             }
         }
     }
@@ -2235,6 +2239,13 @@ private extension View {
         buttonStyle(.bordered)
             .controlSize(.large)
 #endif
+    }
+
+    /// Glass and materials follow the system appearance. The house plate is always dark, so the controls stay in dark mode.
+    func overlayDarkChrome() -> some View {
+        self
+            .environment(\.colorScheme, .dark)
+            .preferredColorScheme(.dark)
     }
 
     /// tvOS keeps disabled hidden buttons out of the focus system so the reveal catcher can take the remote.

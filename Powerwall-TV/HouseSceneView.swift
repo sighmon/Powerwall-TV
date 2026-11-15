@@ -654,6 +654,7 @@ final class HouseSceneController {
     func applyPowerFlow(_ snapshot: PowerFlowSnapshot, solar: GarageSolar) {
         powerFlow.setSolarTerminate(solar == .roof ? 1000 : 2.2)
         powerFlow.update(snapshot)
+        lighting?.setInteriorLights(homeW: snapshot.homeW, vehicleW: snapshot.vehicleW)
     }
 
     func apply(sample: HouseWeatherSample, heading: Double, animated: Bool = true, fadeIn: Bool = false) {

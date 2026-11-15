@@ -52,10 +52,9 @@ enum HouseGroundPlate {
         guard root.childNode(withName: name, recursively: false) == nil else { return }
         let floor = SCNFloor()
         floor.reflectivity = 0.22
-        // Height above the plate, in metres. A negative start means the fade is
-        // already underway at the floor. It finishes a little above the old 0.2 m
-        // cutoff, so the drop is earlier and slightly longer.
-        floor.reflectionFalloffStart = -0.08
+        // Height above the plate, in metres. The fade begins just up the wall and
+        // is gone at the same 0.32 m height as before.
+        floor.reflectionFalloffStart = 0.08
         floor.reflectionFalloffEnd = 0.32
         floor.reflectionCategoryBitMask = reflectionBit
         // A Core Image filter on this node skips the reflection pass entirely, so the
@@ -491,6 +490,8 @@ enum VehicleModel: String, CaseIterable, Identifiable {
 final class HouseLighting {
     let root: SCNNode
     private var buildingMaterials: [SCNMaterial] = []
+    private var windowMaterials: [SCNMaterial] = []
+    private var interiorLight: Float = -1
     private var parkedVehicle: SCNNode?
     private(set) var solarOption: SolarOption = .panels
     private(set) var vehicleModel: VehicleModel = .generic
@@ -540,6 +541,8 @@ final class HouseLighting {
         configureBuilding(named: "GarageDoor", mask: garageMask, albedoLight: dayGrade, albedoDark: nightGrade, normalYSign: -1)
         // Windows and solar keep the imported meshes. Flat cards and a constant
         // grid shader hid the cell rims and the recessed window openings.
+        // The glass stays dark until the house load passes the idle deadband.
+        configureWindowLights()
         // The USD cage is Catmull-Clark. One tessellation level chamfers every
         // separate cell and pane into an octagon and pulls the corners apart.
         keepLitCellsRectangular()
@@ -693,6 +696,23 @@ final class HouseLighting {
     /// pokes through the closed door), so the door is hidden while the vehicle is visible.
     func showWallConnector(_ visible: Bool) {
         root.childNode(withName: "WallConnector", recursively: true)?.isHidden = !visible
+    }
+
+    /// Same 40 W deadband as the home readout's `wiggleWatts`. The car's draw is not the house.
+    static let interiorLightThresholdWatts: Double = 40
+
+    static func interiorLightsOn(homeW: Double, vehicleW: Double) -> Bool {
+        homeW - vehicleW > interiorLightThresholdWatts
+    }
+
+    /// White glow on the window panes while the home is drawing power.
+    func setInteriorLights(homeW: Double, vehicleW: Double) {
+        let on: Float = Self.interiorLightsOn(homeW: homeW, vehicleW: vehicleW) ? 1 : 0
+        guard on != interiorLight else { return }
+        interiorLight = on
+        for material in windowMaterials {
+            material.setValue(NSNumber(value: on), forKey: "interiorLight")
+        }
     }
 
     func showVehicle(_ visible: Bool) {
@@ -1041,6 +1061,27 @@ final class HouseLighting {
         sunLight.light?.intensity = 700
         sunLight.light?.castsShadow = false
         root.addChildNode(sunLight)
+    }
+
+    /// Adds a warm interior glow to the imported window glass. `interiorLight` is 0 or 1.
+    private func configureWindowLights() {
+        let surface = """
+        #pragma arguments
+        float interiorLight;
+
+        #pragma body
+        float3 glow = float3(1.0, 1.0, 1.0);
+        float lit = clamp(interiorLight, 0.0, 1.0);
+        _surface.diffuse.rgb = mix(_surface.diffuse.rgb, glow, lit * 0.42);
+        _surface.emission.rgb = glow * lit * 0.35;
+        _surface.metalness *= (1.0 - lit);
+        """
+        for material in materials(under: "Windows") {
+            material.shaderModifiers = [.surface: surface]
+            material.setValue(NSNumber(value: 0), forKey: "interiorLight")
+            windowMaterials.append(material)
+        }
+        interiorLight = 0
     }
 
     private func configureBuilding(named name: String, mask: Any?, albedoLight: SIMD3<Float>, albedoDark: SIMD3<Float>, normalYSign: Float) {

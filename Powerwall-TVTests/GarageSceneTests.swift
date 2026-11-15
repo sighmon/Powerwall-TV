@@ -426,7 +426,7 @@ struct GarageSceneTests {
         #expect(floor != nil)
         #expect((floor?.reflectivity ?? 0) > 0.05)
         #expect((floor?.reflectivity ?? 1) < 0.5)
-        #expect(abs((floor?.reflectionFalloffStart ?? 1) - (-0.08)) < 0.001)
+        #expect(abs((floor?.reflectionFalloffStart ?? 1) - 0.08) < 0.001)
         #expect(abs((floor?.reflectionFalloffEnd ?? 0) - 0.32) < 0.001)
         #if os(macOS)
         #expect(abs((floor?.reflectionResolutionScaleFactor ?? 0) - 1) < 0.01)
