@@ -275,7 +275,18 @@ struct GarageSceneTests {
 
         #expect(HouseSky.wispOpacity(threshold: 0.34, cloudCover: 0, cirrus: true) == 0)
         #expect(HouseSky.wispOpacity(threshold: 0.9, cloudCover: 0.4, cirrus: false) == 0)
-        #expect(HouseSky.wispOpacity(threshold: 0.34, cloudCover: 1, cirrus: true) > 0.35)
+        let fullCirrus = HouseSky.wispOpacity(threshold: 0.34, cloudCover: 1, cirrus: true)
+        #expect(fullCirrus > 0.30 && fullCirrus < 0.38)
+        let fullPuff = HouseSky.wispOpacity(threshold: 0.55, cloudCover: 1, cirrus: false)
+        #expect(fullPuff > 0.40 && fullPuff < 0.48)
+        #expect(HouseSky.wisps.allSatisfy { abs($0.y - 1) < 0.001 })
+        let dawn = HouseSky.skyWash(altitude: 4)
+        let noonWash = HouseSky.skyWash(altitude: 58)
+        let nightWash = HouseSky.skyWash(altitude: -10)
+        #expect(nightWash.amount == 0)
+        #expect(noonWash.amount > 0.95)
+        #expect(dawn.top.x > dawn.top.z)
+        #expect(noonWash.top.z > noonWash.top.x)
         let thin = HouseSky.wisps.filter { $0.cirrus && HouseSky.wispOpacity(threshold: $0.threshold, cloudCover: 0.5, cirrus: true) > 0 }
         let thick = HouseSky.wisps.filter { !$0.cirrus && HouseSky.wispOpacity(threshold: $0.threshold, cloudCover: 0.5, cirrus: false) > 0.2 }
         #expect(!thin.isEmpty)

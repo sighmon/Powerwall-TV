@@ -1098,6 +1098,7 @@ private struct HouseMetalSceneMac: NSViewRepresentable {
     private func bind(_ view: HouseCameraControlView, delegate: HousePowerFlowDriver) {
         if view.scene !== scene { view.scene = scene }
         if view.pointOfView !== pointOfView { view.pointOfView = pointOfView }
+        HouseSky.useWashShader(in: view)
         view.antialiasingMode = .multisampling4X
         view.allowsCameraControl = false
         view.focusRingType = .none
@@ -1132,6 +1133,7 @@ private struct HouseMetalSceneIOS: UIViewRepresentable {
     private func bind(_ view: HouseCameraControlView, delegate: HousePowerFlowDriver) {
         if view.scene !== scene { view.scene = scene }
         if view.pointOfView !== pointOfView { view.pointOfView = pointOfView }
+        HouseSky.useWashShader(in: view)
         view.antialiasingMode = .multisampling4X
         view.allowsCameraControl = false
         view.sync(from: pose)

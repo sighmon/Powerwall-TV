@@ -197,17 +197,42 @@ enum HouseSky {
     }
 
     /// High wisps first, then lower puffs as the cover thickens.
-    /// Heights are metres on the sky card. The old streaks were under half a metre tall.
+    /// `y` is 0 at the view centre and 1 on the top edge, so 1 puts the middle of
+    /// each card on that edge and leaves only the lower half on screen.
+    /// Heights are metres on the sky card.
     static let wisps: [Wisp] = [
-        Wisp(x: -0.62, y: 0.80, depth: -1.4, width: 11.0, height: 3.4, threshold: 0.34, cirrus: true),
-        Wisp(x: 0.08, y: 0.88, depth: -2.2, width: 13.0, height: 3.1, threshold: 0.40, cirrus: true),
-        Wisp(x: 0.60, y: 0.74, depth: -0.8, width: 9.5, height: 2.8, threshold: 0.48, cirrus: true),
-        Wisp(x: -0.34, y: 0.64, depth: 0.3, width: 6.4, height: 3.4, threshold: 0.55, cirrus: false),
-        Wisp(x: 0.40, y: 0.68, depth: -0.4, width: 7.2, height: 3.6, threshold: 0.64, cirrus: false),
-        Wisp(x: -0.04, y: 0.56, depth: 0.7, width: 8.0, height: 4.0, threshold: 0.74, cirrus: false),
-        Wisp(x: 0.70, y: 0.58, depth: 0.1, width: 5.2, height: 2.8, threshold: 0.82, cirrus: false),
-        Wisp(x: -0.74, y: 0.60, depth: -0.9, width: 5.6, height: 2.6, threshold: 0.90, cirrus: false),
+        Wisp(x: -0.62, y: 1, depth: -1.4, width: 11.0, height: 5.1, threshold: 0.34, cirrus: true),
+        Wisp(x: 0.08, y: 1, depth: -2.2, width: 13.0, height: 4.7, threshold: 0.40, cirrus: true),
+        Wisp(x: 0.60, y: 1, depth: -0.8, width: 9.5, height: 4.2, threshold: 0.48, cirrus: true),
+        Wisp(x: -0.34, y: 1, depth: 0.3, width: 6.4, height: 5.1, threshold: 0.55, cirrus: false),
+        Wisp(x: 0.40, y: 1, depth: -0.4, width: 7.2, height: 5.4, threshold: 0.64, cirrus: false),
+        Wisp(x: -0.04, y: 1, depth: 0.7, width: 8.0, height: 6.0, threshold: 0.74, cirrus: false),
+        Wisp(x: 0.70, y: 1, depth: 0.1, width: 5.2, height: 4.2, threshold: 0.82, cirrus: false),
+        Wisp(x: -0.74, y: 1, depth: -0.9, width: 5.6, height: 3.9, threshold: 0.90, cirrus: false),
     ]
+
+    struct SkyWash: Equatable {
+        var top: SIMD3<Float>
+        var bottom: SIMD3<Float>
+        /// 0 at night, 1 once the sun is up. The plane peaks at `washPeak` opacity.
+        var amount: Float
+    }
+
+    /// Warm near the horizon, blue once the sun is high. Colour fades across
+    /// `washScreenFraction` of the screen and is clear before the plane ends.
+    static func skyWash(altitude: Float) -> SkyWash {
+        let amount = smoothstep(-4, 10, altitude)
+        let day = smoothstep(16, 40, altitude)
+        let sunsetTop = SIMD3<Float>(0.98, 0.38, 0.24)
+        let sunsetBottom = SIMD3<Float>(1.0, 0.70, 0.46)
+        let blueTop = SIMD3<Float>(0.26, 0.46, 0.86)
+        let blueBottom = SIMD3<Float>(0.58, 0.76, 0.96)
+        return SkyWash(
+            top: sunsetTop + (blueTop - sunsetTop) * day,
+            bottom: sunsetBottom + (blueBottom - sunsetBottom) * day,
+            amount: amount
+        )
+    }
 
     static func placement(altitude: Float, azimuth: Float, heading: Float, cloudCover: Float,
                           eye: SIMD3<Float>, target: SIMD3<Float>, viewport: CGSize,
@@ -251,7 +276,7 @@ enum HouseSky {
     static func wispOpacity(threshold: Float, cloudCover: Float, cirrus: Bool) -> Float {
         let cover = min(max(cloudCover, 0), 1)
         let t = smoothstep(threshold, threshold + 0.12, cover)
-        return t * (cirrus ? 0.42 : 0.55)
+        return t * (cirrus ? 0.34 : 0.44)
     }
 
     /// Site-less preview. The arc crosses the camera's sky: east in the morning, overhead at noon, west in the evening.
@@ -268,6 +293,86 @@ enum HouseSky {
     static func smoothstep(_ edge0: Float, _ edge1: Float, _ value: Float) -> Float {
         let t = min(max((value - edge0) / (edge1 - edge0), 0), 1)
         return t * t * (3 - 2 * t)
+    }
+
+    /// Share of the screen, from the top, that still has colour.
+    static let washScreenFraction: Float = 0.48
+    /// Extra plane below that band. It stays clear so the fade ends before the quad edge.
+    static let washFeatherFraction: Float = 0.2
+    /// Peak opacity at the top edge.
+    static let washPeak: Float = 0.25
+
+    /// Full-precision blend. The window is 8-bit, so a peak of 0.25 only has a few dozen
+    /// steps and they draw as lines toward the clear end. The colour is computed here,
+    /// then dithered by half a step per screen pixel, which is what hides those lines.
+    static func washShader(openGL: Bool) -> String {
+        let span = washScreenFraction / (washScreenFraction + washFeatherFraction)
+        let vec2 = openGL ? "vec2" : "float2"
+        let vec3 = openGL ? "vec3" : "float3"
+        let vec4 = openGL ? "vec4" : "float4"
+        let noise = """
+        float washNoise(\(vec2) pixel) {
+            return fract(52.9829189 * fract(dot(pixel, \(vec2)(0.06711056, 0.00583715))));
+        }
+        """
+        let uniforms = openGL ? """
+        uniform \(vec3) washTop;
+        uniform \(vec3) washBottom;
+        uniform float washAmount;
+        uniform float washPeak;
+        uniform \(vec2) washPixels;
+        \(noise)
+        """ : """
+        #pragma arguments
+        \(vec3) washTop;
+        \(vec3) washBottom;
+        float washAmount;
+        float washPeak;
+        \(vec2) washPixels;
+
+        #pragma declaration
+        \(noise)
+        """
+        let body = """
+        #pragma transparent
+        #pragma body
+        float down = clamp(_surface.diffuseTexcoord.y, 0.0, 1.0);
+        float t = clamp(down / \(span), 0.0, 1.0);
+        float fade = 1.0 - t;
+        fade = fade * fade * (3.0 - 2.0 * fade);
+        float alpha = clamp(washPeak * fade * washAmount, 0.0, 1.0);
+        if (alpha <= 0.0) {
+            _output.color = \(vec4)(0.0);
+        } else {
+            \(vec3) color = mix(washBottom, washTop, fade);
+            \(vec2) pixel = floor(_surface.diffuseTexcoord * washPixels);
+            alpha = clamp(alpha + (washNoise(pixel) - 0.5) / 255.0, 0.0, 1.0);
+            _output.color = \(vec4)(color * alpha, alpha);
+        }
+        """
+        return uniforms + "\n" + body
+    }
+
+    /// Picks the shader for the view that is actually drawing. OpenGL SceneKit ignores Metal.
+    /// `washPixels` is the plane's size in screen pixels, so the dither stays one pixel wide.
+    static func useWashShader(in view: SCNView) {
+        guard let material = view.scene?.rootNode.childNode(withName: "HouseSkyWash", recursively: true)?.geometry?.firstMaterial else { return }
+        #if os(macOS)
+        let source = washShader(openGL: view.renderingAPI != .metal)
+        let scale = view.window?.backingScaleFactor ?? view.layer?.contentsScale ?? 2
+        #else
+        let source = washShader(openGL: false)
+        let scale = view.contentScaleFactor
+        #endif
+        if material.shaderModifiers?[.fragment] != source {
+            material.shaderModifiers = [.fragment: source]
+        }
+        guard view.bounds.width > 1, view.bounds.height > 1 else { return }
+        let band = CGFloat(washScreenFraction + washFeatherFraction)
+        material.setValue(
+            CGPoint(x: view.bounds.width * scale * 1.025, y: view.bounds.height * scale * band),
+            forKey: "washPixels"
+        )
     }
 }
 
@@ -395,6 +500,7 @@ final class HouseLighting {
     private let skyRig = SCNNode()
     private let sunDisc = SCNNode()
     private let sunHalo = SCNNode()
+    private let skyWash = SCNNode()
     private var cloudCards: [SCNNode] = []
     private let rain = HouseLighting.makeRain()
     private let snow = HouseLighting.makeSnow()
@@ -466,6 +572,8 @@ final class HouseLighting {
 
         rainNode.name = "Rain"
         snowNode.name = "Snow"
+        rainNode.renderingOrder = 7
+        snowNode.renderingOrder = 7
         rainNode.position = SCNVector3(-1.6, 6, 0)
         snowNode.position = SCNVector3(-1.6, 6, 0)
         rainNode.addParticleSystem(rain)
@@ -474,6 +582,7 @@ final class HouseLighting {
         root.addChildNode(snowNode)
         installSky()
         HouseGroundPlate.install(on: root)
+        showAboveTheSkyWash(root)
 
         apply(HouseLightingParameters())
     }
@@ -621,6 +730,7 @@ final class HouseLighting {
         vehicle.addChildNode(car)
         parkedVehicle = car
         repairVehicleShell(car)
+        showAboveTheSkyWash(car)
         HouseGroundPlate.omitFromReflection(car)
         if let paint { setVehiclePaint(paint) }
     }
@@ -735,6 +845,28 @@ final class HouseLighting {
         skyRig.addChildNode(sunHalo)
         skyRig.addChildNode(sunDisc)
 
+        let wash = SCNPlane(width: 1, height: 1)
+        let washMaterial = SCNMaterial()
+        washMaterial.lightingModel = .constant
+        washMaterial.isDoubleSided = true
+        washMaterial.diffuse.contents = HouseSkyArt.washContents(
+            top: SIMD3(0.26, 0.46, 0.86), bottom: SIMD3(0.58, 0.76, 0.96))
+        smoothWash(washMaterial)
+        washMaterial.transparencyMode = .aOne
+        washMaterial.blendMode = .alpha
+        let washBand = HouseSky.washScreenFraction + HouseSky.washFeatherFraction
+        washMaterial.setValue(CGPoint(x: 1920 * 1.025, y: 1080 * CGFloat(washBand)), forKey: "washPixels")
+        washMaterial.writesToDepthBuffer = false
+        // The ground plate would otherwise cut a hard edge through the fade.
+        // The house is drawn after this plane, so it still covers the wash.
+        washMaterial.readsFromDepthBuffer = false
+        wash.materials = [washMaterial]
+        skyWash.geometry = wash
+        skyWash.name = "HouseSkyWash"
+        // Behind the house (order 2) and the clouds (order 4).
+        skyWash.renderingOrder = 0
+        skyRig.addChildNode(skyWash)
+
         for (index, wisp) in HouseSky.wisps.enumerated() {
             let plane = SCNPlane(width: CGFloat(wisp.width), height: CGFloat(wisp.height))
             // The house and the ground plate write a depth mask. A low wisp crosses
@@ -744,6 +876,9 @@ final class HouseLighting {
             card.name = "HouseCloud\(index)"
             card.renderingOrder = 4
             let holder = SCNNode()
+            // The holder's opacity makes SceneKit draw the card in the parent's pass.
+            // That pass has to stay after the wash, or the band covers the clouds.
+            holder.renderingOrder = 4
             holder.opacity = 0
             holder.isHidden = true
             holder.addChildNode(card)
@@ -792,6 +927,15 @@ final class HouseLighting {
         basis.columns.2 = SIMD4<Float>(-forward.x, -forward.y, -forward.z, 0)
         basis.columns.3 = SIMD4<Float>(center.x, center.y, center.z, 1)
         skyRig.simdWorldTransform = basis
+        if let plane = skyWash.geometry as? SCNPlane {
+            // The rig sits 0.52 of a screen above the view centre. Colour occupies
+            // the top washScreenFraction. The plane continues below that, already clear.
+            let band = HouseSky.washScreenFraction + HouseSky.washFeatherFraction
+            plane.width = CGFloat(halfWidth * 2.05)
+            plane.height = CGFloat(halfHeight * 2 * band)
+            let top = (1 - 0.52) * halfHeight
+            skyWash.simdPosition = SIMD3(0, top - Float(plane.height) / 2, 0)
+        }
         if placeCards || abs(halfWidth - skyHalfWidth) > 0.01 {
             skyHalfWidth = halfWidth
             let sky = HouseSky.placement(
@@ -804,13 +948,15 @@ final class HouseLighting {
                 viewport: skyViewport,
                 fieldOfView: skyFieldOfView
             )
-            let localSun = SIMD3<Float>(sky.screenX * halfWidth, (sky.screenY - 0.52) * halfHeight, 0)
+            // +Z points at the camera. Keep the sun closest, then the clouds, then the wash,
+            // so an older SceneKit that sorts transparent nodes by depth still stacks them.
+            let localSun = SIMD3<Float>(sky.screenX * halfWidth, (sky.screenY - 0.52) * halfHeight, 4)
             sunDisc.simdPosition = localSun
             sunHalo.simdPosition = localSun
             sunDisc.scale = SCNVector3(sky.discRadius, sky.discRadius, 1)
             sunHalo.scale = SCNVector3(sky.haloRadius, sky.haloRadius, 1)
             for (card, wisp) in zip(cloudCards, HouseSky.wisps) {
-                card.simdPosition = SIMD3<Float>(wisp.x * halfWidth * 0.92, (wisp.y - 0.52) * halfHeight, wisp.depth)
+                card.simdPosition = SIMD3<Float>(wisp.x * halfWidth * 0.92, (wisp.y - 0.52) * halfHeight, wisp.depth + 2.5)
             }
         }
         SCNTransaction.commit()
@@ -847,6 +993,18 @@ final class HouseLighting {
         sunHalo.opacity = CGFloat(sky.haloOpacity)
         sunDisc.isHidden = sky.sunOpacity < 0.02
         sunHalo.isHidden = sky.haloOpacity < 0.02
+        let wash = HouseSky.skyWash(altitude: p.sunAltitude)
+        if let material = skyWash.geometry?.firstMaterial {
+            material.diffuse.contents = HouseSkyArt.washContents(top: wash.top, bottom: wash.bottom)
+            smoothWash(material)
+            material.setValue(NSValue(scnVector3: SCNVector3(wash.top.x, wash.top.y, wash.top.z)), forKey: "washTop")
+            material.setValue(NSValue(scnVector3: SCNVector3(wash.bottom.x, wash.bottom.y, wash.bottom.z)), forKey: "washBottom")
+            material.setValue(NSNumber(value: wash.amount), forKey: "washAmount")
+            material.setValue(NSNumber(value: HouseSky.washPeak), forKey: "washPeak")
+        }
+        // The shader multiplies by washAmount. Leave the node opaque so it is not applied twice.
+        skyWash.opacity = 1
+        skyWash.isHidden = wash.amount < 0.02
         for (holder, wisp) in zip(cloudCards, HouseSky.wisps) {
             let opacity = HouseSky.wispOpacity(threshold: wisp.threshold, cloudCover: p.cloudCover, cirrus: wisp.cirrus)
             holder.opacity = CGFloat(opacity)
@@ -920,6 +1078,29 @@ final class HouseLighting {
             geometry.tessellator?.edgeTessellationFactor = 1
             geometry.tessellator?.insideTessellationFactor = 1
             geometry.tessellator?.isAdaptive = false
+        }
+    }
+
+    /// SceneKit drops these when the diffuse image is replaced. Nearest filtering turns the ramp into stripes.
+    private func smoothWash(_ material: SCNMaterial) {
+        material.diffuse.magnificationFilter = .linear
+        material.diffuse.minificationFilter = .linear
+        material.diffuse.mipFilter = .none
+        material.diffuse.wrapS = .clamp
+        material.diffuse.wrapT = .clamp
+    }
+
+    /// Draws the model after the sky wash. The plate stays earlier so the fade can cover it.
+    private func showAboveTheSkyWash(_ node: SCNNode) {
+        let name = node.name ?? ""
+        if name == HouseGroundPlate.name || name == "HouseSky" || name == "Rain" || name == "Snow" {
+            return
+        }
+        if node.renderingOrder < 2 {
+            node.renderingOrder = 2
+        }
+        for child in node.childNodes {
+            showAboveTheSkyWash(child)
         }
     }
 
@@ -1196,6 +1377,50 @@ enum HouseSkyArt {
             }
         }
         return image(pixels, width: size, height: size)
+    }
+
+    /// Row 0 is the top. The peak is only a quarter opaque, so an 8-bit ramp has a few
+    /// dozen steps and they read as stripes. Bayer dither breaks those steps up, and
+    /// the lower feather is already clear so the quad edge is not a line.
+    static func washContents(top: SIMD3<Float>, bottom: SIMD3<Float>) -> Any {
+        let width = 1024
+        let height = 512
+        let span = HouseSky.washScreenFraction / (HouseSky.washScreenFraction + HouseSky.washFeatherFraction)
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let last = Float(height - 1)
+        for y in 0..<height {
+            let down = Float(y) / last
+            let t = min(max(down / span, 0), 1)
+            let fade = 1 - t
+            let eased = fade * fade * (3 - 2 * fade)
+            let color = bottom + (top - bottom) * eased
+            for x in 0..<width {
+                let index = (y * width + x) * 4
+                pixels[index] = ditheredByte(color.x, x: x, y: y)
+                pixels[index + 1] = ditheredByte(color.y, x: x, y: y &+ 3)
+                pixels[index + 2] = ditheredByte(color.z, x: x, y: y &+ 5)
+                pixels[index + 3] = ditheredByte(HouseSky.washPeak * eased, x: x &+ 2, y: y &+ 1)
+            }
+        }
+        return platformImage(image(pixels, width: width, height: height))
+    }
+
+    /// 8×8 Bayer thresholds, 0…1. Spreads a fractional 8-bit step across neighbouring pixels.
+    private static let bayer8: [Float] = [
+        0, 32, 8, 40, 2, 34, 10, 42,
+        48, 16, 56, 24, 50, 18, 58, 26,
+        12, 44, 4, 36, 14, 46, 6, 38,
+        60, 28, 52, 20, 62, 30, 54, 22,
+        3, 35, 11, 43, 1, 33, 9, 41,
+        51, 19, 59, 27, 49, 17, 57, 25,
+        15, 47, 7, 39, 13, 45, 5, 37,
+        63, 31, 55, 23, 61, 29, 53, 21,
+    ].map { ($0 + 0.5) / 64 }
+
+    private static func ditheredByte(_ value: Float, x: Int, y: Int) -> UInt8 {
+        let exact = min(max(value, 0), 1) * 255
+        let threshold = bayer8[(y & 7) * 8 + (x & 7)]
+        return UInt8(min(max(exact + threshold - 0.5, 0), 255))
     }
 
     private static func precipitationImage(size: Int) -> CGImage {

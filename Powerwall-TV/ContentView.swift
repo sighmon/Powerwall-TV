@@ -204,7 +204,6 @@ struct ContentView: View {
                     metricLeaderLines(
                         data: data,
                         sceneSize: sceneSize,
-                        screenMidX: geometry.size.width / 2,
                         callouts: houseCallouts,
                         frames: metricFrames
                     )
@@ -815,7 +814,7 @@ struct ContentView: View {
     }
 
     /// Vertical grey leaders beside the metric labels. Only the 3D scene publishes callouts.
-    private func metricLeaderLines(data: PowerwallData, sceneSize: CGSize, screenMidX: CGFloat, callouts: HouseCalloutPoints, frames: [OverlayFrameKind: CGRect]) -> some View {
+    private func metricLeaderLines(data: PowerwallData, sceneSize: CGSize, callouts: HouseCalloutPoints, frames: [OverlayFrameKind: CGRect]) -> some View {
         var spots: [(OverlayFrameKind, CGRect, CGPoint)] = []
         if let frame = frames[.metricSolar] { spots.append((.metricSolar, frame, callouts.solar)) }
         if let frame = frames[.metricHome] { spots.append((.metricHome, frame, callouts.home)) }
@@ -827,10 +826,8 @@ struct ContentView: View {
         let reach: CGFloat = 2.0 / 3.0
         let powerwallReach = spots.first { $0.0 == .metricBattery }.map { lineReach($0.1, to: $0.2) * reach }
         return Path { path in
-            let gap: CGFloat = 6
             for (kind, label, callout) in spots where label.width > 1 && label.height > 1 {
-                let onLeft = label.midX < screenMidX
-                let x = onLeft ? label.maxX + gap : label.minX - gap
+                let x = label.midX
                 let goingDown = callout.y >= label.midY
                 let innerY = goingDown ? label.maxY + 2 : label.minY - 2
                 let outerY = goingDown ? label.minY : label.maxY
