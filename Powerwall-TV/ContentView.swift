@@ -152,6 +152,8 @@ struct ContentView: View {
     @State private var lastPowerwallRuntimeEstimateTimerCycle: Int?
     @State private var houseCallouts: HouseCalloutPoints?
     @FocusState private var hasKeyboardFocus: Bool
+    /// Takes focus on tvOS while the control buttons are hidden, so a remote press can bring them back.
+    @FocusState private var overlayRevealFocused: Bool
     private let naturalSceneWidth: CGFloat = 1280
     private let naturalSceneHeight: CGFloat = 720
 #if os(macOS)
@@ -175,7 +177,9 @@ struct ContentView: View {
             )
             let siteSummarySceneOverlap = detachSiteSummary
                 && frameIntersectsScene(detachedSiteSummaryFrame, sceneFrame: sceneFrame)
-            let controlsSceneOverlap = frameIntersectsScene(controlsOverlayFrame, sceneFrame: sceneFrame)
+            // The 3D house ignores the safe area and covers the window, including the letterbox
+            // where these buttons sit. The fitted 16:9 frame would miss them, so treat the house as overlap.
+            let controlsSceneOverlap = showsHouseScene || frameIntersectsScene(controlsOverlayFrame, sceneFrame: sceneFrame)
             let metricShift = metricSceneShift(
                 sceneSize: sceneSize,
                 sceneFrame: sceneFrame,
@@ -244,6 +248,12 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding()
                     .opacity(showMetrics ? 1 : 0)
+
+                #if os(tvOS)
+                if hideControlsOverlay {
+                    overlayRevealCatcher
+                }
+                #endif
             }
             .coordinateSpace(name: "contentView")
             .onPreferenceChange(OverlayFramePreferenceKey.self) { frames in
@@ -508,7 +518,8 @@ struct ContentView: View {
             WindowChromeVisibilityConfigurator(
                 isHidden: shouldHideWindowChrome,
                 keepWindowInFront: viewModel.keepWindowInFront,
-                onActivity: revealAutoHiddenOverlays
+                onMouseMove: revealHiddenOverlaysOnActivity,
+                onBecomeKey: revealAutoHiddenOverlays
             )
         )
 #endif
@@ -525,6 +536,10 @@ struct ContentView: View {
 #endif
 #if !os(iOS)
         .onMoveCommand { direction in
+            if hasHiddenAutoOverlay {
+                revealAutoHiddenOverlays()
+                return
+            }
             if direction == .up {
                 updateEnergySite(-1)
             }
@@ -542,11 +557,19 @@ struct ContentView: View {
         }
         .onKeyPress(.upArrow, phases: .down) { _ in
             guard !showingGraph, !showingScheduler else { return .ignored }
+            if hasHiddenAutoOverlay {
+                revealAutoHiddenOverlays()
+                return .handled
+            }
             updateEnergySite(-1)
             return .handled
         }
         .onKeyPress(.downArrow, phases: .down) { _ in
             guard !showingGraph, !showingScheduler else { return .ignored }
+            if hasHiddenAutoOverlay {
+                revealAutoHiddenOverlays()
+                return .handled
+            }
             updateEnergySite(+1)
             return .handled
         }
@@ -878,6 +901,7 @@ struct ContentView: View {
             )
                 .foregroundColor(.white)
                 .overlayChromeBackground(isVisible: !hidden, isOverlapping: useBlurredBackground)
+                .compositingGroup()
                 .opacity(hidden ? 0 : 1)
                 .allowsHitTesting(!hidden)
                 .reportFrame(.detachedSiteSummary)
@@ -1188,8 +1212,7 @@ struct ContentView: View {
 #endif
                     }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
+                .overlayControlButtonStyle()
                 .accessibilityLabel("Settings")
                 .environment(\.colorScheme, .dark)
 
@@ -1217,8 +1240,7 @@ struct ContentView: View {
 #endif
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
+                        .overlayControlButtonStyle()
                         .accessibilityLabel("Scheduler")
                         .environment(\.colorScheme, .dark)
                     }
@@ -1244,8 +1266,7 @@ struct ContentView: View {
 #endif
                         }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    .overlayControlButtonStyle()
                     .accessibilityLabel("Chart")
                     .environment(\.colorScheme, .dark)
                     if showHomeEnergyAdvisorButton || viewModel.isDemoMode {
@@ -1269,8 +1290,7 @@ struct ContentView: View {
                                 .frame(width: 80, height: 80)
 #endif
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
+                        .overlayControlButtonStyle()
                         .accessibilityLabel("Home Energy Advisor")
                         .accessibilityHint("Open again to ask follow-up questions")
                         .accessibilityIdentifier("homeEnergyAdvisorButton")
@@ -1278,12 +1298,14 @@ struct ContentView: View {
                     }
                 }
             }
+            .overlayGlassButtonCluster()
             .overlayChromeBackground(
                 isVisible: !hideControlsOverlay,
                 isOverlapping: controlsOverlayOverlapsScene && viewModel.autoHideButtonsOnOverlap
             )
+            .compositingGroup()
             .opacity(hideControlsOverlay ? 0 : 1)
-            .allowsHitTesting(!hideControlsOverlay)
+            .overlayHideInteraction(hidden: hideControlsOverlay)
             .reportFrame(.controlsOverlay)
 
             Spacer()
@@ -1298,11 +1320,33 @@ struct ContentView: View {
                     isVisible: !hideControlsOverlay,
                     isOverlapping: controlsOverlayOverlapsScene && viewModel.autoHideButtonsOnOverlap
                 )
+                .compositingGroup()
                 .opacity(hideControlsOverlay ? 0 : 1)
-                .allowsHitTesting(!hideControlsOverlay)
+                .overlayHideInteraction(hidden: hideControlsOverlay)
             }
         }
     }
+
+    #if os(tvOS)
+    /// Holds focus while the buttons are hidden so the remote can bring them back.
+    /// A full-screen button is drawn as the selected control, so this stays a 1pt focusable view with no focus effect.
+    /// Menu is left alone so it still exits.
+    private var overlayRevealCatcher: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .focusable(interactions: .activate)
+            .focusEffectDisabled()
+            .focused($overlayRevealFocused)
+            .accessibilityLabel("Show controls")
+            .onTapGesture { revealAutoHiddenOverlays() }
+            .onMoveCommand { _ in
+                revealAutoHiddenOverlays()
+            }
+            .onPlayPauseCommand {
+                revealAutoHiddenOverlays()
+            }
+    }
+    #endif
 
     private var controlsButtonSpacing: CGFloat? {
 #if os(tvOS)
@@ -1640,7 +1684,6 @@ struct ContentView: View {
     }
 
     private func updateOverlayAutoHide(for kind: OverlayAutoHideTarget, overlaps: Bool) {
-#if os(macOS) || os(iOS)
         if overlaps && isAutoHideEnabled(kind) {
             if !isOverlayHidden(kind) {
                 scheduleOverlayHide(for: kind)
@@ -1649,14 +1692,20 @@ struct ContentView: View {
             cancelOverlayHideTask(kind)
             setOverlayHidden(kind, hidden: false)
         }
-#else
-        _ = kind
-        _ = overlaps
-#endif
+    }
+
+    private var hasHiddenAutoOverlay: Bool {
+        hideDetachedSiteSummary || hideControlsOverlay
+    }
+
+    /// Pointer motion only brings overlays back after they have hidden. Resetting the idle timer on
+    /// every move kept the buttons up, because a trackpad never sits still for the full three seconds.
+    private func revealHiddenOverlaysOnActivity() {
+        guard hasHiddenAutoOverlay else { return }
+        revealAutoHiddenOverlays()
     }
 
     private func revealAutoHiddenOverlays() {
-#if os(macOS) || os(iOS)
         cancelOverlayHideTask(.detachedSiteSummary)
         cancelOverlayHideTask(.controlsOverlay)
         setOverlayHidden(.detachedSiteSummary, hidden: false)
@@ -1668,7 +1717,6 @@ struct ContentView: View {
         if controlsOverlayOverlapsScene && isAutoHideEnabled(.controlsOverlay) {
             scheduleOverlayHide(for: .controlsOverlay)
         }
-#endif
     }
 
     private func scheduleOverlayHide(for kind: OverlayAutoHideTarget) {
@@ -1726,6 +1774,17 @@ struct ContentView: View {
             hideDetachedSiteSummary = hidden
         case .controlsOverlay:
             hideControlsOverlay = hidden
+            #if os(tvOS)
+            if hidden {
+                // The catcher is inserted in this update. Focus it on the next turn, once it is in the tree.
+                DispatchQueue.main.async {
+                    guard hideControlsOverlay else { return }
+                    overlayRevealFocused = true
+                }
+            } else {
+                overlayRevealFocused = false
+            }
+            #endif
         }
     }
 
@@ -1924,18 +1983,36 @@ private struct OverlayFramePreferenceKey: PreferenceKey {
 }
 
 #if os(macOS)
+/// Bordered macOS buttons are NSButtons. A parent opacity does not fade them.
+/// Before Liquid Glass (macOS 26), draw a SwiftUI material circle so the hide animation still applies.
+private struct MacOverlayButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        Circle()
+                            .strokeBorder(Color.white.opacity(configuration.isPressed ? 0.5 : 0.32), lineWidth: 0.7)
+                    }
+            }
+            .opacity(configuration.isPressed ? 0.72 : 1)
+    }
+}
+
 private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
     let isHidden: Bool
     let keepWindowInFront: Bool
-    let onActivity: () -> Void
+    let onMouseMove: () -> Void
+    let onBecomeKey: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onActivity: onActivity)
+        Coordinator(onMouseMove: onMouseMove, onBecomeKey: onBecomeKey)
     }
 
     func makeNSView(context: Context) -> TrackingView {
         let view = TrackingView()
-        view.onMouseMove = context.coordinator.handleActivity
+        view.onMouseMove = context.coordinator.handleMouseMove
         DispatchQueue.main.async {
             configureWindow(for: view, coordinator: context.coordinator)
         }
@@ -1943,7 +2020,9 @@ private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: TrackingView, context: Context) {
-        nsView.onMouseMove = context.coordinator.handleActivity
+        context.coordinator.onMouseMove = onMouseMove
+        context.coordinator.onBecomeKey = onBecomeKey
+        nsView.onMouseMove = context.coordinator.handleMouseMove
         DispatchQueue.main.async {
             configureWindow(for: nsView, coordinator: context.coordinator)
         }
@@ -1968,16 +2047,22 @@ private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
     final class Coordinator {
         private var observedWindow: NSWindow?
         private var keyObserver: NSObjectProtocol?
-        private let onActivity: () -> Void
+        var onMouseMove: () -> Void
+        var onBecomeKey: () -> Void
         private var lastTrafficLightsHidden: Bool?
         private var lastKeepWindowInFront: Bool?
 
-        init(onActivity: @escaping () -> Void) {
-            self.onActivity = onActivity
+        init(onMouseMove: @escaping () -> Void, onBecomeKey: @escaping () -> Void) {
+            self.onMouseMove = onMouseMove
+            self.onBecomeKey = onBecomeKey
         }
 
-        func handleActivity() {
-            onActivity()
+        func handleMouseMove() {
+            onMouseMove()
+        }
+
+        func handleBecomeKey() {
+            onBecomeKey()
         }
 
         func startObserving(window: NSWindow) {
@@ -1991,7 +2076,7 @@ private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
                 object: window,
                 queue: .main
             ) { [weak self] _ in
-                self?.handleActivity()
+                self?.handleBecomeKey()
             }
         }
 
@@ -2073,30 +2158,92 @@ private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
 }
 #endif
 
-private extension View {
-    private var overlayChromeDarkenOpacity: Double { 0.1 }
+private struct OverlayMaterialPlate: ViewModifier {
+    var cornerRadius: CGFloat
 
+    func body(content: Content) -> some View {
+        content.background {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.6)
+                }
+        }
+    }
+}
+
+private extension View {
     @ViewBuilder
     func overlayChromeBackground(isVisible: Bool, isOverlapping: Bool) -> some View {
-#if os(macOS) || os(iOS)
         if isVisible && isOverlapping {
+            overlayGlassPlate(cornerRadius: 22)
+        } else {
             self
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .fill(Color.black.opacity(overlayChromeDarkenOpacity))
-                                .blendMode(.multiply)
-                        }
-                }
+        }
+    }
+
+    /// Liquid Glass on OS 26. Earlier systems use a material plate so the group still reads as glass.
+    @ViewBuilder
+    func overlayGlassPlate(cornerRadius: CGFloat) -> some View {
+        let padded = self
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+#if compiler(>=6.2) && !ADVISOR_LEGACY_GLASS
+        if #available(iOS 26.0, macOS 26.0, tvOS 26.0, *) {
+            padded.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            padded.modifier(OverlayMaterialPlate(cornerRadius: cornerRadius))
+        }
+#else
+        padded.modifier(OverlayMaterialPlate(cornerRadius: cornerRadius))
+#endif
+    }
+
+    /// Lets neighbouring glass buttons blend into one surface.
+    @ViewBuilder
+    func overlayGlassButtonCluster() -> some View {
+#if compiler(>=6.2) && !ADVISOR_LEGACY_GLASS
+        if #available(iOS 26.0, macOS 26.0, tvOS 26.0, *) {
+            GlassEffectContainer { self }
         } else {
             self
         }
 #else
         self
+#endif
+    }
+
+    @ViewBuilder
+    func overlayControlButtonStyle() -> some View {
+#if compiler(>=6.2) && !ADVISOR_LEGACY_GLASS
+        if #available(iOS 26.0, macOS 26.0, tvOS 26.0, *) {
+            self.buttonStyle(.glass)
+        } else {
+            self.legacyOverlayControlButtonStyle()
+        }
+#else
+        self.legacyOverlayControlButtonStyle()
+#endif
+    }
+
+    @ViewBuilder
+    func legacyOverlayControlButtonStyle() -> some View {
+#if os(macOS)
+        buttonStyle(MacOverlayButtonStyle())
+#else
+        buttonStyle(.bordered)
+            .controlSize(.large)
+#endif
+    }
+
+    /// tvOS keeps disabled hidden buttons out of the focus system so the reveal catcher can take the remote.
+    @ViewBuilder
+    func overlayHideInteraction(hidden: Bool) -> some View {
+#if os(tvOS)
+        self.disabled(hidden).allowsHitTesting(!hidden)
+#else
+        self.allowsHitTesting(!hidden)
 #endif
     }
 
