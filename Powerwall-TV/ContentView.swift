@@ -11,26 +11,20 @@ import SwiftData
 import AppKit
 #endif
 
-func formatPowerValue(_ value: Double, precision: String, showLessPrecision: Bool) -> String {
-    let displayedValue = showLessPrecision ? abs(value) : value
-    return String(format: precision, displayedValue)
-}
-
 enum PowerwallRuntimeEstimator {
     private static let capacityWhPerBattery = 13_500.0
-    /// Tesla reports "Optimised charging" near ~80% when charge power into the Powerwall is low.
+    /// Tesla pauses for optimised charging from 79% until the battery is full, when charge power is low.
     private static let optimisedChargingMinPercent = 79.0
-    private static let optimisedChargingMaxPercent = 81.0
     private static let optimisedChargingMaxPowerIntoWatts = 250.0
 
-    /// True when SOC is ~80% and less than 250W is flowing into the Powerwall (charging or idle).
+    /// True from 79% up to, but not including, 100% when less than 250W is flowing into the Powerwall.
     /// Negative `batteryWatts` means charging (power into the battery).
     static func isOptimisedCharging(batteryWatts: Double, batteryPercentage: Double?) -> Bool {
         guard let batteryPercentage else { return false }
         // Power into Powerwall is -batteryWatts when charging; idle (0) also counts as < 250W into.
         let powerIntoWatts = batteryWatts <= 0 ? -batteryWatts : Double.infinity
         return batteryPercentage >= optimisedChargingMinPercent
-            && batteryPercentage <= optimisedChargingMaxPercent
+            && batteryPercentage < 100
             && powerIntoWatts < optimisedChargingMaxPowerIntoWatts
     }
 
@@ -114,6 +108,7 @@ private extension View {
 
 struct ContentView: View {
     @ObservedObject var viewModel: PowerwallViewModel
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var scheduleManager = PowerwallScheduleManager.shared
     @State private var demo = false
     @State private var animations = true
@@ -175,11 +170,19 @@ struct ContentView: View {
                 sceneSize: sceneSize,
                 showSiteSummaryInScene: !detachSiteSummary
             )
-            let siteSummarySceneOverlap = detachSiteSummary
-                && frameIntersectsScene(detachedSiteSummaryFrame, sceneFrame: sceneFrame)
-            // The 3D house ignores the safe area and covers the window, including the letterbox
-            // where these buttons sit. The fitted 16:9 frame would miss them, so treat the house as overlap.
-            let controlsSceneOverlap = showsHouseScene || frameIntersectsScene(controlsOverlayFrame, sceneFrame: sceneFrame)
+            let siteSummarySceneOverlap = OverlayAutoHide.summaryOverlaps(
+                showsHouseScene: showsHouseScene,
+                summaryIsInline: !detachSiteSummary,
+                summaryFrame: detachedSiteSummaryFrame,
+                sceneFrame: sceneFrame
+            )
+            // The 3D house ignores the safe area and covers the window. The flat home is a fitted
+            // 16:9 image, so the same buttons sit in the letterbox and miss that rect.
+            let controlsSceneOverlap = OverlayAutoHide.controlsOverlap(
+                showsHouseScene: showsHouseScene,
+                controlsFrame: controlsOverlayFrame,
+                sceneFrame: sceneFrame
+            )
             let metricShift = metricSceneShift(
                 sceneSize: sceneSize,
                 sceneFrame: sceneFrame,
@@ -226,7 +229,8 @@ struct ContentView: View {
                     sceneOverlay(
                         in: sceneSize,
                         showSiteSummaryInScene: !detachSiteSummary,
-                        metricShift: metricShift
+                        metricShift: metricShift,
+                        hideInlineSiteSummary: hideDetachedSiteSummary
                     )
                         .frame(width: sceneSize.width, height: sceneSize.height)
                         .opacity(showMetrics ? 1 : 0)
@@ -504,9 +508,13 @@ struct ContentView: View {
                 viewModel.fetchData()
             }
             beginFirstLoadIntro()
+            viewModel.noteSceneAttention(Self.attention(for: scenePhase))
 #if !os(macOS)
             UIApplication.shared.isIdleTimerDisabled = viewModel.preventScreenSaver
 #endif
+        }
+        .onChange(of: scenePhase) { phase in
+            viewModel.noteSceneAttention(Self.attention(for: phase))
         }
         .onDisappear {
             resetFirstLoadIntro()
@@ -519,7 +527,8 @@ struct ContentView: View {
                 isHidden: shouldHideWindowChrome,
                 keepWindowInFront: viewModel.keepWindowInFront,
                 onMouseMove: revealHiddenOverlaysOnActivity,
-                onBecomeKey: revealAutoHiddenOverlays
+                onBecomeKey: revealAutoHiddenOverlays,
+                onAttention: { viewModel.noteWindowAttention($0) }
             )
         )
 #endif
@@ -656,7 +665,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func sceneOverlay(in sceneSize: CGSize, showSiteSummaryInScene: Bool, metricShift: MetricSceneShift) -> some View {
+    private func sceneOverlay(in sceneSize: CGSize, showSiteSummaryInScene: Bool, metricShift: MetricSceneShift, hideInlineSiteSummary: Bool) -> some View {
         if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local {
             Text("Please configure the gateway settings.")
                 .foregroundColor(.gray)
@@ -665,7 +674,8 @@ struct ContentView: View {
                 data: data,
                 sceneSize: sceneSize,
                 showSiteSummaryInScene: showSiteSummaryInScene,
-                metricShift: metricShift
+                metricShift: metricShift,
+                hideInlineSiteSummary: hideInlineSiteSummary
             )
                 .foregroundColor(.white)
         } else {
@@ -687,7 +697,7 @@ struct ContentView: View {
         }
     }
 
-    private func sceneDataOverlay(data: PowerwallData, sceneSize: CGSize, showSiteSummaryInScene: Bool, metricShift: MetricSceneShift) -> some View {
+    private func sceneDataOverlay(data: PowerwallData, sceneSize: CGSize, showSiteSummaryInScene: Bool, metricShift: MetricSceneShift, hideInlineSiteSummary: Bool) -> some View {
         let batteryPercentage = max(0.0, min(1.0, (viewModel.batteryPercentage?.percentage ?? 0) / 100))
         let batteryIndicatorHeight = sceneHeight(0.076, in: sceneSize) * batteryPercentage
         let batteryIndicatorWidth = max(CGFloat(powerwallPercentageWidth), sceneWidth(0.0024, in: sceneSize))
@@ -707,6 +717,22 @@ struct ContentView: View {
 #endif
 
         let showFlatPower = animations && !showsHouseScene
+        let flatPresentation = PresentationRefresh.decision(
+            rate: viewModel.displayFrameRate,
+            interacting: false,
+            rainIntensity: 0,
+            snowIntensity: 0,
+            snapshot: PowerFlowSnapshot(
+                solarW: data.solar.instantPower,
+                batteryW: data.battery.instantPower,
+                gridW: data.site.instantPower,
+                homeW: data.load.instantPower
+            ),
+            revealingWeather: false,
+            attention: viewModel.appAttention
+        )
+        let flatRefresh = flatPresentation.flatStepInterval
+        let flatPaused = flatPresentation.animationsPaused
         return ZStack {
             if viewModel.isOffGrid(), !showsHouseScene {
                 offGridImage(sceneSize: sceneSize)
@@ -716,6 +742,8 @@ struct ContentView: View {
 
             if showSiteSummaryInScene {
                 siteSummaryView(data: data, valueFont: valueFont, labelFont: labelFont, messageWidth: summaryMessageWidth)
+                    .opacity(hideInlineSiteSummary ? 0 : 1)
+                    .allowsHitTesting(!hideInlineSiteSummary)
                     .position(scenePoint(x: inlineSiteSummaryX, y: -0.38 + metricShift.summary, in: sceneSize))
             }
 
@@ -761,7 +789,9 @@ struct ContentView: View {
                     duration: 2,
                     lineWidth: surgeLineWidth,
                     curve: ChargerToCar(),
-                    shouldStart: startAnimations
+                    shouldStart: startAnimations,
+                    refreshInterval: flatRefresh,
+                    paused: flatPaused
                 )
                 .frame(width: sceneWidth(0.024, in: sceneSize), height: sceneHeight(0.145, in: sceneSize))
                 .position(scenePoint(x: -0.12, y: 0.13, in: sceneSize))
@@ -775,7 +805,9 @@ struct ContentView: View {
                     duration: 2,
                     lineWidth: surgeLineWidth,
                     curve: SolarToGateway(),
-                    shouldStart: startAnimations
+                    shouldStart: startAnimations,
+                    refreshInterval: flatRefresh,
+                    paused: flatPaused
                 )
                 .frame(width: sceneWidth(0.021, in: sceneSize), height: sceneHeight(0.242, in: sceneSize))
                 .position(scenePoint(x: 0.097, y: 0.13, in: sceneSize))
@@ -790,7 +822,9 @@ struct ContentView: View {
                     startOffset: 1,
                     lineWidth: surgeLineWidth,
                     curve: GatewayToHome(),
-                    shouldStart: startAnimations
+                    shouldStart: startAnimations,
+                    refreshInterval: flatRefresh,
+                    paused: flatPaused
                 )
                 .frame(width: sceneWidth(0.054, in: sceneSize), height: sceneHeight(0.056, in: sceneSize))
                 .rotationEffect(Angle(degrees: 6))
@@ -808,7 +842,9 @@ struct ContentView: View {
                     startOffset: data.battery.instantPower > 0 ? 0 : 1,
                     lineWidth: surgeLineWidth,
                     curve: PowerwallToGateway(),
-                    shouldStart: startAnimations
+                    shouldStart: startAnimations,
+                    refreshInterval: flatRefresh,
+                    paused: flatPaused
                 )
                 .frame(width: sceneWidth(0.058, in: sceneSize), height: sceneHeight(0.065, in: sceneSize))
                 .rotationEffect(Angle(degrees: 8))
@@ -826,7 +862,9 @@ struct ContentView: View {
                     startOffset: data.site.instantPower > 0 ? 0 : 1,
                     lineWidth: surgeLineWidth,
                     curve: GatewayToGrid(),
-                    shouldStart: startAnimations
+                    shouldStart: startAnimations,
+                    refreshInterval: flatRefresh,
+                    paused: flatPaused
                 )
                 .frame(width: sceneWidth(0.102, in: sceneSize), height: sceneHeight(0.134, in: sceneSize))
                 .position(scenePoint(x: 0.152, y: 0.208, in: sceneSize))
@@ -1507,6 +1545,20 @@ struct ContentView: View {
         }
     }
 
+    /// Background is off screen. Inactive is visible without focus, including the app switcher and another frontmost app.
+    private static func attention(for phase: ScenePhase) -> AppAttention {
+        switch phase {
+        case .background:
+            return .hidden
+        case .inactive:
+            return .visibleUnfocused
+        case .active:
+            return .focused
+        @unknown default:
+            return .focused
+        }
+    }
+
     private func beginFirstLoadIntro() {
         introAnimationTask?.cancel()
         withAnimation(.easeOut(duration: 1.4)) {
@@ -1674,7 +1726,7 @@ struct ContentView: View {
     }
 
     private func frameIntersectsScene(_ frame: CGRect, sceneFrame: CGRect) -> Bool {
-        !frame.isEmpty && frame.intersects(sceneFrame)
+        OverlayAutoHide.frameIntersects(frame, sceneFrame)
     }
 
     private func updateDetachedSiteSummaryOverlap(_ overlaps: Bool) {
@@ -1968,6 +2020,34 @@ private enum OverlayAutoHideTarget {
     case controlsOverlay
 }
 
+/// Decides when the summary and the corner buttons cover the home presentation.
+enum OverlayAutoHide {
+    /// The house scene fills the window, including the band under a 16:9 frame.
+    /// The flat image does not. Once the buttons have a frame, they still cover that presentation.
+    static func controlsOverlap(showsHouseScene: Bool, controlsFrame: CGRect, sceneFrame: CGRect) -> Bool {
+        if showsHouseScene { return true }
+        if frameIntersects(controlsFrame, sceneFrame) { return true }
+        return !controlsFrame.isEmpty && !sceneFrame.isEmpty
+    }
+
+    /// An inline summary is drawn on the flat image. A detached summary on the flat home
+    /// sits in the same letterbox the fitted scene rect misses.
+    static func summaryOverlaps(
+        showsHouseScene: Bool,
+        summaryIsInline: Bool,
+        summaryFrame: CGRect,
+        sceneFrame: CGRect
+    ) -> Bool {
+        if summaryIsInline { return !showsHouseScene }
+        if showsHouseScene { return frameIntersects(summaryFrame, sceneFrame) }
+        return !summaryFrame.isEmpty && !sceneFrame.isEmpty
+    }
+
+    static func frameIntersects(_ frame: CGRect, _ sceneFrame: CGRect) -> Bool {
+        !frame.isEmpty && frame.intersects(sceneFrame)
+    }
+}
+
 private enum OverlayFrameKind: Hashable {
     case detachedSiteSummary
     case controlsOverlay
@@ -2009,9 +2089,10 @@ private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
     let keepWindowInFront: Bool
     let onMouseMove: () -> Void
     let onBecomeKey: () -> Void
+    let onAttention: (AppAttention) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onMouseMove: onMouseMove, onBecomeKey: onBecomeKey)
+        Coordinator(onMouseMove: onMouseMove, onBecomeKey: onBecomeKey, onAttention: onAttention)
     }
 
     func makeNSView(context: Context) -> TrackingView {
@@ -2026,6 +2107,7 @@ private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
     func updateNSView(_ nsView: TrackingView, context: Context) {
         context.coordinator.onMouseMove = onMouseMove
         context.coordinator.onBecomeKey = onBecomeKey
+        context.coordinator.onAttention = onAttention
         nsView.onMouseMove = context.coordinator.handleMouseMove
         DispatchQueue.main.async {
             configureWindow(for: nsView, coordinator: context.coordinator)
@@ -2050,15 +2132,17 @@ private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
 
     final class Coordinator {
         private var observedWindow: NSWindow?
-        private var keyObserver: NSObjectProtocol?
+        private var observers: [NSObjectProtocol] = []
         var onMouseMove: () -> Void
         var onBecomeKey: () -> Void
+        var onAttention: (AppAttention) -> Void
         private var lastTrafficLightsHidden: Bool?
         private var lastKeepWindowInFront: Bool?
 
-        init(onMouseMove: @escaping () -> Void, onBecomeKey: @escaping () -> Void) {
+        init(onMouseMove: @escaping () -> Void, onBecomeKey: @escaping () -> Void, onAttention: @escaping (AppAttention) -> Void) {
             self.onMouseMove = onMouseMove
             self.onBecomeKey = onBecomeKey
+            self.onAttention = onAttention
         }
 
         func handleMouseMove() {
@@ -2075,13 +2159,37 @@ private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
             observedWindow = window
             lastTrafficLightsHidden = nil
             lastKeepWindowInFront = nil
-            keyObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.didBecomeKeyNotification,
-                object: window,
-                queue: .main
-            ) { [weak self] _ in
-                self?.handleBecomeKey()
+            let center = NotificationCenter.default
+            observe(center, NSWindow.didBecomeKeyNotification, object: window) { coordinator in
+                coordinator.handleBecomeKey()
+                coordinator.publishAttention()
             }
+            observe(center, NSWindow.didChangeOcclusionStateNotification, object: window) { $0.publishAttention() }
+            observe(center, NSWindow.didMiniaturizeNotification, object: window) { $0.publishAttention() }
+            observe(center, NSWindow.didDeminiaturizeNotification, object: window) { $0.publishAttention() }
+            observe(center, NSApplication.didBecomeActiveNotification, object: nil) { $0.publishAttention() }
+            observe(center, NSApplication.didResignActiveNotification, object: nil) { $0.publishAttention() }
+            observe(center, NSApplication.didHideNotification, object: nil) { $0.publishAttention() }
+            observe(center, NSApplication.didUnhideNotification, object: nil) { $0.publishAttention() }
+            publishAttention()
+        }
+
+        private func observe(_ center: NotificationCenter, _ name: Notification.Name, object: Any?, body: @escaping (Coordinator) -> Void) {
+            observers.append(center.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
+                guard let self else { return }
+                body(self)
+            })
+        }
+
+        func publishAttention() {
+            guard let window = observedWindow else { return }
+            onAttention(AppAttention.macWindow(
+                isVisible: window.isVisible,
+                isMiniaturized: window.isMiniaturized,
+                occlusionVisible: window.occlusionState.contains(.visible),
+                appHidden: NSApp.isHidden,
+                appActive: NSApp.isActive
+            ))
         }
 
         func applyWindowLevel(_ keepWindowInFront: Bool, to window: NSWindow) {
@@ -2109,10 +2217,10 @@ private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
         }
 
         func stopObserving(window: NSWindow?) {
-            if let keyObserver {
-                NotificationCenter.default.removeObserver(keyObserver)
-                self.keyObserver = nil
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
             }
+            observers.removeAll()
             if observedWindow === window {
                 observedWindow = nil
                 lastTrafficLightsHidden = nil

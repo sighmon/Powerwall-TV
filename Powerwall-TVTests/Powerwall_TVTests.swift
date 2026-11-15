@@ -365,7 +365,7 @@ struct Powerwall_TVTests {
         #expect(PowerwallRuntimeEstimator.estimateString(batteryWatts: 20, batteryCount: 1, batteryPercentage: 50, idleThresholdWatts: 40) == nil)
     }
 
-    @Test func powerwallRuntimeEstimateShowsOptimisedChargingNearEightyPercentWithLowChargePower() {
+    @Test func powerwallRuntimeEstimateShowsOptimisedChargingFrom79UntilFullWithLowChargePower() {
         #expect(
             PowerwallRuntimeEstimator.estimateString(
                 batteryWatts: -100,
@@ -386,11 +386,12 @@ struct Powerwall_TVTests {
             PowerwallRuntimeEstimator.estimateString(
                 batteryWatts: 0,
                 batteryCount: 1,
-                batteryPercentage: 81,
+                batteryPercentage: 99,
                 idleThresholdWatts: 40
             ) == "Optimised charging"
         )
-        #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: -50, batteryPercentage: 80) == true)
+        #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: -50, batteryPercentage: 82) == true)
+        #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: -50, batteryPercentage: 99.4) == true)
     }
 
     @Test func powerwallRuntimeEstimateDoesNotShowOptimisedChargingOutsideTeslaConditions() {
@@ -405,9 +406,9 @@ struct Powerwall_TVTests {
         )
         #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: -250, batteryPercentage: 80) == false)
 
-        // Outside 79–81% SOC
+        // Below 79%, or already full
         #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: -100, batteryPercentage: 78) == false)
-        #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: -100, batteryPercentage: 82) == false)
+        #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: -100, batteryPercentage: 100) == false)
 
         // Discharging (power out of the Powerwall), even at ~80%
         #expect(PowerwallRuntimeEstimator.isOptimisedCharging(batteryWatts: 100, batteryPercentage: 80) == false)

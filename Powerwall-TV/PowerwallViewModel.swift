@@ -9,6 +9,9 @@
 import Foundation
 import Combine
 import AuthenticationServices
+#if canImport(WidgetKit) && !os(tvOS)
+import WidgetKit
+#endif
 #if os(iOS)
 import UIKit
 #elseif os(macOS)
@@ -61,7 +64,12 @@ class PowerwallViewModel: ObservableObject {
     @Published var username: String = UserDefaults.standard.string(forKey: "username") ?? "customer"
     @Published var password: String = KeychainWrapper.standard.string(forKey: "gatewayPassword") ?? ""
     @Published var preventScreenSaver: Bool = UserDefaults.standard.bool(forKey: "preventScreenSaver")
-    @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision")
+    @Published var showLessPrecision: Bool = UserDefaults.standard.bool(forKey: "showLessPrecision") {
+        didSet {
+            UserDefaults.standard.set(showLessPrecision, forKey: "showLessPrecision")
+            publishEnergyWidget()
+        }
+    }
     @Published var alwaysShowPowerwallRuntimeEstimate: Bool = UserDefaults.standard.bool(forKey: "alwaysShowPowerwallRuntimeEstimate")
     @Published var showVehicles: Bool = UserDefaults.standard.object(forKey: "showVehicles") as? Bool ?? false
     @Published var showSchedulerButton: Bool = UserDefaults.standard.object(forKey: "showSchedulerButton") as? Bool ?? false
@@ -69,6 +77,39 @@ class PowerwallViewModel: ObservableObject {
     @Published var keepWindowInFront: Bool = UserDefaults.standard.bool(forKey: "keepWindowInFront")
     @Published var autoHideSummaryOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideSummaryOnOverlap") as? Bool ?? false
     @Published var autoHideButtonsOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideButtonsOnOverlap") as? Bool ?? false
+    /// Off unless the user turns it on. Persists immediately so a relaunch keeps the choice.
+    /// 1 fps, 10 fps, 30 fps, or the display refresh. Missing preference stays on Full.
+    @Published var displayFrameRate: DisplayFrameRate = DisplayFrameRate.stored() {
+        didSet { displayFrameRate.write() }
+    }
+    /// Off-screen pauses playback. Visible but unfocused caps the menu rate at 30 fps.
+    /// Not saved. The Display menu keeps the user's choice.
+    @Published var appAttention: AppAttention = .focused
+    private var sceneAttention: AppAttention = .focused
+    private var windowAttention: AppAttention?
+    var lowCPUMode: Bool { displayFrameRate == .low }
+
+    func noteSceneAttention(_ attention: AppAttention) {
+        sceneAttention = attention
+        refreshAppAttention()
+    }
+
+    func noteWindowAttention(_ attention: AppAttention) {
+        windowAttention = attention
+        refreshAppAttention()
+    }
+
+    private func refreshAppAttention() {
+        #if os(macOS)
+        // A hidden or backgrounded app stays paused even if a window report is still visible.
+        let next = sceneAttention == .hidden ? AppAttention.hidden : (windowAttention ?? sceneAttention)
+        #else
+        let next = sceneAttention
+        #endif
+        if appAttention != next {
+            appAttention = next
+        }
+    }
     @Published var sceneScale: Double = clampSceneScale(UserDefaults.standard.object(forKey: "sceneScale") as? Double ?? 1.0)
     @Published var sceneHorizontalOffset: Double = clampSceneHorizontalOffset(UserDefaults.standard.object(forKey: "sceneHorizontalOffset") as? Double ?? 0.0)
     @Published var sceneVerticalOffset: Double = clampSceneVerticalOffset(UserDefaults.standard.object(forKey: "sceneVerticalOffset") as? Double ?? 0.0)
@@ -94,8 +135,12 @@ class PowerwallViewModel: ObservableObject {
     @Published var gridCarbonIntensity: Int?
     @Published var gridFossilFuelPercentage: Double?
 
-    @Published var data: PowerwallData?
-    @Published var batteryPercentage: BatteryPercentage?
+    @Published var data: PowerwallData? {
+        didSet { publishEnergyWidget() }
+    }
+    @Published var batteryPercentage: BatteryPercentage? {
+        didSet { publishEnergyWidget() }
+    }
     @Published var gridStatus: GridStatus?
     /// Fleet API `live_status.island_status` (e.g. on_grid, off_grid_intentional, off_grid_unintentional).
     @Published var islandStatus: String?
@@ -248,6 +293,17 @@ class PowerwallViewModel: ObservableObject {
     }()
 
     init() {
+        // Launch arguments force the same properties the Display toggles set, without
+        // writing preferences. Used to sample CPU with the mode on.
+        if CommandLine.arguments.contains("--low-cpu") {
+            displayFrameRate = .low
+        }
+        if CommandLine.arguments.contains("--flat-home") {
+            showHouseScene = false
+        } else if CommandLine.arguments.contains("--house") {
+            showHouseScene = true
+        }
+
         let delegate = InsecureURLSessionDelegate() // Custom delegate for local SSL bypass
         self.localURLSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
 
@@ -606,6 +662,18 @@ class PowerwallViewModel: ObservableObject {
         }.resume()
     }
 
+    private var regionResolveInFlight = false
+
+    /// Same probe as `resolveRegionBaseURL`, but the wait stays off the main thread.
+    private func resolveRegionWithoutBlockingTheMainThread() {
+        if Self.isRunningTests || fleetRegionResolved || accessToken.isEmpty || regionResolveInFlight { return }
+        regionResolveInFlight = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.resolveRegionBaseURL()
+            DispatchQueue.main.async { self?.regionResolveInFlight = false }
+        }
+    }
+
     private func resolveRegionBaseURL() {
         if Self.isRunningTests { return }
         if fleetRegionResolved || accessToken.isEmpty { return }
@@ -715,6 +783,25 @@ class PowerwallViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Writes the figures the home screen is showing so the widget can draw them without the scene.
+    func publishEnergyWidget() {
+        let vehicle = data?.wallConnectors.reduce(0.0) { $0 + ($1.wallConnectorPower ?? 0) } ?? 0
+        let reading = EnergyWidgetReading(
+            solarWatts: data?.solar.instantPower,
+            homeWatts: data.map { $0.load.instantPower - vehicle },
+            batteryWatts: data?.battery.instantPower,
+            gridWatts: data?.site.instantPower,
+            siteName: siteName,
+            updatedAt: Date(),
+            showLessPrecision: showLessPrecision,
+            batteryPercent: batteryPercentage?.percentage
+        )
+        EnergyWidgetStore.save(reading)
+        #if canImport(WidgetKit) && !os(tvOS)
+        WidgetCenter.shared.reloadTimelines(ofKind: "PowerwallEnergy")
+        #endif
+    }
+
     /// Switches the Fleet home on screen and reloads its live data.
     func selectEnergySite(at index: Int) {
         guard !energySites.isEmpty else { return }
@@ -760,7 +847,13 @@ class PowerwallViewModel: ObservableObject {
                Date() >= expirationDate {
                 self.refreshAccessToken()
             }
-            self.resolveRegionBaseURL()
+            if displayFrameRate == .low {
+                // The probe waits on the network. On the main thread that wait is a
+                // multi-second stall every time the region is still unknown.
+                resolveRegionWithoutBlockingTheMainThread()
+            } else {
+                self.resolveRegionBaseURL()
+            }
             if !self.energySites.isEmpty {
                 let currentSite = self.energySites[self.currentEnergySiteIndex]
                 if let id = currentSite.energySiteId {

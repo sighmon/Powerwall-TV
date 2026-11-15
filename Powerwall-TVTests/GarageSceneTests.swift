@@ -285,8 +285,14 @@ struct GarageSceneTests {
         let nightWash = HouseSky.skyWash(altitude: -10)
         #expect(nightWash.amount == 0)
         #expect(noonWash.amount > 0.95)
-        #expect(dawn.top.x > dawn.top.z)
+        #expect(dawn.top.z > dawn.top.x)
+        #expect(dawn.top.x > dawn.top.y)
+        #expect(dawn.bottom.x > dawn.bottom.z)
+        #expect(dawn.bottom.z > dawn.bottom.y)
         #expect(noonWash.top.z > noonWash.top.x)
+        let lowSun = place(altitude: 4, azimuth: 90, cloud: 0)
+        #expect(lowSun.sunColor.x > lowSun.sunColor.z)
+        #expect(lowSun.sunColor.z > lowSun.sunColor.y)
         let thin = HouseSky.wisps.filter { $0.cirrus && HouseSky.wispOpacity(threshold: $0.threshold, cloudCover: 0.5, cirrus: true) > 0 }
         let thick = HouseSky.wisps.filter { !$0.cirrus && HouseSky.wispOpacity(threshold: $0.threshold, cloudCover: 0.5, cirrus: false) > 0.2 }
         #expect(!thin.isEmpty)
@@ -363,6 +369,13 @@ struct GarageSceneTests {
         #expect(abs(halfway.rainIntensity - 0.3) < 0.001)
         #expect(HouseWeatherFade.ease(0) == 0)
         #expect(HouseWeatherFade.ease(1) == 1)
+        let refresh = 1.0 / 120.0
+        #expect(HouseWeatherFade.stepInterval(rate: .full, attention: .focused, displayRefresh: refresh) == refresh)
+        #expect(HouseWeatherFade.stepInterval(rate: .medium, attention: .focused, displayRefresh: refresh) == 1.0 / 30.0)
+        #expect(HouseWeatherFade.stepInterval(rate: .ten, attention: .focused, displayRefresh: refresh) == 0.1)
+        #expect(HouseWeatherFade.stepInterval(rate: .low, attention: .focused, displayRefresh: refresh) == 1)
+        #expect(HouseWeatherFade.stepInterval(rate: .full, attention: .visibleUnfocused, displayRefresh: refresh) == 1.0 / 30.0)
+        #expect(HouseWeatherFade.stepInterval(rate: .full, attention: .hidden, displayRefresh: refresh).isInfinite)
 
         let view = HouseCameraControlView(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
         let idle = PowerFlowSnapshot()
@@ -1264,6 +1277,365 @@ struct GarageSceneTests {
         }
         #expect(view.rendersContinuously == false)
         #expect(view.isPlaying == false)
+    }
+
+    @Test func lowCPUModeDoesNotAdvanceTheSkyEveryTick() {
+        #expect(HouseSkyCadence.advancesSun(lowCPU: true, step: 1) == false)
+        #expect(HouseSkyCadence.advancesSun(lowCPU: true, step: 44) == false)
+        #expect(HouseSkyCadence.advancesSun(lowCPU: false, step: 1) == true)
+        #expect(HouseSkyCadence.advancesSun(lowCPU: false, step: 44) == true)
+        #expect(HouseSkyCadence.advancesSun(lowCPU: false, step: 0) == false)
+        #expect(HouseSkyCadence.advancesSun(lowCPU: false, step: 45) == false)
+    }
+
+    @Test @MainActor func houseSceneViewDoesNotReloadTheHouseOnEachUpdate() {
+        let model = PowerwallViewModel()
+        let before = ResidentialClassicScene.loadCount
+        for _ in 0..<4 {
+            _ = HouseSceneView(viewModel: model)
+        }
+        #expect(ResidentialClassicScene.loadCount == before)
+    }
+
+    @Test func lowCPUModeStaysOffUntilTheUserTurnsItOn() {
+        let suite = "lowCPU-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        #expect(LowCPUModeSetting.stored(in: defaults) == false)
+        defaults.set(true, forKey: LowCPUModeSetting.key)
+        #expect(LowCPUModeSetting.stored(in: defaults) == true)
+        defaults.set(false, forKey: LowCPUModeSetting.key)
+        #expect(LowCPUModeSetting.stored(in: defaults) == false)
+        #expect(DisplayFrameRate.stored(in: defaults) == .full)
+        defaults.set(true, forKey: LowCPUModeSetting.key)
+        #expect(DisplayFrameRate.stored(in: defaults) == .low)
+        defaults.set(DisplayFrameRate.medium.rawValue, forKey: DisplayFrameRate.key)
+        #expect(DisplayFrameRate.stored(in: defaults) == .medium)
+    }
+
+    @Test func mediumFrameRateSitsBetweenLowCPUAndFull() {
+        let flowing = PowerFlowSnapshot(solarW: 11, homeW: 11)
+        let low = PresentationRefresh.decision(rate: .low, interacting: false, rainIntensity: 0, snowIntensity: 0, snapshot: flowing)
+        let ten = PresentationRefresh.decision(rate: .ten, interacting: false, rainIntensity: 0, snowIntensity: 0, snapshot: flowing)
+        let middle = PresentationRefresh.decision(rate: .medium, interacting: false, rainIntensity: 0, snowIntensity: 0, snapshot: flowing)
+        let full = PresentationRefresh.decision(rate: .full, interacting: false, rainIntensity: 0, snowIntensity: 0, snapshot: flowing)
+        #expect(low.preferredFramesPerSecond == 1)
+        #expect(low.flatStepInterval == 1)
+        #expect(low.rendersContinuously == false)
+        #expect(ten.preferredFramesPerSecond == 10)
+        #expect(ten.flatStepInterval == 1.0 / 10.0)
+        #expect(ten.rendersContinuously == false)
+        #expect(ten.usesDisplayRefresh == false)
+        #expect(ten.isPlaying == true)
+        #expect(middle.preferredFramesPerSecond == 30)
+        #expect(middle.flatStepInterval == 1.0 / 30.0)
+        #expect(middle.rendersContinuously == false)
+        #expect(middle.usesDisplayRefresh == false)
+        #expect(middle.isPlaying == true)
+        #expect(full.preferredFramesPerSecond == 0)
+        #expect(full.flatStepInterval == nil)
+        #expect(full.rendersContinuously == true)
+        #expect(full.usesDisplayRefresh == true)
+        #expect(DisplayFrameRate.allCases.map(\.title) == ["1 fps", "10 fps", "30 fps", "Full"])
+
+        let view = HouseCameraControlView(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: flowing, interacting: false, frameRate: .medium)
+        #expect(view.rendersContinuously == false)
+        #expect(view.isPlaying == true)
+        #expect(view.preferredFramesPerSecond == 30)
+    }
+
+    @Test func offscreenPausesPlaybackAndUnfocusedCapsAtThirty() {
+        let flowing = PowerFlowSnapshot(solarW: 11, homeW: 11)
+        let hidden = PresentationRefresh.decision(
+            rate: .full,
+            interacting: true,
+            rainIntensity: 0.4,
+            snowIntensity: 0.4,
+            snapshot: flowing,
+            revealingWeather: true,
+            attention: .hidden
+        )
+        #expect(hidden.animationsPaused)
+        #expect(hidden.isPlaying == false)
+        #expect(hidden.rendersContinuously == false)
+        #expect(hidden.usesDisplayRefresh == false)
+
+        let unfocused = PresentationRefresh.decision(
+            rate: .full,
+            interacting: false,
+            rainIntensity: 0,
+            snowIntensity: 0,
+            snapshot: flowing,
+            attention: .visibleUnfocused
+        )
+        #expect(unfocused.animationsPaused == false)
+        #expect(unfocused.preferredFramesPerSecond == 30)
+        #expect(unfocused.flatStepInterval == 1.0 / 30.0)
+        #expect(unfocused.rendersContinuously == false)
+        #expect(unfocused.isPlaying == true)
+
+        let unfocusedLow = PresentationRefresh.decision(
+            rate: .low,
+            interacting: false,
+            rainIntensity: 0,
+            snowIntensity: 0,
+            snapshot: flowing,
+            attention: .visibleUnfocused
+        )
+        #expect(unfocusedLow.preferredFramesPerSecond == 1)
+        #expect(unfocusedLow.flatStepInterval == 1)
+
+        let unfocusedTen = PresentationRefresh.decision(
+            rate: .ten,
+            interacting: false,
+            rainIntensity: 0,
+            snowIntensity: 0,
+            snapshot: flowing,
+            attention: .visibleUnfocused
+        )
+        #expect(unfocusedTen.preferredFramesPerSecond == 10)
+        #expect(unfocusedTen.flatStepInterval == 0.1)
+
+        #expect(AppAttention.macWindow(isVisible: true, isMiniaturized: false, occlusionVisible: true, appHidden: false, appActive: true) == .focused)
+        #expect(AppAttention.macWindow(isVisible: true, isMiniaturized: false, occlusionVisible: true, appHidden: false, appActive: false) == .visibleUnfocused)
+        #expect(AppAttention.macWindow(isVisible: true, isMiniaturized: true, occlusionVisible: true, appHidden: false, appActive: true) == .hidden)
+        #expect(AppAttention.macWindow(isVisible: false, isMiniaturized: false, occlusionVisible: false, appHidden: false, appActive: true) == .hidden)
+        #expect(AppAttention.macWindow(isVisible: true, isMiniaturized: false, occlusionVisible: false, appHidden: false, appActive: true) == .hidden)
+        #expect(AppAttention.macWindow(isVisible: true, isMiniaturized: false, occlusionVisible: true, appHidden: true, appActive: false) == .hidden)
+
+        let view = HouseCameraControlView(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+        view.applyPlayback(rainIntensity: 0.4, snowIntensity: 0, snapshot: flowing, interacting: true, revealingWeather: true, frameRate: .full, attention: .hidden)
+        #expect(view.isPlaying == false)
+        #expect(view.rendersContinuously == false)
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: flowing, interacting: false, frameRate: .full, attention: .visibleUnfocused)
+        #expect(view.isPlaying == true)
+        #expect(view.rendersContinuously == false)
+        #expect(view.preferredFramesPerSecond == 30)
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: flowing, interacting: false, frameRate: .full, attention: .focused)
+        #expect(view.rendersContinuously == true)
+        #expect(view.isPlaying == true)
+    }
+
+    @Test func lowCPURefreshLeavesTheDisplayLoop() {
+        let flowing = PowerFlowSnapshot(solarW: 11, homeW: 11)
+        let cases = [
+            PresentationRefresh.decision(lowCPU: true, interacting: false, rainIntensity: 0.4, snowIntensity: 0, snapshot: PowerFlowSnapshot(), revealingWeather: false),
+            PresentationRefresh.decision(lowCPU: true, interacting: false, rainIntensity: 0, snowIntensity: 0.4, snapshot: PowerFlowSnapshot(), revealingWeather: false),
+            PresentationRefresh.decision(lowCPU: true, interacting: false, rainIntensity: 0, snowIntensity: 0, snapshot: flowing, revealingWeather: false),
+            PresentationRefresh.decision(lowCPU: true, interacting: false, rainIntensity: 0, snowIntensity: 0, snapshot: PowerFlowSnapshot(), revealingWeather: true),
+        ]
+        for decision in cases {
+            #expect(decision.rendersContinuously == false)
+            #expect(decision.usesDisplayRefresh == false)
+            #expect(decision.isPlaying == true)
+            #expect(decision.preferredFramesPerSecond == PresentationRefresh.lowCPUFramesPerSecond)
+            #expect(decision.preferredFramesPerSecond < 10)
+            #expect(decision.flatStepInterval == PresentationRefresh.lowCPUInterval)
+            #expect((decision.flatStepInterval ?? 0) >= 1)
+        }
+        let idle = PresentationRefresh.decision(lowCPU: true, interacting: false, rainIntensity: 0, snowIntensity: 0, snapshot: PowerFlowSnapshot(), revealingWeather: false)
+        #expect(idle.rendersContinuously == false)
+        #expect(idle.isPlaying == false)
+        #expect(idle.flatStepInterval == 1)
+
+        let normal = PresentationRefresh.decision(lowCPU: false, interacting: false, rainIntensity: 0.4, snowIntensity: 0, snapshot: flowing, revealingWeather: true)
+        #expect(normal.rendersContinuously == true)
+        #expect(normal.isPlaying == true)
+        #expect(normal.usesDisplayRefresh == true)
+        #expect(normal.flatStepInterval == nil)
+
+        let view = HouseCameraControlView(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+        view.applyPlayback(rainIntensity: 0.4, snowIntensity: 0, snapshot: flowing, interacting: false, revealingWeather: true, lowCPU: true)
+        #expect(view.rendersContinuously == false)
+        #expect(view.isPlaying == true)
+        #expect(view.preferredFramesPerSecond == 1)
+        view.applyPlayback(rainIntensity: 0, snowIntensity: 0, snapshot: PowerFlowSnapshot(), interacting: false, revealingWeather: false, lowCPU: true)
+        #expect(view.rendersContinuously == false)
+        #expect(view.isPlaying == false)
+
+        view.applyPlayback(rainIntensity: 0.4, snowIntensity: 0, snapshot: flowing, interacting: false, revealingWeather: true, lowCPU: false)
+        #expect(view.rendersContinuously == true)
+        #expect(view.isPlaying == true)
+        #expect(view.preferredFramesPerSecond != 1)
+    }
+
+    @Test func flatHomeRefreshStepsOnceASecondInLowCPUMode() {
+        let interval = PresentationRefresh.decision(
+            lowCPU: true,
+            interacting: false,
+            rainIntensity: 0,
+            snowIntensity: 0,
+            snapshot: PowerFlowSnapshot(solarW: 500, homeW: 500)
+        ).flatStepInterval
+        #expect(interval == 1)
+        let first = FlatHomeRefresh.frame(tick: 0, isForward: true)
+        let later = FlatHomeRefresh.frame(tick: 1, isForward: true)
+        #expect(first.opacity == 1)
+        #expect(later.trimStart != first.trimStart)
+        #expect(FlatHomeRefresh.frame(tick: 2, isForward: true).opacity == 0)
+        let displayRate = PresentationRefresh.decision(
+            lowCPU: false,
+            interacting: false,
+            rainIntensity: 0,
+            snowIntensity: 0,
+            snapshot: PowerFlowSnapshot(solarW: 500, homeW: 500)
+        )
+        #expect(displayRate.flatStepInterval == nil)
+        #expect(displayRate.rendersContinuously == true)
+    }
+
+    @Test func widgetSnapshotShowsTheFixtureWatts() {
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let entry = EnergyWidgetTimeline.entry(
+            solarWatts: 4321,
+            homeWatts: 1500,
+            batteryWatts: -800,
+            gridWatts: 250,
+            siteName: "Cabin",
+            at: date
+        )
+        #expect(entry.date == date)
+        #expect(entry.solar == "4.321 kW")
+        #expect(entry.home == "1.500 kW")
+        #expect(entry.battery == "-0.800 kW")
+        #expect(entry.batteryMark.isEmpty)
+        #expect(entry.grid == "0.250 kW")
+        #expect(entry.siteName == "Cabin")
+        #expect(entry.summary.contains("4.321"))
+        #expect(entry.summary.contains("1.500"))
+        #expect(entry.summary.contains("-0.800"))
+        #expect(entry.summary.contains("0.250"))
+        let coarse = EnergyWidgetTimeline.entry(
+            solarWatts: 4321,
+            homeWatts: 1500,
+            batteryWatts: -800,
+            gridWatts: 250,
+            siteName: "Cabin",
+            showLessPrecision: true,
+            at: date
+        )
+        #expect(coarse.solar == "4.3 kW")
+        #expect(coarse.home == "1.5 kW")
+        #expect(coarse.battery == "0.8 kW")
+        #expect(coarse.grid == "0.2 kW")
+
+        let charging = EnergyWidgetTimeline.entry(
+            solarWatts: 4321,
+            homeWatts: 1500,
+            batteryWatts: -800,
+            gridWatts: 250,
+            siteName: "Cabin",
+            batteryPercent: 80.4,
+            at: date
+        )
+        #expect(charging.batteryMark == "▲")
+        #expect(charging.batteryPercent == "80%")
+        #expect(charging.batteryLine == "-0.800 kW ▲ 80%")
+        let discharging = EnergyWidgetTimeline.entry(
+            solarWatts: 0,
+            homeWatts: 0,
+            batteryWatts: 100,
+            gridWatts: 0,
+            siteName: "Cabin",
+            batteryPercent: 40,
+            at: date
+        )
+        #expect(discharging.batteryMark == "▼")
+        #expect(discharging.batteryLine == "0.100 kW ▼ 40%")
+        let idle = EnergyWidgetTimeline.entry(
+            solarWatts: 0,
+            homeWatts: 0,
+            batteryWatts: 10,
+            gridWatts: 0,
+            siteName: "Cabin",
+            batteryPercent: 55.2,
+            at: date
+        )
+        #expect(idle.batteryMark == "·")
+        #expect(idle.batteryLine == "0.010 kW · 55%")
+        #expect(EnergyWidgetSnapshot.oneDecimalPowerText(4321) == "4.3 kW")
+        #expect(EnergyWidgetSnapshot.oneDecimalPowerText(-800) == "0.8 kW")
+        #expect(EnergyWidgetSnapshot.oneDecimalPowerText(250) == "0.2 kW")
+        #expect(EnergyWidgetSnapshot.oneDecimalPowerText(nil) == "—")
+        #expect(entry.solarWatts == 4321)
+
+        let suite = "widget-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let reading = EnergyWidgetReading(
+            solarWatts: 4321,
+            homeWatts: 1500,
+            batteryWatts: -800,
+            gridWatts: 250,
+            siteName: "Cabin",
+            updatedAt: date
+        )
+        EnergyWidgetStore.save(reading, defaults: defaults)
+        let loaded = EnergyWidgetStore.load(defaults: defaults)
+        let stored = EnergyWidgetTimeline.entry(for: loaded ?? .empty, at: date)
+        #expect(stored.solar == entry.solar)
+        #expect(stored.home == entry.home)
+        #expect(stored.battery == entry.battery)
+        #expect(stored.grid == entry.grid)
+    }
+
+    @Test func widgetSourcesDoNotLoadTheHouseScene() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let folders = [
+            root.appendingPathComponent("PowerwallEnergyWidget"),
+            root.appendingPathComponent("Shared"),
+        ]
+        var sources: [URL] = []
+        for folder in folders {
+            let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            sources.append(contentsOf: files.filter { $0.pathExtension == "swift" })
+        }
+        #expect(sources.count >= 2)
+        for file in sources {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            #expect(!text.contains("import SceneKit"))
+            #expect(!text.contains("HouseSceneView"))
+            #expect(!text.contains("ResidentialClassic"))
+        }
+    }
+
+    @Test func flatHomeLetterboxStillCountsAsOverlappingTheControls() {
+        // 850×1022 is taller than 16:9. The fitted image is 1280×720 and leaves
+        // the corner buttons and the top summary in the bands around it.
+        let scene = CGRect(x: -215, y: 151, width: 1280, height: 720)
+        let buttons = CGRect(x: 16, y: 966, width: 160, height: 40)
+        let summary = CGRect(x: 24, y: 24, width: 220, height: 80)
+        #expect(!OverlayAutoHide.frameIntersects(buttons, scene))
+        #expect(!OverlayAutoHide.frameIntersects(summary, scene))
+        #expect(OverlayAutoHide.controlsOverlap(showsHouseScene: false, controlsFrame: buttons, sceneFrame: scene))
+        #expect(OverlayAutoHide.summaryOverlaps(
+            showsHouseScene: false,
+            summaryIsInline: false,
+            summaryFrame: summary,
+            sceneFrame: scene
+        ))
+        #expect(OverlayAutoHide.summaryOverlaps(
+            showsHouseScene: false,
+            summaryIsInline: true,
+            summaryFrame: .zero,
+            sceneFrame: scene
+        ))
+        #expect(OverlayAutoHide.controlsOverlap(showsHouseScene: true, controlsFrame: .zero, sceneFrame: scene))
+        #expect(!OverlayAutoHide.controlsOverlap(showsHouseScene: false, controlsFrame: .zero, sceneFrame: scene))
+        #expect(!OverlayAutoHide.summaryOverlaps(
+            showsHouseScene: true,
+            summaryIsInline: false,
+            summaryFrame: summary,
+            sceneFrame: scene
+        ))
+        #expect(!OverlayAutoHide.summaryOverlaps(
+            showsHouseScene: true,
+            summaryIsInline: true,
+            summaryFrame: summary,
+            sceneFrame: scene
+        ))
     }
 
     private func ribbonColor(_ material: SCNMaterial, matches color: PowerFlowColor?) -> Bool {

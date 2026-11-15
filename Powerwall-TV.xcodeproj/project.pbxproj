@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A1E1000A2E10000100B12C98 /* PowerwallEnergyWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A1E100012E10000100B12C98 /* PowerwallEnergyWidget.appex */; platformFilters = (ios, macos, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		0540E3832D88263C00B12C98 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -21,12 +25,34 @@
 			remoteGlobalIDString = 0540E36F2D88263900B12C98;
 			remoteInfo = "Powerwall-TV";
 		};
+		A1E1000C2E10000100B12C98 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0540E3682D88263900B12C98 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1E100052E10000100B12C98;
+			remoteInfo = PowerwallEnergyWidget;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A1E100092E10000100B12C98 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A1E1000A2E10000100B12C98 /* PowerwallEnergyWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		0540E3702D88263900B12C98 /* Powerwall-TV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Powerwall-TV.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		0540E3822D88263C00B12C98 /* Powerwall-TVTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Powerwall-TVTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		0540E38C2D88263C00B12C98 /* Powerwall-TVUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Powerwall-TVUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1E100012E10000100B12C98 /* PowerwallEnergyWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PowerwallEnergyWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -36,6 +62,13 @@
 				Info.plist,
 			);
 			target = 0540E36F2D88263900B12C98 /* Powerwall-TV */;
+		};
+		A1E100042E10000100B12C98 /* Exceptions for "PowerwallEnergyWidget" folder in "PowerwallEnergyWidget" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A1E100052E10000100B12C98 /* PowerwallEnergyWidget */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -56,6 +89,19 @@
 		0540E38F2D88263C00B12C98 /* Powerwall-TVUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Powerwall-TVUITests";
+			sourceTree = "<group>";
+		};
+		A1E100022E10000100B12C98 /* PowerwallEnergyWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1E100042E10000100B12C98 /* Exceptions for "PowerwallEnergyWidget" folder in "PowerwallEnergyWidget" target */,
+			);
+			path = PowerwallEnergyWidget;
+			sourceTree = "<group>";
+		};
+		A1E100032E10000100B12C98 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -82,6 +128,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1E100072E10000100B12C98 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -89,6 +142,8 @@
 			isa = PBXGroup;
 			children = (
 				0540E3722D88263900B12C98 /* Powerwall-TV */,
+				A1E100032E10000100B12C98 /* Shared */,
+				A1E100022E10000100B12C98 /* PowerwallEnergyWidget */,
 				0540E3852D88263C00B12C98 /* Powerwall-TVTests */,
 				0540E38F2D88263C00B12C98 /* Powerwall-TVUITests */,
 				0540E3712D88263900B12C98 /* Products */,
@@ -99,6 +154,7 @@
 			isa = PBXGroup;
 			children = (
 				0540E3702D88263900B12C98 /* Powerwall-TV.app */,
+				A1E100012E10000100B12C98 /* PowerwallEnergyWidget.appex */,
 				0540E3822D88263C00B12C98 /* Powerwall-TVTests.xctest */,
 				0540E38C2D88263C00B12C98 /* Powerwall-TVUITests.xctest */,
 			);
@@ -115,14 +171,18 @@
 				0540E36C2D88263900B12C98 /* Sources */,
 				0540E36D2D88263900B12C98 /* Frameworks */,
 				0540E36E2D88263900B12C98 /* Resources */,
+				A1E100092E10000100B12C98 /* Embed Foundation Extensions */,
 				0540E3B12D88263900B12C98 /* Strip quarantine */,
+				A1E100202E10000100B12C98 /* Sign macOS widget app group */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A1E1000B2E10000100B12C98 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				0540E3722D88263900B12C98 /* Powerwall-TV */,
+				A1E100032E10000100B12C98 /* Shared */,
 			);
 			name = "Powerwall-TV";
 			packageProductDependencies = (
@@ -177,6 +237,29 @@
 			productReference = 0540E38C2D88263C00B12C98 /* Powerwall-TVUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		A1E100052E10000100B12C98 /* PowerwallEnergyWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1E1000D2E10000100B12C98 /* Build configuration list for PBXNativeTarget "PowerwallEnergyWidget" */;
+			buildPhases = (
+				A1E100062E10000100B12C98 /* Sources */,
+				A1E100072E10000100B12C98 /* Frameworks */,
+				A1E100082E10000100B12C98 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A1E100022E10000100B12C98 /* PowerwallEnergyWidget */,
+				A1E100032E10000100B12C98 /* Shared */,
+			);
+			name = PowerwallEnergyWidget;
+			packageProductDependencies = (
+			);
+			productName = PowerwallEnergyWidget;
+			productReference = A1E100012E10000100B12C98 /* PowerwallEnergyWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -198,6 +281,9 @@
 						CreatedOnToolsVersion = 16.2;
 						TestTargetID = 0540E36F2D88263900B12C98;
 					};
+					A1E100052E10000100B12C98 = {
+						CreatedOnToolsVersion = 16.2;
+					};
 				};
 			};
 			buildConfigurationList = 0540E36B2D88263900B12C98 /* Build configuration list for PBXProject "Powerwall-TV" */;
@@ -215,6 +301,7 @@
 			projectRoot = "";
 			targets = (
 				0540E36F2D88263900B12C98 /* Powerwall-TV */,
+				A1E100052E10000100B12C98 /* PowerwallEnergyWidget */,
 				0540E3812D88263C00B12C98 /* Powerwall-TVTests */,
 				0540E38B2D88263C00B12C98 /* Powerwall-TVUITests */,
 			);
@@ -243,6 +330,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1E100082E10000100B12C98 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
@@ -259,7 +353,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -n \"${WRAPPER_NAME}\" ] && [ -d \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\" ]; then\n  /usr/bin/xattr -dr com.apple.quarantine \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\"\nfi\n";
+			shellScript = "if [ -n \"${WRAPPER_NAME}\" ] && [ -d \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\" ]; then\n  # -s does not follow symlinks. A test host's framework Resources link can\n  # point nowhere while frameworks are still being copied, and plain -r then\n  # exits non-zero. Real files under Versions are still cleared.\n  /usr/bin/xattr -drs com.apple.quarantine \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\"\nfi\n";
+		};
+		A1E100202E10000100B12C98 /* Sign macOS widget app group */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Sign macOS widget app group";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"${PLATFORM_NAME}\" != \"macosx\" ]; then\n  exit 0\nfi\nEMBEDDED=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/PlugIns/PowerwallEnergyWidget.appex\"\nSTANDALONE=\"${TARGET_BUILD_DIR}/PowerwallEnergyWidget.appex\"\nENT=\"${SRCROOT}/PowerwallEnergyWidget/PowerwallEnergyWidget-macOS.entitlements\"\nif [ ! -d \"${EMBEDDED}\" ] || [ ! -f \"${ENT}\" ]; then\n  echo \"error: macOS energy widget is missing its appex or entitlements\" >&2\n  exit 1\nfi\nPROFILE_DIR=\"${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles\"\nPROFILE=\"$(/usr/bin/python3 - \"${PROFILE_DIR}\" << 'SELECT'\nimport glob, os, plistlib, subprocess, sys\nfolder = sys.argv[1]\nbest = None\nbest_score = -1\nfor path in glob.glob(os.path.join(folder, \"*.provisionprofile\")):\n    raw = subprocess.check_output([\"security\", \"cms\", \"-D\", \"-i\", path])\n    start = raw.find(b\"<?xml\")\n    if start < 0:\n        start = raw.find(b\"<plist\")\n    if start < 0:\n        continue\n    data = plistlib.loads(raw[start:])\n    ent = data.get(\"Entitlements\") or {}\n    teams = list(data.get(\"TeamIdentifier\") or [])\n    app_id = str(ent.get(\"com.apple.application-identifier\") or \"\")\n    groups = list(ent.get(\"com.apple.security.application-groups\") or [])\n    if \"4P8S9W2NYL\" not in teams:\n        continue\n    if not app_id.startswith(\"4P8S9W2NYL.\"):\n        continue\n    if \"group.com.sighmon.Powerwall-TV\" not in groups:\n        continue\n    if \"8WCLFC2272\" in app_id:\n        continue\n    name = str(data.get(\"Name\") or \"\")\n    score = 0\n    if app_id == \"4P8S9W2NYL.com.sighmon.Powerwall-TV.EnergyWidget\":\n        score += 100\n    elif app_id == \"4P8S9W2NYL.com.sighmon.Powerwall-TV\":\n        score += 50\n    if \"Store\" in name:\n        score -= 20\n    if score > best_score:\n        best_score = score\n        best = path\nif not best:\n    sys.exit(\"error: no Mac profile for team 4P8S9W2NYL authorizes group.com.sighmon.Powerwall-TV\")\nprint(best)\nSELECT\n)\"\nif [ ! -f \"${PROFILE}\" ]; then\n  echo \"error: selected app-group profile is missing\" >&2\n  exit 1\nfi\nAPP=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\"\nAPP_XCENT=\"${DERIVED_FILE_DIR}/Powerwall-TV-app.xcent\"\nSIGN_ENT=\"${DERIVED_FILE_DIR}/PowerwallEnergyWidget-macOS.xcent\"\n/usr/bin/codesign -d --entitlements :- \"${APP}\" > \"${APP_XCENT}\"\ncp \"${ENT}\" \"${SIGN_ENT}\"\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n  /usr/libexec/PlistBuddy -c \"Add :com.apple.security.get-task-allow bool true\" \"${SIGN_ENT}\" >/dev/null 2>&1 || /usr/libexec/PlistBuddy -c \"Set :com.apple.security.get-task-allow true\" \"${SIGN_ENT}\"\nfi\nsign_widget() {\n  cp \"${PROFILE}\" \"$1/Contents/embedded.provisionprofile\"\n  /usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --entitlements \"${SIGN_ENT}\" --timestamp=none --generate-entitlement-der \"$1\"\n}\nsign_widget \"${EMBEDDED}\"\nif [ -d \"${STANDALONE}\" ]; then\n  sign_widget \"${STANDALONE}\"\nfi\n/usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --entitlements \"${APP_XCENT}\" --timestamp=none --generate-entitlement-der \"${APP}\"\n/usr/bin/python3 - \"${EMBEDDED}\" << 'CHECK'\nimport plistlib, subprocess, sys\nappex = sys.argv[1]\nraw = subprocess.check_output([\"codesign\", \"-d\", \"--entitlements\", \":-\", appex], stderr=subprocess.DEVNULL)\nstart = raw.find(b\"<?xml\")\nif start < 0:\n    start = raw.find(b\"<plist\")\nif start < 0:\n    start = raw.find(b\"bplist\")\nent = plistlib.loads(raw[start:])\nprof_raw = subprocess.check_output([\"security\", \"cms\", \"-D\", \"-i\", appex + \"/Contents/embedded.provisionprofile\"])\nps = prof_raw.find(b\"<?xml\")\nif ps < 0:\n    ps = prof_raw.find(b\"<plist\")\ndata = plistlib.loads(prof_raw[ps:])\npe = data.get(\"Entitlements\") or {}\napp_id = ent.get(\"com.apple.application-identifier\") or \"\"\np_id = pe.get(\"com.apple.application-identifier\") or \"\"\ngroups = ent.get(\"com.apple.security.application-groups\") or []\npgroups = pe.get(\"com.apple.security.application-groups\") or []\nteams = list(data.get(\"TeamIdentifier\") or [])\nprint(\"widget application-identifier\", app_id)\nprint(\"profile name\", data.get(\"Name\"))\nprint(\"profile application-identifier\", p_id)\nprint(\"profile team\", teams)\nprint(\"widget groups\", groups)\nprint(\"profile groups\", pgroups)\nok = (\n    str(app_id).startswith(\"4P8S9W2NYL.\")\n    and str(p_id).startswith(\"4P8S9W2NYL.\")\n    and \"8WCLFC2272\" not in str(app_id)\n    and \"8WCLFC2272\" not in str(p_id)\n    and \"4P8S9W2NYL\" in teams\n    and \"group.com.sighmon.Powerwall-TV\" in groups\n    and \"group.com.sighmon.Powerwall-TV\" in pgroups\n)\nif not ok:\n    sys.exit(\"error: macOS widget signature does not authorize the app group under prefix 4P8S9W2NYL\")\nCHECK\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -285,6 +394,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1E100062E10000100B12C98 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -297,6 +413,11 @@
 			isa = PBXTargetDependency;
 			target = 0540E36F2D88263900B12C98 /* Powerwall-TV */;
 			targetProxy = 0540E38D2D88263C00B12C98 /* PBXContainerItemProxy */;
+		};
+		A1E1000B2E10000100B12C98 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A1E100052E10000100B12C98 /* PowerwallEnergyWidget */;
+			targetProxy = A1E1000C2E10000100B12C98 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -433,6 +554,8 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = "Powerwall-TV/Powerwall-TV.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "Powerwall-TV/Powerwall-TV-tvOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "Powerwall-TV/Powerwall-TV-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 130;
 				DEVELOPMENT_ASSET_PATHS = "\"Powerwall-TV/Preview Content\"";
@@ -474,6 +597,8 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = "Powerwall-TV/Powerwall-TV.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "Powerwall-TV/Powerwall-TV-tvOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "Powerwall-TV/Powerwall-TV-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 130;
 				DEVELOPMENT_ASSET_PATHS = "\"Powerwall-TV/Preview Content\"";
@@ -598,6 +723,72 @@
 			};
 			name = Release;
 		};
+		A1E1000E2E10000100B12C98 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PowerwallEnergyWidget/PowerwallEnergyWidget.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "PowerwallEnergyWidget/PowerwallEnergyWidget-tvOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "PowerwallEnergyWidget/PowerwallEnergyWidget-tvOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 130;
+				DEVELOPMENT_TEAM = 4P8S9W2NYL;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PowerwallEnergyWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Powerwall;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				MARKETING_VERSION = 1.32;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sighmon.Powerwall-TV.EnergyWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator iphoneos iphonesimulator macosx";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,3";
+				TVOS_DEPLOYMENT_TARGET = 18.2;
+			};
+			name = Debug;
+		};
+		A1E1000F2E10000100B12C98 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PowerwallEnergyWidget/PowerwallEnergyWidget.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "PowerwallEnergyWidget/PowerwallEnergyWidget-tvOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "PowerwallEnergyWidget/PowerwallEnergyWidget-tvOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 130;
+				DEVELOPMENT_TEAM = 4P8S9W2NYL;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PowerwallEnergyWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Powerwall;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				MARKETING_VERSION = 1.32;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sighmon.Powerwall-TV.EnergyWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator iphoneos iphonesimulator macosx";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,3";
+				TVOS_DEPLOYMENT_TARGET = 18.2;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -633,6 +824,15 @@
 			buildConfigurations = (
 				0540E39D2D88263C00B12C98 /* Debug */,
 				0540E39E2D88263C00B12C98 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1E1000D2E10000100B12C98 /* Build configuration list for PBXNativeTarget "PowerwallEnergyWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1E1000E2E10000100B12C98 /* Debug */,
+				A1E1000F2E10000100B12C98 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

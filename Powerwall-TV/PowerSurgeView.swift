@@ -117,6 +117,10 @@ struct PowerSurgeView<Curve: Shape>: View {
     var lineWidth: CGFloat
     let curve: Curve
     var shouldStart: Bool
+    /// When set, the pulse steps on this interval instead of a display-rate animation.
+    var refreshInterval: TimeInterval? = nil
+    /// Off screen. Holds the current pulse and does not schedule the next one.
+    var paused: Bool = false
 
     @State private var startFraction: CGFloat
     @State private var direction: Bool
@@ -142,7 +146,9 @@ struct PowerSurgeView<Curve: Shape>: View {
         startOffset: Double = 0.0,
         lineWidth: CGFloat? = nil,
         curve: Curve = PreviewCurve(),
-        shouldStart: Bool = false
+        shouldStart: Bool = false,
+        refreshInterval: TimeInterval? = nil,
+        paused: Bool = false
     ) {
         self.color = color
         self.isForward = isForward
@@ -152,35 +158,66 @@ struct PowerSurgeView<Curve: Shape>: View {
         self.lineWidth = lineWidth ?? Self.defaultLineWidth
         self.curve = curve
         self.shouldStart = shouldStart
+        self.refreshInterval = refreshInterval
+        self.paused = paused
         _startFraction = State(initialValue: isForward ? 0 : 2.0 / 3.0)
         _direction = State(initialValue: isForward)
         _opacity = State(initialValue: 0.0)
     }
 
     var body: some View {
+        Group {
+            if paused {
+                surgeShape(pausedFrame)
+            } else if let refreshInterval {
+                TimelineView(.periodic(from: .now, by: refreshInterval)) { context in
+                    let tick = Int(context.date.timeIntervalSinceReferenceDate / refreshInterval)
+                    surgeShape(FlatHomeRefresh.frame(tick: tick, isForward: isForward))
+                }
+            } else {
+                surgeShape(FlatHomeRefresh.Frame(trimStart: startFraction, opacity: opacity))
+                    .onAppear {
+                        if shouldStart {
+                            startAnimation()
+                        }
+                    }
+                    .onChange(of: shouldStart) { newValue in
+                        if newValue {
+                            if !isAnimating {
+                                startAnimation()
+                            }
+                        } else {
+                            isAnimating = false
+                            opacity = 0.0
+                        }
+                    }
+            }
+        }
+        .onChange(of: paused) { isPaused in
+            if isPaused {
+                isAnimating = false
+            }
+        }
+    }
+
+    /// The stepped pulse, or the in-flight display-rate pulse, with no timer behind it.
+    private var pausedFrame: FlatHomeRefresh.Frame {
+        guard let refreshInterval else {
+            return FlatHomeRefresh.Frame(trimStart: startFraction, opacity: opacity)
+        }
+        let tick = Int(Date().timeIntervalSinceReferenceDate / refreshInterval)
+        return FlatHomeRefresh.frame(tick: tick, isForward: isForward)
+    }
+
+    private func surgeShape(_ frame: FlatHomeRefresh.Frame) -> some View {
         ZStack {
             curve
                 .stroke(Color.gray, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .opacity(0.0)
             curve
-                .trim(from: startFraction, to: startFraction + 1.0)
+                .trim(from: frame.trimStart, to: frame.trimStart + 1.0)
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                .opacity(opacity)
-        }
-        .onAppear {
-            if shouldStart {
-                startAnimation()
-            }
-        }
-        .onChange(of: shouldStart) { newValue in
-            if newValue {
-                if !isAnimating {
-                    startAnimation()
-                }
-            } else {
-                isAnimating = false
-                opacity = 0.0 // Optional: reset visibility
-            }
+                .opacity(frame.opacity)
         }
     }
 

@@ -2,7 +2,9 @@ import CoreLocation
 import SceneKit
 import SwiftUI
 import WeatherKit
-#if os(iOS)
+#if os(macOS)
+import AppKit
+#elseif os(iOS) || os(tvOS)
 import UIKit
 #endif
 
@@ -340,10 +342,123 @@ struct HouseCalloutKey: PreferenceKey {
 /// SceneKit stand-in for the flat home background. Lighting comes from the same
 /// WeatherKit forecast cache as Home Energy Advisor. The parked car follows the
 /// wall connector, using cached Fleet paint when `vehicle_data` has already returned it.
+/// How often the house sky moves. A forecast refresh is step 0 and every 45 ticks
+/// (15 minutes at 20 seconds). The ticks between only move the sun. Low-CPU mode
+/// skips those, because each one rebuilds the sky gradient on the main thread.
+enum HouseSkyCadence {
+    static func advancesSun(lowCPU: Bool, step: Int) -> Bool {
+        step % 45 != 0 && !lowCPU
+    }
+}
+
+/// Frame rate for the flat home and the 3D house.
+/// 1 fps is the current low-CPU mode. 10 and 30 fps stay off the display link. Full is the display refresh.
+enum DisplayFrameRate: String, CaseIterable, Identifiable {
+    case low
+    case ten
+    case medium
+    case full
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .low: return "1 fps"
+        case .ten: return "10 fps"
+        case .medium: return "30 fps"
+        case .full: return "Full"
+        }
+    }
+
+    /// Cap while power or weather is moving. Nil lets SceneKit use the display refresh.
+    var movingFramesPerSecond: Int? {
+        switch self {
+        case .low: return PresentationRefresh.lowCPUFramesPerSecond
+        case .ten: return 10
+        case .medium: return 30
+        case .full: return nil
+        }
+    }
+
+    /// Seconds between flat-home steps. Nil keeps the display-rate surge.
+    var flatStepInterval: TimeInterval? {
+        switch self {
+        case .low: return PresentationRefresh.lowCPUInterval
+        case .ten: return 1.0 / 10.0
+        case .medium: return 1.0 / 30.0
+        case .full: return nil
+        }
+    }
+
+    static let key = "displayFrameRate"
+
+    static func stored(in defaults: UserDefaults = .standard) -> DisplayFrameRate {
+        if let raw = defaults.string(forKey: key), let rate = DisplayFrameRate(rawValue: raw) {
+            return rate
+        }
+        // The old toggle stored a bool. On meant the 1 fps mode.
+        if defaults.object(forKey: LowCPUModeSetting.key) as? Bool == true {
+            return .low
+        }
+        return .full
+    }
+
+    func write(to defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: Self.key)
+    }
+
+    /// A slower choice stays slower. Full drops to the ceiling; 1 fps and 10 fps do not rise.
+    func capped(to ceiling: DisplayFrameRate) -> DisplayFrameRate {
+        rank <= ceiling.rank ? self : ceiling
+    }
+
+    private var rank: Int {
+        switch self {
+        case .low: return 0
+        case .ten: return 1
+        case .medium: return 2
+        case .full: return 3
+        }
+    }
+}
+
+/// Where the window is, separate from the frame-rate menu.
+/// Hidden pauses playback. Visible but unfocused caps the menu choice at 30 fps.
+enum AppAttention: Equatable {
+    case focused
+    case visibleUnfocused
+    case hidden
+
+    func frameRate(preferred: DisplayFrameRate) -> DisplayFrameRate {
+        switch self {
+        case .focused, .hidden:
+            return preferred
+        case .visibleUnfocused:
+            return preferred.capped(to: .medium)
+        }
+    }
+
+    /// macOS window visibility. Occluded, minimized, or hidden is off screen.
+    /// A visible window whose app is not active is on screen without focus.
+    static func macWindow(isVisible: Bool, isMiniaturized: Bool, occlusionVisible: Bool, appHidden: Bool, appActive: Bool) -> AppAttention {
+        let onScreen = isVisible && !isMiniaturized && occlusionVisible && !appHidden
+        guard onScreen else { return .hidden }
+        return appActive ? .focused : .visibleUnfocused
+    }
+}
+
+/// Holds the one SceneKit house. `@State` would build a new controller, and reload
+/// the USDZ, on every parent refresh. `StateObject` runs this thunk once.
+@MainActor
+final class HouseSceneControllerStore: ObservableObject {
+    let controller = HouseSceneController()
+}
+
 struct HouseSceneView: View {
     @ObservedObject var viewModel: PowerwallViewModel
     @AppStorage("houseHeadingDegrees") private var houseHeadingDegrees = 180.0
-    @State private var controller = HouseSceneController()
+    @StateObject private var store = HouseSceneControllerStore()
+    private var controller: HouseSceneController { store.controller }
     @State private var weatherMark: HouseWeatherMark?
     @State private var skyRain: Float = 0
     @State private var skySnow: Float = 0
@@ -384,7 +499,9 @@ struct HouseSceneView: View {
                 rainIntensity: skyRain,
                 snowIntensity: skySnow,
                 powerSnapshot: powerFlowSnapshot,
-                revealingWeather: revealingWeather
+                revealingWeather: revealingWeather,
+                frameRate: viewModel.displayFrameRate,
+                attention: viewModel.appAttention
             )
                 .frame(width: size.width, height: size.height)
                 .focusable(false)
@@ -409,6 +526,7 @@ struct HouseSceneView: View {
         }
         .animation(.easeInOut(duration: HouseWeatherFade.duration), value: weatherMark?.markURL)
         .onAppear {
+            controller.notePlayback(rate: viewModel.displayFrameRate, attention: viewModel.appAttention)
             controller.onRevealChange = { revealing in
                 revealingWeather = revealing
                 noteSky()
@@ -433,6 +551,12 @@ struct HouseSceneView: View {
         .onChange(of: houseHeadingDegrees) { heading in
             controller.applyHeading(heading)
         }
+        .onChange(of: viewModel.displayFrameRate) { _ in
+            controller.notePlayback(rate: viewModel.displayFrameRate, attention: viewModel.appAttention)
+        }
+        .onChange(of: viewModel.appAttention) { _ in
+            controller.notePlayback(rate: viewModel.displayFrameRate, attention: viewModel.appAttention)
+        }
         .onChange(of: viewModel.demoSceneIndex) { _ in
             guard viewModel.isDemoMode else { return }
             showDemoSky()
@@ -443,11 +567,12 @@ struct HouseSceneView: View {
         .task(id: weatherIdentity) {
             // The sun steps with the clock. WeatherKit is read again every 15 minutes
             // so the wisps follow the current hour without a forecast call every tick.
+            // Low-CPU mode keeps that forecast and does not rebuild the sky bitmap.
             var step = 0
             while !Task.isCancelled {
                 if step % 45 == 0 {
                     await loadWeather()
-                } else {
+                } else if HouseSkyCadence.advancesSun(lowCPU: viewModel.displayFrameRate == .low || viewModel.appAttention == .hidden, step: step) {
                     controller.advanceSkyClock()
                     noteSky()
                 }
@@ -553,6 +678,8 @@ final class HouseSceneController {
     private var fadeTarget: HouseLightingParameters?
     private var fadeGeneration = 0
     private var isRevealingWeather = false
+    private var playbackRate = DisplayFrameRate.full
+    private var playbackAttention = AppAttention.focused
     /// Tells the scene view to keep drawing while a forecast is blending in.
     var onRevealChange: ((Bool) -> Void)?
     /// Tesla's paint albedos assume a skybox. This lift keeps them readable under SceneKit lights.
@@ -733,15 +860,29 @@ final class HouseSceneController {
             onRevealChange?(true)
         }
         let task = Task { @MainActor in
-            let started = Date()
+            var elapsed: TimeInterval = 0
+            var lastTick = Date()
             while !Task.isCancelled, fadeGeneration == generation {
-                let elapsed = Date().timeIntervalSince(started)
+                let now = Date()
+                let interval = HouseWeatherFade.stepInterval(rate: playbackRate, attention: playbackAttention)
+                if interval.isInfinite {
+                    lastTick = now
+                    do {
+                        try await Task.sleep(nanoseconds: 200_000_000)
+                    } catch {
+                        return
+                    }
+                    continue
+                }
+                elapsed += now.timeIntervalSince(lastTick)
+                lastTick = now
                 let t = min(1, elapsed / HouseWeatherFade.duration)
                 let goal = fadeTarget ?? target
                 lighting.apply(from.interpolated(toward: goal, fraction: Float(HouseWeatherFade.ease(t))), animated: false)
                 if t >= 1 { break }
+                let nanos = UInt64((interval * 1_000_000_000).rounded())
                 do {
-                    try await Task.sleep(nanoseconds: 50_000_000)
+                    try await Task.sleep(nanoseconds: max(nanos, 1))
                 } catch {
                     return
                 }
@@ -754,6 +895,12 @@ final class HouseSceneController {
             onRevealChange?(false)
         }
         fadeTask = task
+    }
+
+    /// The fade loop reads this so a frame-rate change applies on the next step.
+    func notePlayback(rate: DisplayFrameRate, attention: AppAttention) {
+        playbackRate = rate
+        playbackAttention = attention
     }
 
     /// Repositions the sun from the clock without fetching WeatherKit again.
@@ -815,12 +962,14 @@ private struct HouseMetalScene: View {
     let snowIntensity: Float
     let powerSnapshot: PowerFlowSnapshot
     let revealingWeather: Bool
+    let frameRate: DisplayFrameRate
+    let attention: AppAttention
 
     var body: some View {
         #if os(macOS)
-        HouseMetalSceneMac(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose, rainIntensity: rainIntensity, snowIntensity: snowIntensity, powerSnapshot: powerSnapshot, revealingWeather: revealingWeather)
+        HouseMetalSceneMac(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose, rainIntensity: rainIntensity, snowIntensity: snowIntensity, powerSnapshot: powerSnapshot, revealingWeather: revealingWeather, frameRate: frameRate, attention: attention)
         #else
-        HouseMetalSceneIOS(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose, rainIntensity: rainIntensity, snowIntensity: snowIntensity, powerSnapshot: powerSnapshot, revealingWeather: revealingWeather)
+        HouseMetalSceneIOS(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose, rainIntensity: rainIntensity, snowIntensity: snowIntensity, powerSnapshot: powerSnapshot, revealingWeather: revealingWeather, frameRate: frameRate, attention: attention)
         #endif
     }
 }
@@ -833,11 +982,42 @@ enum HouseWeatherFade {
         let x = min(max(t, 0), 1)
         return x * x * (3 - 2 * x)
     }
+
+    /// Seconds between blend steps. Matches the house animation rate: the display
+    /// refresh at Full, otherwise the capped 30, 10, or 1 fps. Off screen does not step.
+    static func stepInterval(rate: DisplayFrameRate, attention: AppAttention, displayRefresh: TimeInterval? = nil) -> TimeInterval {
+        let decision = PresentationRefresh.decision(
+            rate: rate,
+            interacting: false,
+            rainIntensity: 0,
+            snowIntensity: 0,
+            snapshot: PowerFlowSnapshot(),
+            revealingWeather: true,
+            attention: attention
+        )
+        if decision.animationsPaused { return .infinity }
+        if decision.preferredFramesPerSecond > 0 {
+            return 1.0 / Double(decision.preferredFramesPerSecond)
+        }
+        return displayRefresh ?? displayRefreshInterval
+    }
+
+    static var displayRefreshInterval: TimeInterval {
+        let fps: Int
+        #if os(macOS)
+        fps = NSScreen.main?.maximumFramesPerSecond ?? 60
+        #elseif os(iOS) || os(tvOS)
+        fps = UIScreen.main.maximumFramesPerSecond
+        #else
+        fps = 60
+        #endif
+        return 1.0 / Double(max(fps, 1))
+    }
 }
 
 /// Idle house frames stay still. Dragging, rain, snow, a ribbon above the
 /// solver's 10 W threshold, or a forecast still fading in is what keeps
-/// SceneKit on the display refresh.
+/// SceneKit on the display refresh. Low CPU mode never uses that loop.
 enum HouseSceneRenderPolicy {
     static func needsContinuousRendering(interacting: Bool, rainIntensity: Float, snowIntensity: Float, snapshot: PowerFlowSnapshot, revealingWeather: Bool = false) -> Bool {
         let precipitation = rainIntensity > 0 || snowIntensity > 0
@@ -845,16 +1025,136 @@ enum HouseSceneRenderPolicy {
         return interacting || precipitation || flowing || revealingWeather
     }
 
-    static func apply(to view: SCNView, interacting: Bool, rainIntensity: Float, snowIntensity: Float, snapshot: PowerFlowSnapshot, revealingWeather: Bool = false) {
-        let continuous = needsContinuousRendering(
+    static func apply(to view: SCNView, interacting: Bool, rainIntensity: Float, snowIntensity: Float, snapshot: PowerFlowSnapshot, revealingWeather: Bool = false, lowCPU: Bool = false, frameRate: DisplayFrameRate? = nil, attention: AppAttention = .focused) {
+        let decision = PresentationRefresh.decision(
+            rate: frameRate ?? (lowCPU ? .low : .full),
+            interacting: interacting,
+            rainIntensity: rainIntensity,
+            snowIntensity: snowIntensity,
+            snapshot: snapshot,
+            revealingWeather: revealingWeather,
+            attention: attention
+        )
+        PresentationRefresh.apply(decision, to: view)
+    }
+}
+
+/// One answer for "how soon is the next frame" on the 3D house and the flat home.
+enum PresentationRefresh {
+    /// One frame a second stays far under a display-rate loop.
+    static let lowCPUFramesPerSecond = 1
+    static let lowCPUInterval: TimeInterval = 1
+
+    struct Decision: Equatable {
+        var rendersContinuously: Bool
+        var isPlaying: Bool
+        /// Zero lets SceneKit use the display refresh. A positive value is the cap.
+        var preferredFramesPerSecond: Int
+        /// Nil keeps the flat home's repeating surge. A number is the seconds between steps.
+        var flatStepInterval: TimeInterval?
+        /// Off-screen. SceneKit is paused and the flat home does not schedule another pulse.
+        var animationsPaused: Bool = false
+
+        var usesDisplayRefresh: Bool {
+            rendersContinuously && preferredFramesPerSecond == 0
+        }
+    }
+
+    static func decision(
+        lowCPU: Bool,
+        interacting: Bool,
+        rainIntensity: Float,
+        snowIntensity: Float,
+        snapshot: PowerFlowSnapshot,
+        revealingWeather: Bool = false,
+        attention: AppAttention = .focused
+    ) -> Decision {
+        decision(
+            rate: lowCPU ? .low : .full,
+            interacting: interacting,
+            rainIntensity: rainIntensity,
+            snowIntensity: snowIntensity,
+            snapshot: snapshot,
+            revealingWeather: revealingWeather,
+            attention: attention
+        )
+    }
+
+    static func decision(
+        rate: DisplayFrameRate,
+        interacting: Bool,
+        rainIntensity: Float,
+        snowIntensity: Float,
+        snapshot: PowerFlowSnapshot,
+        revealingWeather: Bool = false,
+        attention: AppAttention = .focused
+    ) -> Decision {
+        let moving = HouseSceneRenderPolicy.needsContinuousRendering(
             interacting: interacting,
             rainIntensity: rainIntensity,
             snowIntensity: snowIntensity,
             snapshot: snapshot,
             revealingWeather: revealingWeather
         )
-        view.rendersContinuously = continuous
-        view.isPlaying = continuous
+        if attention == .hidden {
+            return Decision(
+                rendersContinuously: false,
+                isPlaying: false,
+                preferredFramesPerSecond: 0,
+                flatStepInterval: rate.flatStepInterval,
+                animationsPaused: true
+            )
+        }
+        let playbackRate = attention.frameRate(preferred: rate)
+        if playbackRate == .full {
+            return Decision(
+                rendersContinuously: moving,
+                isPlaying: moving,
+                preferredFramesPerSecond: 0,
+                flatStepInterval: nil
+            )
+        }
+        return Decision(
+            rendersContinuously: false,
+            isPlaying: moving,
+            preferredFramesPerSecond: moving ? (playbackRate.movingFramesPerSecond ?? lowCPUFramesPerSecond) : 0,
+            flatStepInterval: playbackRate.flatStepInterval
+        )
+    }
+
+    static func apply(_ decision: Decision, to view: SCNView) {
+        view.preferredFramesPerSecond = decision.preferredFramesPerSecond
+        view.rendersContinuously = decision.rendersContinuously
+        view.isPlaying = decision.isPlaying
+        view.antialiasingMode = decision.flatStepInterval == nil ? .multisampling4X : .none
+    }
+}
+
+/// Discrete pulse for the flat home when it is not animating on the display refresh.
+enum FlatHomeRefresh {
+    struct Frame: Equatable {
+        var trimStart: CGFloat
+        var opacity: Double
+    }
+
+    static func frame(tick: Int, isForward: Bool) -> Frame {
+        let phase = ((tick % 3) + 3) % 3
+        switch phase {
+        case 0:
+            return Frame(trimStart: isForward ? 0 : 2.0 / 3.0, opacity: 1)
+        case 1:
+            return Frame(trimStart: isForward ? 2.0 / 3.0 : 0, opacity: 1)
+        default:
+            return Frame(trimStart: isForward ? 0 : 2.0 / 3.0, opacity: 0)
+        }
+    }
+}
+
+enum LowCPUModeSetting {
+    static let key = "lowCPUMode"
+
+    static func stored(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? false
     }
 }
 
@@ -870,6 +1170,8 @@ final class HouseCameraControlView: SCNView {
     private var snowIntensity: Float = 0
     private var powerSnapshot = PowerFlowSnapshot()
     private var revealingWeather = false
+    private var frameRate = DisplayFrameRate.full
+    private var attention = AppAttention.focused
 
     override init(frame frameRect: CGRect, options: [String: Any]? = nil) {
         super.init(frame: frameRect, options: options)
@@ -890,18 +1192,26 @@ final class HouseCameraControlView: SCNView {
     }
 
     /// The same call `HouseMetalScene` uses when it binds the live view.
-    func applyPlayback(rainIntensity: Float, snowIntensity: Float, snapshot: PowerFlowSnapshot, interacting: Bool? = nil, revealingWeather: Bool? = nil) {
+    func applyPlayback(rainIntensity: Float, snowIntensity: Float, snapshot: PowerFlowSnapshot, interacting: Bool? = nil, revealingWeather: Bool? = nil, lowCPU: Bool? = nil, frameRate: DisplayFrameRate? = nil, attention: AppAttention? = nil) {
         if let interacting { isAdjustingCamera = interacting }
         if let revealingWeather { self.revealingWeather = revealingWeather }
+        if let frameRate {
+            self.frameRate = frameRate
+        } else if let lowCPU {
+            self.frameRate = lowCPU ? .low : .full
+        }
+        if let attention { self.attention = attention }
         self.rainIntensity = rainIntensity
         self.snowIntensity = snowIntensity
         powerSnapshot = snapshot
-        let continuous = HouseSceneRenderPolicy.needsContinuousRendering(
+        let decision = PresentationRefresh.decision(
+            rate: self.frameRate,
             interacting: isAdjustingCamera,
             rainIntensity: rainIntensity,
             snowIntensity: snowIntensity,
             snapshot: snapshot,
-            revealingWeather: self.revealingWeather
+            revealingWeather: self.revealingWeather,
+            attention: self.attention
         )
         // The SwiftUI binding reaches this before `onChange` pushes the snapshot.
         // Give the driver that snapshot and, when the view is about to pause,
@@ -910,11 +1220,10 @@ final class HouseCameraControlView: SCNView {
             // Record the pause before the snapshot. Attach and later solar-roof
             // rebuilds paint from this flag, because they run after the view has
             // already stopped.
-            driver.setPlaybackContinuous(continuous)
+            driver.setPlaybackContinuous(decision.isPlaying)
             driver.update(snapshot)
         }
-        rendersContinuously = continuous
-        isPlaying = continuous
+        PresentationRefresh.apply(decision, to: self)
     }
 
     private func beginCameraAdjustment() {
@@ -1085,6 +1394,8 @@ private struct HouseMetalSceneMac: NSViewRepresentable {
     let snowIntensity: Float
     let powerSnapshot: PowerFlowSnapshot
     let revealingWeather: Bool
+    let frameRate: DisplayFrameRate
+    let attention: AppAttention
 
     func makeCoordinator() -> HousePowerFlowDriver { powerFlow }
     func makeNSView(context: Context) -> HouseCameraControlView { configured(context.coordinator) }
@@ -1106,7 +1417,7 @@ private struct HouseMetalSceneMac: NSViewRepresentable {
         view.sync(from: pose)
         view.onPose = onPose
         if view.delegate !== delegate { view.delegate = delegate }
-        view.applyPlayback(rainIntensity: rainIntensity, snowIntensity: snowIntensity, snapshot: powerSnapshot, revealingWeather: revealingWeather)
+        view.applyPlayback(rainIntensity: rainIntensity, snowIntensity: snowIntensity, snapshot: powerSnapshot, revealingWeather: revealingWeather, frameRate: frameRate, attention: attention)
     }
 }
 #else
@@ -1120,6 +1431,8 @@ private struct HouseMetalSceneIOS: UIViewRepresentable {
     let snowIntensity: Float
     let powerSnapshot: PowerFlowSnapshot
     let revealingWeather: Bool
+    let frameRate: DisplayFrameRate
+    let attention: AppAttention
 
     func makeCoordinator() -> HousePowerFlowDriver { powerFlow }
     func makeUIView(context: Context) -> HouseCameraControlView { configured(context.coordinator) }
@@ -1140,7 +1453,7 @@ private struct HouseMetalSceneIOS: UIViewRepresentable {
         view.sync(from: pose)
         view.onPose = onPose
         if view.delegate !== delegate { view.delegate = delegate }
-        view.applyPlayback(rainIntensity: rainIntensity, snowIntensity: snowIntensity, snapshot: powerSnapshot, revealingWeather: revealingWeather)
+        view.applyPlayback(rainIntensity: rainIntensity, snowIntensity: snowIntensity, snapshot: powerSnapshot, revealingWeather: revealingWeather, frameRate: frameRate, attention: attention)
     }
 }
 #endif

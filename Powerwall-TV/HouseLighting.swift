@@ -217,13 +217,14 @@ enum HouseSky {
         var amount: Float
     }
 
-    /// Warm near the horizon, blue once the sun is high. Colour fades across
-    /// `washScreenFraction` of the screen and is clear before the plane ends.
+    /// Deep purple higher in the wash and deep pink toward the horizon, blue
+    /// once the sun is high. Colour fades across `washScreenFraction` of the
+    /// screen and is clear before the plane ends.
     static func skyWash(altitude: Float) -> SkyWash {
         let amount = smoothstep(-4, 10, altitude)
         let day = smoothstep(16, 40, altitude)
-        let sunsetTop = SIMD3<Float>(0.98, 0.38, 0.24)
-        let sunsetBottom = SIMD3<Float>(1.0, 0.70, 0.46)
+        let sunsetTop = SIMD3<Float>(0.46, 0.14, 0.70)
+        let sunsetBottom = SIMD3<Float>(0.88, 0.26, 0.58)
         let blueTop = SIMD3<Float>(0.26, 0.46, 0.86)
         let blueBottom = SIMD3<Float>(0.58, 0.76, 0.96)
         return SkyWash(
@@ -256,7 +257,7 @@ enum HouseSky {
         let day = smoothstep(-5, 6, altitude)
         let veil = pow(1 - cover, 1.45)
         let warm = smoothstep(0, 26, altitude)
-        let low = SIMD3<Float>(1, 0.55, 0.28)
+        let low = SIMD3<Float>(0.98, 0.34, 0.68)
         let high = SIMD3<Float>(1, 0.97, 0.90)
         let tint = low + (high - low) * warm
         let grey = SIMD3<Float>(0.86, 0.89, 0.93)
@@ -512,6 +513,9 @@ final class HouseLighting {
     private var skyFieldOfView: Float = HouseCameraFraming.verticalFOVDegrees
     /// Last sky-card half-width. Camera moves reuse it so the wisps are not repositioned.
     private var skyHalfWidth: Float = -1
+    /// Last baked wash colours. A blend that does not change the sun reuses the image.
+    private var bakedWashTop: SIMD3<Float>?
+    private var bakedWashBottom: SIMD3<Float>?
     /// Emitter volume relative to a 4,000 m³ reference, so a larger view stays the same density.
     private var coverageScale: CGFloat = 1
     private var coverageCenter = SIMD3<Float>.zero
@@ -1002,9 +1006,10 @@ final class HouseLighting {
         SCNTransaction.animationDuration = animated ? 1.5 : 0
         SCNTransaction.disableActions = !animated
         if !animated {
+            // Cloud drift is a forever action. Clearing the cards here restarted
+            // it on every forecast blend step, so the wisps never actually moved.
             sunDisc.removeAllAnimations()
             sunHalo.removeAllAnimations()
-            cloudCards.forEach { $0.removeAllAnimations() }
         }
         let tint = HouseColor(red: CGFloat(sky.sunColor.x), green: CGFloat(sky.sunColor.y), blue: CGFloat(sky.sunColor.z), alpha: 1)
         sunDisc.geometry?.firstMaterial?.multiply.contents = tint
@@ -1015,8 +1020,14 @@ final class HouseLighting {
         sunHalo.isHidden = sky.haloOpacity < 0.02
         let wash = HouseSky.skyWash(altitude: p.sunAltitude)
         if let material = skyWash.geometry?.firstMaterial {
-            material.diffuse.contents = HouseSkyArt.washContents(top: wash.top, bottom: wash.bottom)
-            smoothWash(material)
+            // The bitmap is the expensive part. A forecast blend steps every frame
+            // while the sun colour stays put, so keep the image already on the material.
+            if bakedWashTop != wash.top || bakedWashBottom != wash.bottom {
+                material.diffuse.contents = HouseSkyArt.washContents(top: wash.top, bottom: wash.bottom)
+                smoothWash(material)
+                bakedWashTop = wash.top
+                bakedWashBottom = wash.bottom
+            }
             material.setValue(NSValue(scnVector3: SCNVector3(wash.top.x, wash.top.y, wash.top.z)), forKey: "washTop")
             material.setValue(NSValue(scnVector3: SCNVector3(wash.bottom.x, wash.bottom.y, wash.bottom.z)), forKey: "washBottom")
             material.setValue(NSNumber(value: wash.amount), forKey: "washAmount")
@@ -1923,8 +1934,12 @@ enum HouseMeshSeam {
 // MARK: - Loading helper
 
 enum ResidentialClassicScene {
+    /// How many times the house file was opened. A view refresh must not reload it.
+    static var loadCount = 0
+
     /// Loads ResidentialClassic.usdz (or .scn/.glb-converted fallback) from the app bundle.
     static func load() -> SCNScene? {
+        loadCount += 1
         for ext in ["usdz", "scn"] {
             if let url = HouseLighting.resourceURL(name: "ResidentialClassic", ext: ext),
                let scene = try? SCNScene(url: url, options: [.checkConsistency: true]) {
