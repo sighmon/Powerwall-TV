@@ -321,6 +321,24 @@ struct SettingsView: View {
 
             }
             if selectedTab == .display {
+            if viewModel.energySites.count > 1 {
+                settingsCard("Home") {
+                    Picker("Home", selection: homeSelection) {
+                        ForEach(viewModel.energySites.indices, id: \.self) { index in
+                            Text(energySiteName(at: index)).tag(index)
+                        }
+                    }
+                    .accessibilityIdentifier("homePicker")
+#if !os(tvOS)
+                    .pickerStyle(.menu)
+#endif
+#if !os(tvOS)
+                    Text("Tap the summary on the home screen to cycle homes.")
+                        .font(.footnote)
+                        .foregroundColor(.gray)
+#endif
+                }
+            }
             settingsCard("Display Settings") {
 #if os(macOS)
                 Toggle("Show in menu bar", isOn: $showInMenuBar)
@@ -519,6 +537,31 @@ struct SettingsView: View {
         houseHeadingDegrees = 180
         viewModel.showHouseScene = true
         viewModel.houseScenePose = .identity
+    }
+
+    private var homeSelection: Binding<Int> {
+        Binding(
+            get: {
+                min(viewModel.currentEnergySiteIndex, max(viewModel.energySites.count - 1, 0))
+            },
+            set: { viewModel.selectEnergySite(at: $0) }
+        )
+    }
+
+    private func energySiteName(at index: Int) -> String {
+        let site = viewModel.energySites[index]
+        if let name = site.energySiteDisplayName, !name.isEmpty {
+            return name
+        }
+        if index == viewModel.currentEnergySiteIndex,
+           let siteName = viewModel.siteName,
+           !siteName.isEmpty {
+            return siteName
+        }
+        if let id = site.energySiteId {
+            return "Home \(id)"
+        }
+        return "Home \(index + 1)"
     }
 
     private var houseSceneGestureHelp: String {

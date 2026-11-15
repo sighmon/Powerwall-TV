@@ -128,6 +128,7 @@ struct ContentView: View {
     @StateObject private var exportAdvisor = ExportAdvisor()
     @AppStorage("homeEnergyAdvisor_showButton") private var showHomeEnergyAdvisorButton = false
     @State private var showingGraph = false
+    @State private var selectedGraph: GraphView.GraphType = .battery
     @State private var showingScheduler = false
     @State private var wiggleWatts = 40.0
     @State private var startAnimations = false
@@ -312,7 +313,8 @@ struct ContentView: View {
             ExportAdvisorView(advisor: exportAdvisor, viewModel: viewModel)
         }
         .sheet(isPresented: $showingGraph) {
-            GraphView(viewModel: viewModel)
+            GraphView(viewModel: viewModel, initialGraph: selectedGraph)
+                .id(selectedGraph)
                 .background(
                     Color.clear
                         .background(.regularMaterial)
@@ -369,7 +371,8 @@ struct ContentView: View {
             ExportAdvisorView(advisor: exportAdvisor, viewModel: viewModel)
         }
         .fullScreenCover(isPresented: $showingGraph) {
-            GraphView(viewModel: viewModel)
+            GraphView(viewModel: viewModel, initialGraph: selectedGraph)
+                .id(selectedGraph)
                 .background(
                     Color.clear
                         .background(.regularMaterial)
@@ -514,25 +517,19 @@ struct ContentView: View {
             DragGesture(minimumDistance: 20)
                 .onEnded { value in
                     revealAutoHiddenOverlays()
+                    // A vertical drag on the 3D house orbits the camera.
+                    guard !showsHouseScene else { return }
                     handleSiteSwipe(value.translation)
                 }
         )
 #endif
 #if !os(iOS)
         .onMoveCommand { direction in
-            if direction == .up && viewModel.currentEnergySiteIndex > 0 {
-                viewModel.currentEnergySiteIndex -= 1
-                UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
-                viewModel.fetchData()
-                viewModel.fetchSolarEnergyToday()
-                viewModel.fetchSiteInfo()
+            if direction == .up {
+                updateEnergySite(-1)
             }
-            if direction == .down && viewModel.currentEnergySiteIndex < viewModel.energySites.count - 1 {
-                viewModel.currentEnergySiteIndex += 1
-                UserDefaults.standard.set(viewModel.currentEnergySiteIndex, forKey: "currentEnergySiteIndex")
-                viewModel.fetchData()
-                viewModel.fetchSolarEnergyToday()
-                viewModel.fetchSiteInfo()
+            if direction == .down {
+                updateEnergySite(+1)
             }
         }
 #endif
@@ -923,6 +920,14 @@ struct ContentView: View {
         }
         .multilineTextAlignment(.leading)
         .frame(width: messageWidth, alignment: .leading)
+#if !os(tvOS)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            viewModel.cycleEnergySite()
+        }
+        .accessibilityAddTraits(viewModel.energySites.count > 1 ? .isButton : [])
+        .accessibilityHint(viewModel.energySites.count > 1 ? "Shows the next home" : "")
+#endif
     }
 
     private func solarMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
@@ -937,6 +942,7 @@ struct ContentView: View {
                 .font(labelFont)
         }
         .multilineTextAlignment(.center)
+        .opensGraph(.solar, using: openGraph)
     }
 
     private func homeMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
@@ -951,6 +957,7 @@ struct ContentView: View {
                 .font(labelFont)
         }
         .multilineTextAlignment(.center)
+        .opensGraph(.home, using: openGraph)
     }
 
     private func batteryMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
@@ -972,6 +979,7 @@ struct ContentView: View {
                 .animation(.easeInOut(duration: 0.4), value: showPowerwallRuntimeEstimate)
         }
         .multilineTextAlignment(.center)
+        .opensGraph(.battery, using: openGraph)
     }
 
     private func powerwallStatusLabel(data: PowerwallData) -> some View {
@@ -1133,6 +1141,7 @@ struct ContentView: View {
                 .numericUpdateAnimation(for: "\(viewModel.gridLabelText())-\(viewModel.gridCarbonIntensity.map(String.init) ?? "")")
         }
         .multilineTextAlignment(.center)
+        .opensGraph(.grid, using: openGraph)
     }
 
     private func batteryPercentageIndicator(indicatorWidth: CGFloat, indicatorHeight: CGFloat) -> some View {
@@ -1215,8 +1224,7 @@ struct ContentView: View {
                     }
 
                     Button(action: {
-                        revealAutoHiddenOverlays()
-                        showingGraph = true
+                        openGraph(.battery)
                     }) {
                         ZStack {
                             Image(systemName: "chart.bar.xaxis.ascending.badge.clock")
@@ -1775,14 +1783,13 @@ struct ContentView: View {
 
     private func updateEnergySite(_ delta: Int) {
         revealAutoHiddenOverlays()
-        let next = max(0, min(viewModel.currentEnergySiteIndex + delta,
-                              max(0, viewModel.energySites.count - 1)))
-        guard next != viewModel.currentEnergySiteIndex else { return }
-        viewModel.currentEnergySiteIndex = next
-        UserDefaults.standard.set(next, forKey: "currentEnergySiteIndex")
-        viewModel.fetchData()
-        viewModel.fetchSolarEnergyToday()
-        viewModel.fetchSiteInfo()
+        viewModel.selectEnergySite(at: viewModel.currentEnergySiteIndex + delta)
+    }
+
+    private func openGraph(_ graph: GraphView.GraphType) {
+        revealAutoHiddenOverlays()
+        selectedGraph = graph
+        showingGraph = true
     }
 
 #if os(macOS)
@@ -1876,6 +1883,20 @@ struct ContentView: View {
         if clamped < 50 { return .orange }
         if clamped < 75 { return .yellow }
         return .green
+    }
+}
+
+private extension View {
+    /// iOS and macOS open the matching history. tvOS keeps the remote on the scene.
+    func opensGraph(_ graph: GraphView.GraphType, using open: @escaping (GraphView.GraphType) -> Void) -> some View {
+        #if os(tvOS)
+        return self
+        #else
+        return contentShape(Rectangle())
+            .onTapGesture { open(graph) }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Opens the \(graph.title) graph")
+        #endif
     }
 }
 

@@ -14,8 +14,13 @@ var valuetoKw: Double = 84
 struct GraphView: View {
     @ObservedObject var viewModel: PowerwallViewModel
     @FocusState private var isGraphFocused: Bool
-    @State private var selectedGraph: GraphType = .battery
+    @State private var selectedGraph: GraphType
     @Environment(\.dismiss) private var dismiss
+
+    init(viewModel: PowerwallViewModel, initialGraph: GraphType = .battery) {
+        self.viewModel = viewModel
+        _selectedGraph = State(initialValue: initialGraph)
+    }
 
 #if os(macOS)
     private let maxChartHeight = (NSScreen.main?.visibleFrame.height ?? 600) / 2
@@ -23,7 +28,7 @@ struct GraphView: View {
     private let maxChartHeight: CGFloat = 600
 #endif
 
-    private enum GraphType: Int, CaseIterable {
+    enum GraphType: Int, CaseIterable {
         case battery
         case solar
         case home

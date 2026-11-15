@@ -715,6 +715,24 @@ class PowerwallViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Switches the Fleet home on screen and reloads its live data.
+    func selectEnergySite(at index: Int) {
+        guard !energySites.isEmpty else { return }
+        let next = min(max(index, 0), energySites.count - 1)
+        guard next != currentEnergySiteIndex else { return }
+        currentEnergySiteIndex = next
+        UserDefaults.standard.set(next, forKey: "currentEnergySiteIndex")
+        fetchData()
+        fetchSolarEnergyToday()
+        fetchSiteInfo()
+    }
+
+    /// Moves to the next home, wrapping back to the first.
+    func cycleEnergySite() {
+        guard energySites.count > 1 else { return }
+        selectEnergySite(at: (currentEnergySiteIndex + 1) % energySites.count)
+    }
+
     // MARK: - Data Fetching
 
     func fetchData() {
