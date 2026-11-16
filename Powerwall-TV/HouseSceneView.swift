@@ -179,6 +179,13 @@ struct HouseScenePose: Equatable {
     var panForward: Double = 0
 
     static let identity = HouseScenePose()
+    /// First launch and Reset 3D view. Identity stays the unshifted camera used by framing math.
+    static let preferred = HouseScenePose(
+        yawDegrees: 6,
+        pitchDegrees: -5,
+        distanceScale: 0.70,
+        panRight: 0.5
+    )
     static let yawRange: ClosedRange<Double> = -180...180
     static let distanceRange: ClosedRange<Double> = 0.45...2.2
     static let panRange: ClosedRange<Double> = -3...3
@@ -286,14 +293,17 @@ struct HouseScenePose: Equatable {
 
     static func stored() -> HouseScenePose {
         let defaults = UserDefaults.standard
-        func value(_ key: String) -> Double { defaults.object(forKey: key) as? Double ?? 0 }
+        let base = preferred
+        func value(_ key: String, fallback: Double) -> Double {
+            defaults.object(forKey: key) as? Double ?? fallback
+        }
         return HouseScenePose(
-            yawDegrees: value(Key.yaw),
-            pitchDegrees: value(Key.pitch),
-            distanceScale: defaults.object(forKey: Key.distance) as? Double ?? 1,
-            panRight: value(Key.panRight),
-            panUp: value(Key.panUp),
-            panForward: value(Key.panForward)
+            yawDegrees: value(Key.yaw, fallback: base.yawDegrees),
+            pitchDegrees: value(Key.pitch, fallback: base.pitchDegrees),
+            distanceScale: value(Key.distance, fallback: base.distanceScale),
+            panRight: value(Key.panRight, fallback: base.panRight),
+            panUp: value(Key.panUp, fallback: base.panUp),
+            panForward: value(Key.panForward, fallback: base.panForward)
         ).clamped()
     }
 

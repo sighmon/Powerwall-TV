@@ -408,7 +408,7 @@ struct SettingsView: View {
                     adjustableValue("Pan up: \(houseSceneMetres(viewModel.houseScenePose.panUp))", value: $viewModel.houseScenePose.panUp, in: HouseScenePose.panRange, step: 0.05)
                     adjustableValue("Pan forward: \(houseSceneMetres(viewModel.houseScenePose.panForward))", value: $viewModel.houseScenePose.panForward, in: HouseScenePose.panRange, step: 0.05)
                     Button("Reset 3D view") {
-                        viewModel.houseScenePose = .identity
+                        viewModel.houseScenePose = .preferred
                     }
                 }
             }
@@ -549,7 +549,7 @@ struct SettingsView: View {
         lastChargingWallConnectorVIN = ""
         houseHeadingDegrees = 180
         viewModel.showHouseScene = true
-        viewModel.houseScenePose = .identity
+        viewModel.houseScenePose = .preferred
     }
 
     private var homeSelection: Binding<Int> {

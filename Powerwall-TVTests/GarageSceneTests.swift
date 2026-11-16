@@ -813,6 +813,19 @@ struct GarageSceneTests {
 
     @Test func savedPoseKeepsTheCentredCameraUntilItChanges() {
         let size = CGSize(width: 1280, height: 720)
+        let preferred = HouseScenePose.preferred
+        #expect(preferred.yawDegrees == 6)
+        #expect(preferred.pitchDegrees == -5)
+        #expect(preferred.distanceScale == 0.70)
+        #expect(preferred.panRight == 0.5)
+        #expect(preferred.panUp == 0)
+        #expect(preferred.panForward == 0)
+        let clamped = preferred.clamped()
+        #expect(abs(clamped.yawDegrees - 6) < 0.001)
+        #expect(abs(clamped.pitchDegrees + 5) < 0.001)
+        #expect(abs(clamped.distanceScale - 0.70) < 0.001)
+        #expect(abs(clamped.panRight - 0.5) < 0.001)
+
         let identity = HouseScenePose.identity
         #expect(simd_length(identity.eye - HouseCameraFraming.position) < 0.0001)
         #expect(simd_length(identity.target - HouseCameraFraming.subject) < 0.0001)
@@ -998,7 +1011,6 @@ struct GarageSceneTests {
     @Test func litSolarAndWindowsStayRectangular() {
         guard let scene = ResidentialClassicScene.load() else { return }
         let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
-        _ = HouseLighting(root: house)
         func subdivision(prefix: String) -> Int {
             var level = -1
             house.enumerateHierarchy { child, _ in
@@ -1007,12 +1019,17 @@ struct GarageSceneTests {
             }
             return level
         }
+        // The USD scheme is "none", so current SceneKit imports the Powerwall at 0.
+        // Older SceneKit tessellated it. Either way, lighting must leave that level alone.
+        let powerwall = subdivision(prefix: "Powerwall")
+        _ = HouseLighting(root: house)
         #expect(subdivision(prefix: "SolarPanel") == 0)
         #expect(subdivision(prefix: "SolarRoof") == 0)
         #expect(subdivision(prefix: "Windows") == 0)
         #expect(subdivision(prefix: "Home") == 0)
         #expect(subdivision(prefix: "GarageDoor") == 0)
-        #expect(subdivision(prefix: "Powerwall") == 1)
+        #expect(subdivision(prefix: "Powerwall") == powerwall)
+        #expect(powerwall >= 0)
     }
 
     @Test func carSitsInTheMiddleOfTheGarageDoor() {
