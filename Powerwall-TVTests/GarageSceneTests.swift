@@ -1085,6 +1085,13 @@ struct GarageSceneTests {
         #expect(view.isPlaying == false)
     }
 
+    @Test func interiorLightsStayOffUntilTheHomeDrawsMoreThan200Watts() {
+        #expect(HouseLighting.interiorLightsOn(homeW: 200, vehicleW: 0) == false)
+        #expect(HouseLighting.interiorLightsOn(homeW: 201, vehicleW: 0) == true)
+        #expect(HouseLighting.interiorLightsOn(homeW: 2500, vehicleW: 2300) == false)
+        #expect(HouseLighting.interiorLightsOn(homeW: 2500, vehicleW: 2200) == true)
+    }
+
     @Test func idlePausePaintsTheRibbonBaseColour() {
         guard let scene = ResidentialClassicScene.load() else { return }
         let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode

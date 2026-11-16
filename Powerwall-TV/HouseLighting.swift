@@ -702,8 +702,9 @@ final class HouseLighting {
         root.childNode(withName: "WallConnector", recursively: true)?.isHidden = !visible
     }
 
-    /// Same 40 W deadband as the home readout's `wiggleWatts`. The car's draw is not the house.
-    static let interiorLightThresholdWatts: Double = 40
+    /// House load, excluding the wall connector, that turns the window glow on.
+    /// The 40 W readout deadband stays on for ordinary standby, so the panes use a higher bar.
+    static let interiorLightThresholdWatts: Double = 200
 
     static func interiorLightsOn(homeW: Double, vehicleW: Double) -> Bool {
         homeW - vehicleW > interiorLightThresholdWatts

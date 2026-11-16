@@ -99,13 +99,17 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
     private var connectorPlug: SIMD3<Float>?
 
     func attach(house: SCNNode, cameraPosition: SIMD3<Float>) {
+        // Measure before taking `lock`. `boundingBox` needs the scene lock, and the
+        // display-link thread holds that lock while it waits for `lock` in `renderer`.
+        let measuredClearances = PowerFlowObstacles.clearances(house: house)
+        let plug = PowerFlowObstacles.wallConnectorPlug(house: house)
         lock.lock()
         defer { lock.unlock() }
         guard self.house == nil else { return }
         self.house = house
         camera = cameraPosition
-        clearances = PowerFlowObstacles.clearances(house: house)
-        connectorPlug = PowerFlowObstacles.wallConnectorPlug(house: house)
+        clearances = measuredClearances
+        connectorPlug = plug
         installLocked()
     }
 
@@ -140,7 +144,9 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
     }
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
-        lock.lock()
+        // The display link calls this while it holds the scene lock. Waiting here
+        // deadlocks if the main thread holds `lock` and then reads a bounding box.
+        guard lock.try() else { return }
         self.renderer?.tick(at: time)
         lock.unlock()
     }
