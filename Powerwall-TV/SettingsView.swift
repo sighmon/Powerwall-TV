@@ -346,17 +346,12 @@ struct SettingsView: View {
 #endif
                 Toggle("Auto-hide home summary", isOn: $autoHideSummaryOnOverlap)
                 Toggle("Auto-hide buttons", isOn: $autoHideButtonsOnOverlap)
-                Picker("Frame rate", selection: $viewModel.displayFrameRate) {
-                    ForEach(DisplayFrameRate.allCases) { rate in
-                        Text(rate.title).tag(rate)
-                    }
-                }
-#if !os(tvOS)
-                .pickerStyle(.menu)
-#endif
-                Text("1 fps is the low CPU mode. 10 fps and 30 fps stay capped. Full redraws at the display refresh.")
+#if os(macOS)
+                Toggle("Stop animation when the app isn't in focus", isOn: $viewModel.pauseAnimationWhenUnfocused)
+                Text("Power flows stay solid lines and update when new data arrives. Clouds, rain, and snow stop too. The window also stops animating when it is off screen.")
                     .font(.footnote)
                     .foregroundColor(.gray)
+#endif
                 Toggle("Limit data to one decimal place", isOn: $showLessPrecision)
                 Toggle("Always show Powerwall estimate", isOn: $alwaysShowPowerwallRuntimeEstimate)
                 Toggle("Show schedule (beta)", isOn: $showSchedulerButton)
@@ -497,7 +492,7 @@ struct SettingsView: View {
         UserDefaults.standard.set(keepWindowInFront, forKey: "keepWindowInFront")
         UserDefaults.standard.set(autoHideSummaryOnOverlap, forKey: "autoHideSummaryOnOverlap")
         UserDefaults.standard.set(autoHideButtonsOnOverlap, forKey: "autoHideButtonsOnOverlap")
-        viewModel.displayFrameRate.write()
+        UserDefaults.standard.set(viewModel.pauseAnimationWhenUnfocused, forKey: PauseAnimationWhenUnfocused.key)
         UserDefaults.standard.set(clampSceneScale(sceneScale), forKey: "sceneScale")
         UserDefaults.standard.set(clampSceneHorizontalOffset(sceneHorizontalOffset), forKey: "sceneHorizontalOffset")
         UserDefaults.standard.set(clampSceneVerticalOffset(sceneVerticalOffset), forKey: "sceneVerticalOffset")
@@ -523,8 +518,9 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "keepWindowInFront")
         UserDefaults.standard.removeObject(forKey: "autoHideSummaryOnOverlap")
         UserDefaults.standard.removeObject(forKey: "autoHideButtonsOnOverlap")
-        UserDefaults.standard.removeObject(forKey: LowCPUModeSetting.key)
-        UserDefaults.standard.removeObject(forKey: DisplayFrameRate.key)
+        UserDefaults.standard.removeObject(forKey: "lowCPUMode")
+        UserDefaults.standard.removeObject(forKey: "displayFrameRate")
+        UserDefaults.standard.removeObject(forKey: PauseAnimationWhenUnfocused.key)
         UserDefaults.standard.removeObject(forKey: "showVehicles")
         UserDefaults.standard.removeObject(forKey: "alwaysShowPowerwallRuntimeEstimate")
         UserDefaults.standard.removeObject(forKey: "showSchedulerButton")
@@ -539,7 +535,7 @@ struct SettingsView: View {
         keepWindowInFront = false
         autoHideSummaryOnOverlap = true
         autoHideButtonsOnOverlap = true
-        viewModel.displayFrameRate = .full
+        viewModel.pauseAnimationWhenUnfocused = false
         showVehicles = false
         alwaysShowPowerwallRuntimeEstimate = false
         showSchedulerButton = false

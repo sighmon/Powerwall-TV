@@ -717,8 +717,7 @@ struct ContentView: View {
 #endif
 
         let showFlatPower = animations && !showsHouseScene
-        let flatPresentation = PresentationRefresh.decision(
-            rate: viewModel.displayFrameRate,
+        let flatPaused = PresentationRefresh.decision(
             interacting: false,
             rainIntensity: 0,
             snowIntensity: 0,
@@ -729,10 +728,9 @@ struct ContentView: View {
                 homeW: data.load.instantPower
             ),
             revealingWeather: false,
-            attention: viewModel.appAttention
-        )
-        let flatRefresh = flatPresentation.flatStepInterval
-        let flatPaused = flatPresentation.animationsPaused
+            attention: viewModel.appAttention,
+            pauseWhenUnfocused: viewModel.pauseAnimationWhenUnfocused
+        ).animationsPaused
         return ZStack {
             if viewModel.isOffGrid(), !showsHouseScene {
                 offGridImage(sceneSize: sceneSize)
@@ -790,7 +788,6 @@ struct ContentView: View {
                     lineWidth: surgeLineWidth,
                     curve: ChargerToCar(),
                     shouldStart: startAnimations,
-                    refreshInterval: flatRefresh,
                     paused: flatPaused
                 )
                 .frame(width: sceneWidth(0.024, in: sceneSize), height: sceneHeight(0.145, in: sceneSize))
@@ -806,7 +803,6 @@ struct ContentView: View {
                     lineWidth: surgeLineWidth,
                     curve: SolarToGateway(),
                     shouldStart: startAnimations,
-                    refreshInterval: flatRefresh,
                     paused: flatPaused
                 )
                 .frame(width: sceneWidth(0.021, in: sceneSize), height: sceneHeight(0.242, in: sceneSize))
@@ -823,7 +819,6 @@ struct ContentView: View {
                     lineWidth: surgeLineWidth,
                     curve: GatewayToHome(),
                     shouldStart: startAnimations,
-                    refreshInterval: flatRefresh,
                     paused: flatPaused
                 )
                 .frame(width: sceneWidth(0.054, in: sceneSize), height: sceneHeight(0.056, in: sceneSize))
@@ -843,7 +838,6 @@ struct ContentView: View {
                     lineWidth: surgeLineWidth,
                     curve: PowerwallToGateway(),
                     shouldStart: startAnimations,
-                    refreshInterval: flatRefresh,
                     paused: flatPaused
                 )
                 .frame(width: sceneWidth(0.058, in: sceneSize), height: sceneHeight(0.065, in: sceneSize))
@@ -863,7 +857,6 @@ struct ContentView: View {
                     lineWidth: surgeLineWidth,
                     curve: GatewayToGrid(),
                     shouldStart: startAnimations,
-                    refreshInterval: flatRefresh,
                     paused: flatPaused
                 )
                 .frame(width: sceneWidth(0.102, in: sceneSize), height: sceneHeight(0.134, in: sceneSize))

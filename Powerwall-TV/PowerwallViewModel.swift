@@ -77,17 +77,19 @@ class PowerwallViewModel: ObservableObject {
     @Published var keepWindowInFront: Bool = UserDefaults.standard.bool(forKey: "keepWindowInFront")
     @Published var autoHideSummaryOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideSummaryOnOverlap") as? Bool ?? false
     @Published var autoHideButtonsOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideButtonsOnOverlap") as? Bool ?? false
-    /// Off unless the user turns it on. Persists immediately so a relaunch keeps the choice.
-    /// 1 fps, 10 fps, 30 fps, or the display refresh. Missing preference stays on Full.
-    @Published var displayFrameRate: DisplayFrameRate = DisplayFrameRate.stored() {
-        didSet { displayFrameRate.write() }
+    /// macOS Display checkbox. A visible window whose app is not active stops
+    /// animations and draws solid power-flow lines. Off screen always stops.
+    /// Missing preference stays off, so a visible unfocused window keeps animating.
+    @Published var pauseAnimationWhenUnfocused: Bool = PauseAnimationWhenUnfocused.stored() {
+        didSet {
+            UserDefaults.standard.set(pauseAnimationWhenUnfocused, forKey: PauseAnimationWhenUnfocused.key)
+        }
     }
-    /// Off-screen pauses playback. Visible but unfocused caps the menu rate at 30 fps.
-    /// Not saved. The Display menu keeps the user's choice.
+    /// Off-screen pauses playback. Visible but unfocused pauses only when
+    /// `pauseAnimationWhenUnfocused` is on. Not saved.
     @Published var appAttention: AppAttention = .focused
     private var sceneAttention: AppAttention = .focused
     private var windowAttention: AppAttention?
-    var lowCPUMode: Bool { displayFrameRate == .low }
 
     func noteSceneAttention(_ attention: AppAttention) {
         sceneAttention = attention
@@ -294,10 +296,7 @@ class PowerwallViewModel: ObservableObject {
 
     init() {
         // Launch arguments force the same properties the Display toggles set, without
-        // writing preferences. Used to sample CPU with the mode on.
-        if CommandLine.arguments.contains("--low-cpu") {
-            displayFrameRate = .low
-        }
+        // writing preferences.
         if CommandLine.arguments.contains("--flat-home") {
             showHouseScene = false
         } else if CommandLine.arguments.contains("--house") {
@@ -662,18 +661,6 @@ class PowerwallViewModel: ObservableObject {
         }.resume()
     }
 
-    private var regionResolveInFlight = false
-
-    /// Same probe as `resolveRegionBaseURL`, but the wait stays off the main thread.
-    private func resolveRegionWithoutBlockingTheMainThread() {
-        if Self.isRunningTests || fleetRegionResolved || accessToken.isEmpty || regionResolveInFlight { return }
-        regionResolveInFlight = true
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            self?.resolveRegionBaseURL()
-            DispatchQueue.main.async { self?.regionResolveInFlight = false }
-        }
-    }
-
     private func resolveRegionBaseURL() {
         if Self.isRunningTests { return }
         if fleetRegionResolved || accessToken.isEmpty { return }
@@ -847,13 +834,7 @@ class PowerwallViewModel: ObservableObject {
                Date() >= expirationDate {
                 self.refreshAccessToken()
             }
-            if displayFrameRate == .low {
-                // The probe waits on the network. On the main thread that wait is a
-                // multi-second stall every time the region is still unknown.
-                resolveRegionWithoutBlockingTheMainThread()
-            } else {
-                self.resolveRegionBaseURL()
-            }
+            self.resolveRegionBaseURL()
             if !self.energySites.isEmpty {
                 let currentSite = self.energySites[self.currentEnergySiteIndex]
                 if let id = currentSite.energySiteId {

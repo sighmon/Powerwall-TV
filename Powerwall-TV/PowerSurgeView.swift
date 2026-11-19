@@ -108,6 +108,12 @@ struct PowerwallToGateway: Shape {
     }
 }
 
+/// One frame of the flat-home pulse while it is animating.
+private struct FlatHomePulse: Equatable {
+    var trimStart: CGFloat
+    var opacity: Double
+}
+
 struct PowerSurgeView<Curve: Shape>: View {
     var color: Color
     var isForward: Bool
@@ -117,9 +123,7 @@ struct PowerSurgeView<Curve: Shape>: View {
     var lineWidth: CGFloat
     let curve: Curve
     var shouldStart: Bool
-    /// When set, the pulse steps on this interval instead of a display-rate animation.
-    var refreshInterval: TimeInterval? = nil
-    /// Off screen. Holds the current pulse and does not schedule the next one.
+    /// Stopped. Draws the whole cable in `color` and does not schedule another pulse.
     var paused: Bool = false
 
     @State private var startFraction: CGFloat
@@ -147,7 +151,6 @@ struct PowerSurgeView<Curve: Shape>: View {
         lineWidth: CGFloat? = nil,
         curve: Curve = PreviewCurve(),
         shouldStart: Bool = false,
-        refreshInterval: TimeInterval? = nil,
         paused: Bool = false
     ) {
         self.color = color
@@ -158,7 +161,6 @@ struct PowerSurgeView<Curve: Shape>: View {
         self.lineWidth = lineWidth ?? Self.defaultLineWidth
         self.curve = curve
         self.shouldStart = shouldStart
-        self.refreshInterval = refreshInterval
         self.paused = paused
         _startFraction = State(initialValue: isForward ? 0 : 2.0 / 3.0)
         _direction = State(initialValue: isForward)
@@ -168,14 +170,10 @@ struct PowerSurgeView<Curve: Shape>: View {
     var body: some View {
         Group {
             if paused {
-                surgeShape(pausedFrame)
-            } else if let refreshInterval {
-                TimelineView(.periodic(from: .now, by: refreshInterval)) { context in
-                    let tick = Int(context.date.timeIntervalSinceReferenceDate / refreshInterval)
-                    surgeShape(FlatHomeRefresh.frame(tick: tick, isForward: isForward))
-                }
+                curve
+                    .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
             } else {
-                surgeShape(FlatHomeRefresh.Frame(trimStart: startFraction, opacity: opacity))
+                surgeShape(FlatHomePulse(trimStart: startFraction, opacity: opacity))
                     .onAppear {
                         if shouldStart {
                             startAnimation()
@@ -200,16 +198,7 @@ struct PowerSurgeView<Curve: Shape>: View {
         }
     }
 
-    /// The stepped pulse, or the in-flight display-rate pulse, with no timer behind it.
-    private var pausedFrame: FlatHomeRefresh.Frame {
-        guard let refreshInterval else {
-            return FlatHomeRefresh.Frame(trimStart: startFraction, opacity: opacity)
-        }
-        let tick = Int(Date().timeIntervalSinceReferenceDate / refreshInterval)
-        return FlatHomeRefresh.frame(tick: tick, isForward: isForward)
-    }
-
-    private func surgeShape(_ frame: FlatHomeRefresh.Frame) -> some View {
+    private func surgeShape(_ frame: FlatHomePulse) -> some View {
         ZStack {
             curve
                 .stroke(Color.gray, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))

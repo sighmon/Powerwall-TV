@@ -320,11 +320,19 @@ enum PowerFlowShader {
 
     /// `time` is WireDisplay's fmod(seconds, pulse_frequency).
     static func color(u: Float, shade: Float, alpha: Float, state: PowerFlowPathState, time: Float,
-                             params: PowerFlowShaderParameters, base: PowerFlowColor = PowerFlowStyle.baseColor) -> PowerFlowColor {
+                             params: PowerFlowShaderParameters, base: PowerFlowColor = PowerFlowStyle.baseColor, solid: Bool = false) -> PowerFlowColor {
         let s = Float(state.direction.rawValue)
-        let phase = fract(time / params.pulseFrequency + s * (u / params.pulseLength + state.phaseOffset))
-        let amount = pow(max(1 - phase / params.snakeFraction, 0), params.snakeExponent) * abs(s)
-        let k = smoothstep01(amount)
+        let k: Float
+        if solid {
+            // A frozen window shows the flow colour along the whole cable.
+            // Idle stays the grey track. Time is ignored, so a later data
+            // update is the only thing that repaints the line.
+            k = (state.direction == .flowIn || state.direction == .flowOut) ? 1 : 0
+        } else {
+            let phase = fract(time / params.pulseFrequency + s * (u / params.pulseLength + state.phaseOffset))
+            let amount = pow(max(1 - phase / params.snakeFraction, 0), params.snakeExponent) * abs(s)
+            k = smoothstep01(amount)
+        }
         let f = state.flowColor
         return PowerFlowColor(r: (base.r + (f.r - base.r) * k) * shade,
                               g: (base.g + (f.g - base.g) * k) * shade,
@@ -816,13 +824,14 @@ final class PowerFlowAnimator {
     }
 
     /// Per-quad RGBA for `ribbon` at absolute time `seconds`, or nil if the path is hidden.
-    func colors(for ribbon: PowerFlowRibbon, at seconds: TimeInterval) -> [PowerFlowColor]? {
+    /// `solid` paints the flow colour along the whole cable and ignores `seconds`.
+    func colors(for ribbon: PowerFlowRibbon, at seconds: TimeInterval, solid: Bool = false) -> [PowerFlowColor]? {
         guard let state = states[ribbon.name], state.direction != .hidden else { return nil }
         let speed = speedPerKW > 0 ? 1 + speedPerKW * Float(state.watts / 1000) : 1
         let t = Float(fmod(seconds * Double(speed), Double(params.pulseFrequency)))
         return (0..<ribbon.quadCount).map { i in
             var c = PowerFlowShader.color(u: ribbon.midU[i], shade: ribbon.shade[i] * brightness, alpha: ribbon.alpha[i],
-                                          state: state, time: t, params: params)
+                                          state: state, time: t, params: params, solid: solid)
             c.r = min(c.r, 1); c.g = min(c.g, 1); c.b = min(c.b, 1)
             return c
         }

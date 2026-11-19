@@ -614,12 +614,38 @@ final class HouseLighting {
         sunLight.light?.intensity = 350 + 650 * CGFloat(p.theme * p.ambientScale)
         SCNTransaction.commit()
 
-        rain.birthRate = CGFloat(p.rainIntensity) * 90 * coverageScale
-        snow.birthRate = CGFloat(p.snowIntensity) * 22 * coverageScale
-        // A paused view would otherwise leave the last drops hanging in the air.
-        rainNode.isHidden = p.rainIntensity <= 0
-        snowNode.isHidden = p.snowIntensity <= 0
         layoutSky(animated: animated)
+        applyWeatherMotionPause()
+    }
+
+    /// Cloud drift and precipitation. SceneKit keeps a display link awake while a
+    /// particle system is emitting, including after the view itself is paused.
+    private var weatherMotionPaused = false
+
+    func setWeatherMotionPaused(_ paused: Bool) {
+        weatherMotionPaused = paused
+        applyWeatherMotionPause()
+    }
+
+    private func applyWeatherMotionPause() {
+        if weatherMotionPaused {
+            rain.birthRate = 0
+            snow.birthRate = 0
+            rain.speedFactor = 0
+            snow.speedFactor = 0
+        } else {
+            rain.birthRate = CGFloat(parameters.rainIntensity) * 90 * coverageScale
+            snow.birthRate = CGFloat(parameters.snowIntensity) * 22 * coverageScale
+            rain.speedFactor = 1
+            snow.speedFactor = 1
+        }
+        rainNode.isPaused = weatherMotionPaused
+        snowNode.isPaused = weatherMotionPaused
+        rainNode.isHidden = weatherMotionPaused || parameters.rainIntensity <= 0
+        snowNode.isHidden = weatherMotionPaused || parameters.snowIntensity <= 0
+        for holder in cloudCards {
+            holder.childNodes.first?.isPaused = weatherMotionPaused
+        }
     }
 
     var rainIntensity: Float { parameters.rainIntensity }
@@ -679,10 +705,7 @@ final class HouseLighting {
             snowNode.position = local
             // 4,000 m³ ≈ the framed house view. Scale the count with volume and keep the spacing.
             coverageScale = CGFloat((size.x * size.y * size.z) / 4000)
-            rain.birthRate = CGFloat(parameters.rainIntensity) * 90 * coverageScale
-            snow.birthRate = CGFloat(parameters.snowIntensity) * 22 * coverageScale
-            rainNode.isHidden = parameters.rainIntensity <= 0
-            snowNode.isHidden = parameters.snowIntensity <= 0
+            applyWeatherMotionPause()
         }
     }
 

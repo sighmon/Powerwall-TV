@@ -63,10 +63,11 @@ final class PowerFlowSceneKitRenderer {
     func update(_ snapshot: PowerFlowSnapshot) { animator.update(snapshot) }
 
     /// Once per frame, with the renderer's time in seconds.
-    func tick(at time: TimeInterval) {
+    /// `solid` paints the flow colour along the whole cable and ignores `time`.
+    func tick(at time: TimeInterval, solid: Bool = false) {
         for ribbon in animator.ribbons {
             guard let entry = nodes[ribbon.name] else { continue }
-            guard let colors = animator.colors(for: ribbon, at: time) else {
+            guard let colors = animator.colors(for: ribbon, at: time, solid: solid) else {
                 entry.node.isHidden = true
                 continue
             }
@@ -94,6 +95,10 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
     /// snapshot updates paint immediately while this stays false, because a paused
     /// view never calls `renderer(_:updateAtTime:)`.
     private var playbackContinuous = false
+    /// Frozen playback paints each flowing cable in one colour.
+    private var solidFlows = false
+    /// Set when playback stops so the next snapshot paints even if the watts match.
+    private var needsPaint = false
     private var camera = SIMD3<Float>(7.55, 5.7, 9.75)
     private var clearances: [PowerFlowClearance] = []
     private var connectorPlug: SIMD3<Float>?
@@ -125,29 +130,38 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
         installLocked()
     }
 
-    /// The house view sets this before pushing a snapshot. While it is false, `update`
-    /// paints the ribbons itself.
-    func setPlaybackContinuous(_ continuous: Bool) {
+    /// The house view sets this before pushing a snapshot. While `playing` is false,
+    /// `update` paints the ribbons itself. `solidFlows` replaces the pulse with one colour.
+    func setPresentation(playing: Bool, solidFlows: Bool) {
         lock.lock()
-        playbackContinuous = continuous
+        if self.solidFlows != solidFlows || playbackContinuous != playing {
+            needsPaint = !playing
+        }
+        playbackContinuous = playing
+        self.solidFlows = solidFlows
         lock.unlock()
     }
 
     func update(_ snapshot: PowerFlowSnapshot) {
         lock.lock()
         defer { lock.unlock() }
+        let changed = self.snapshot != snapshot
         self.snapshot = snapshot
-        renderer?.update(snapshot)
+        if changed { renderer?.update(snapshot) }
         // The view may already be paused. `applyPlayback` runs before the house
         // attaches, and `setSolarTerminate` rebuilds hidden ribbons afterwards.
+        // A paused view paints only when the watts change or playback just stopped.
+        guard !playbackContinuous, changed || needsPaint else { return }
         paintLockedIfPaused()
+        needsPaint = false
     }
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         // The display link calls this while it holds the scene lock. Waiting here
         // deadlocks if the main thread holds `lock` and then reads a bounding box.
         guard lock.try() else { return }
-        self.renderer?.tick(at: time)
+        let solid = solidFlows
+        self.renderer?.tick(at: time, solid: solid)
         lock.unlock()
     }
 
@@ -165,7 +179,7 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
     /// New ribbon nodes start hidden. A paused view will not tick them later.
     private func paintLockedIfPaused() {
         guard !playbackContinuous, snapshot != nil else { return }
-        renderer?.tick(at: 0)
+        renderer?.tick(at: 0, solid: solidFlows)
     }
 }
 
