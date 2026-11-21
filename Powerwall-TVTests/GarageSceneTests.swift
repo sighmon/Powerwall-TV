@@ -1762,6 +1762,501 @@ struct GarageSceneTests {
         ))
     }
 
+    @Test func showroomOpensTheConnectedCarOnTheHomeGlass() {
+        let model3 = "5YJ3GDEE5NF000001"
+        let modelY = "5YJYGDEE5LF000001"
+        let pluggedThenCharging = PowerwallData(
+            battery: .init(instantPower: 0, count: 1),
+            load: .init(instantPower: 0),
+            solar: .init(instantPower: 0, energyExported: 0),
+            site: .init(instantPower: 0),
+            wallConnectors: [
+                .init(vin: model3, din: "stall-a", wallConnectorState: 4, wallConnectorPower: 0),
+                .init(vin: modelY, din: "stall-b", wallConnectorState: 1, wallConnectorPower: 2000)
+            ]
+        )
+        let idle = PowerwallData(
+            battery: .init(instantPower: 0, count: 1),
+            load: .init(instantPower: 0),
+            solar: .init(instantPower: 0, energyExported: 0),
+            site: .init(instantPower: 0),
+            wallConnectors: [.init(vin: modelY, din: "1", wallConnectorState: 0, wallConnectorPower: 0)]
+        )
+        let paint = DemoHouseTour.parkedCar(at: 1)
+        let colourName = TeslaPaint.spacedName(paint.appearance.exteriorColor ?? "")
+        let full = VehicleChargeSnapshot(batteryLevel: 80, chargingState: "Charging", minutesToFullCharge: 45)
+        let opened = CarShowroom.request(
+            data: pluggedThenCharging,
+            fallbackVIN: "7G2C12345RF000001",
+            appearances: [modelY.lowercased(): paint.appearance],
+            solar: .panels,
+            vehicles: [FleetVehicle(vin: modelY.lowercased(), displayName: "Daydream", state: "online")],
+            charges: [modelY.lowercased(): full],
+            displayBoost: 1
+        )
+        #expect(opened?.vin == GaragePresentation.connectedVIN(wallConnectors: pluggedThenCharging.wallConnectors, fallbackVIN: "7G2C12345RF000001"))
+        #expect(GaragePresentation.make(data: idle, fallbackVIN: "", appearances: [:], solar: .panels).showVehicle == false)
+        #expect(CarShowroom.request(
+            data: idle,
+            fallbackVIN: "",
+            appearances: [:],
+            solar: .panels,
+            vehicles: [],
+            charges: [:],
+            displayBoost: 4
+        ) == nil)
+
+        let shown = opened?.lines.joined(separator: "\n") ?? ""
+        #expect(shown.contains("80"))
+        #expect(shown.contains("Charging"))
+        #expect(shown.contains("45"))
+        #expect(shown.contains("Daydream"))
+        #expect(shown.contains(colourName))
+        let generic = DemoHouseTour.parkedCar(at: 0)
+        let genericLines = CarShowroom.statLines(
+            displayName: generic.vehicle.displayName,
+            exteriorColor: generic.appearance.exteriorColor,
+            snapshot: full
+        )
+        #expect(!genericLines.contains { $0.contains("·") })
+        let withoutMinutes = CarShowroom.statLines(
+            displayName: "Daydream",
+            exteriorColor: paint.appearance.exteriorColor,
+            snapshot: VehicleChargeSnapshot(batteryLevel: 80, chargingState: "Charging", minutesToFullCharge: nil)
+        )
+        #expect(!withoutMinutes.joined(separator: "\n").lowercased().contains("minute"))
+        guard let opened else {
+            #expect(Bool(false))
+            return
+        }
+
+        let scene = CarShowroom.scene(for: opened)
+        let referenceRoot = SCNNode()
+        HouseGroundPlate.install(on: referenceRoot)
+        let referenceNode = referenceRoot.childNode(withName: HouseGroundPlate.name, recursively: false)
+        let showroomNode = scene.rootNode.childNode(withName: HouseGroundPlate.name, recursively: false)
+        let referenceFloor = referenceNode?.geometry as? SCNFloor
+        let showroomFloor = showroomNode?.geometry as? SCNFloor
+        #expect(referenceFloor != nil)
+        #expect(showroomFloor != nil)
+        #expect(abs((referenceFloor?.reflectivity ?? 0) - (showroomFloor?.reflectivity ?? -1)) < 0.001)
+        #expect(abs((referenceFloor?.reflectionFalloffStart ?? -1) - (showroomFloor?.reflectionFalloffStart ?? 0)) < 0.001)
+        #expect(abs((referenceFloor?.reflectionFalloffEnd ?? -1) - (showroomFloor?.reflectionFalloffEnd ?? 0)) < 0.001)
+        #expect(abs((referenceFloor?.reflectionFalloffStart ?? 0) - 0.08) < 0.001)
+        #expect(abs((referenceFloor?.reflectionFalloffEnd ?? 0) - 0.32) < 0.001)
+        #expect(showroomFloor?.materials.first?.lightingModel == referenceFloor?.materials.first?.lightingModel)
+        #expect(referenceFloor?.materials.first?.lightingModel == .constant)
+        #expect(plateDiffuseMatches(showroomFloor?.materials.first, referenceFloor?.materials.first))
+        #if os(macOS)
+        #expect(showroomNode?.filters?.isEmpty != false)
+        #endif
+        var vehicle: SCNNode?
+        var shell = false
+        scene.rootNode.enumerateHierarchy { node, _ in
+            if node.name == "Vehicle" { vehicle = node }
+            let name = node.name ?? ""
+            if name.hasPrefix("Home") || name.hasPrefix("GarageDoor") { shell = true }
+        }
+        #expect(vehicle != nil)
+        #expect((vehicle?.categoryBitMask ?? 0) & HouseGroundPlate.reflectionBit != 0)
+        var meshes = 0
+        vehicle?.enumerateHierarchy { node, _ in
+            if node.geometry != nil { meshes += 1 }
+        }
+        #expect(meshes > 0)
+        #expect(shell == false)
+    }
+
+    @Test func showroomOrbitStartsOnTheRestingCameraAndStaysOnTheCar() {
+        let centre = CarShowroom.stageCentre
+        let resting = CarShowroomOrbit()
+        let target = resting.target(around: centre)
+        let eye = resting.eye(around: centre)
+        let expected = target + CarShowroomOrbit.restingOffset
+        #expect(simd_length(eye - expected) < 0.001)
+
+        var closer = resting
+        closer.distanceScale = 0.5
+        let near = closer.eye(around: centre)
+        #expect(simd_length(near - target) < simd_length(eye - target) - 0.5)
+
+        var spun = resting
+        spun.yawDegrees = 90
+        let side = spun.eye(around: centre) - target
+        let restingOffset = eye - target
+        #expect(abs(simd_length(side) - simd_length(restingOffset)) < 0.01)
+        #expect(abs(side.x - restingOffset.z) < 0.02)
+        #expect(abs(side.z + restingOffset.x) < 0.02)
+        #expect(abs(side.y - restingOffset.y) < 0.02)
+
+        var raised = resting
+        raised.pitchDegrees = 20
+        #expect(raised.eye(around: centre).y > eye.y)
+    }
+
+    @Test func showroomStartZoomFitsTheCarToTheWindow() {
+        let centre = CarShowroom.stageCentre
+        let target = CarShowroomOrbit().target(around: centre)
+        let corners = [
+            target + SIMD3<Float>(-1.2, -0.5, -2.4),
+            target + SIMD3<Float>(1.2, -0.5, -2.4),
+            target + SIMD3<Float>(-1.2, 0.9, -2.4),
+            target + SIMD3<Float>(1.2, 0.9, -2.4),
+            target + SIMD3<Float>(-1.2, -0.5, 2.4),
+            target + SIMD3<Float>(1.2, -0.5, 2.4),
+            target + SIMD3<Float>(-1.2, 0.9, 2.4),
+            target + SIMD3<Float>(1.2, 0.9, 2.4),
+        ]
+        let wide = CarShowroomOrbit.distanceScale(
+            fitting: corners, around: centre, yawDegrees: 0, pitchDegrees: 0, aspect: 16 / 9
+        )
+        let narrow = CarShowroomOrbit.distanceScale(
+            fitting: corners, around: centre, yawDegrees: 0, pitchDegrees: 0, aspect: 9 / 16
+        )
+        #expect(narrow > wide)
+        #expect(showroomFill(of: corners, around: centre, scale: wide, aspect: 16 / 9) <= CarShowroomOrbit.fitFill + 0.02)
+        #expect(showroomFill(of: corners, around: centre, scale: narrow, aspect: 9 / 16) <= CarShowroomOrbit.fitFill + 0.02)
+
+        guard let index = CarShowroom.catalogueModels.firstIndex(of: .cybertruck) else {
+            Issue.record("Cybertruck is missing from the catalogue")
+            return
+        }
+        let truck = CarShowroom.fitPoints(in: CarShowroom.scene(for: CarShowroom.catalogueRequest(index: index)))
+        #expect(truck.count > 8)
+        let fitted = CarShowroomOrbit.distanceScale(
+            fitting: truck, around: centre, yawDegrees: 0, pitchDegrees: 0, aspect: 16 / 9
+        )
+        #expect(showroomFill(of: truck, around: centre, scale: fitted, aspect: 16 / 9) <= CarShowroomOrbit.fitFill + 0.02)
+    }
+
+    @Test func showroomCarSitsOnTheHorizontalCentre() {
+        let centre = CarShowroom.stageCentre
+        let target = CarShowroomOrbit().target(around: centre)
+        let box = [
+            SIMD3<Float>(-1.2, -0.4, -2.2),
+            SIMD3<Float>(1.2, -0.4, -2.2),
+            SIMD3<Float>(-1.2, 0.8, -2.2),
+            SIMD3<Float>(1.2, 0.8, -2.2),
+            SIMD3<Float>(-1.2, -0.4, 2.2),
+            SIMD3<Float>(1.2, -0.4, 2.2),
+            SIMD3<Float>(-1.2, 0.8, 2.2),
+            SIMD3<Float>(1.2, 0.8, 2.2),
+        ].map { target + $0 }
+        let leaning = showroomHorizontalCentre(of: box, around: centre, scale: 1, bias: .zero, aspect: 16 / 9)
+        #expect(leaning > 0.05)
+        let bias = CarShowroomOrbit.centreBias(
+            fitting: box, around: centre, yawDegrees: 0, pitchDegrees: 0, distanceScale: 1
+        )
+        #expect(abs(showroomHorizontalCentre(of: box, around: centre, scale: 1, bias: bias, aspect: 16 / 9)) < 0.02)
+        #expect(abs(showroomHorizontalCentre(of: box, around: centre, scale: 1, bias: bias, aspect: 9 / 16)) < 0.02)
+
+        for model in [VehicleModel.model3, .modelS, .cybertruck] {
+            guard let index = CarShowroom.catalogueModels.firstIndex(of: model) else {
+                Issue.record("\(model.rawValue) is missing from the catalogue")
+                continue
+            }
+            let points = CarShowroom.fitPoints(in: CarShowroom.scene(for: CarShowroom.catalogueRequest(index: index)))
+            #expect(points.count > 8)
+            for yaw in [Float(0), Float(75)] {
+                let shift = CarShowroomOrbit.centreBias(
+                    fitting: points, around: centre, yawDegrees: yaw, pitchDegrees: -8, distanceScale: 1.4
+                )
+                let mid = showroomHorizontalCentre(
+                    of: points, around: centre, yaw: yaw, pitch: -8, scale: 1.4, bias: shift, aspect: 16 / 9
+                )
+                #expect(abs(mid) < 0.02)
+                let fitted = CarShowroomOrbit.distanceScale(
+                    fitting: points, around: centre, yawDegrees: yaw, pitchDegrees: -8, aspect: 16 / 9
+                )
+                let fittedShift = CarShowroomOrbit.centreBias(
+                    fitting: points, around: centre, yawDegrees: yaw, pitchDegrees: -8, distanceScale: fitted
+                )
+                let fittedMid = showroomHorizontalCentre(
+                    of: points, around: centre, yaw: yaw, pitch: -8, scale: fitted, bias: fittedShift, aspect: 16 / 9
+                )
+                #expect(abs(fittedMid) < 0.02)
+                let fill = showroomFill(
+                    of: points, around: centre, yaw: yaw, pitch: -8, scale: fitted, bias: fittedShift, aspect: 16 / 9
+                )
+                #expect(fill <= CarShowroomOrbit.fitFill + 0.02)
+            }
+        }
+    }
+
+    /// Screen-space midpoint of the points. Zero is the horizontal centre of the window.
+    private func showroomHorizontalCentre(
+        of points: [SIMD3<Float>],
+        around centre: SIMD3<Float>,
+        yaw: Float = 0,
+        pitch: Float = 0,
+        scale: Float,
+        bias: SIMD3<Float>,
+        aspect: Float
+    ) -> Float {
+        var pose = CarShowroomOrbit()
+        pose.yawDegrees = yaw
+        pose.pitchDegrees = pitch
+        pose.distanceScale = scale
+        pose.centreBias = bias
+        let eye = pose.eye(around: centre)
+        let target = pose.target(around: centre)
+        let forward = simd_normalize(target - eye)
+        var right = simd_cross(forward, SIMD3<Float>(0, 1, 0))
+        right = simd_normalize(right)
+        let tanX = tan(CarShowroomOrbit.verticalFieldOfViewDegrees * .pi / 180 / 2) * aspect
+        var minX = Float.greatestFiniteMagnitude
+        var maxX = -Float.greatestFiniteMagnitude
+        for point in points {
+            let depth = simd_dot(point - eye, forward)
+            guard depth > 0.001 else { return 10 }
+            let x = simd_dot(point - eye, right) / (depth * tanX)
+            minX = min(minX, x)
+            maxX = max(maxX, x)
+        }
+        return (minX + maxX) / 2
+    }
+
+    /// Largest fraction of the vertical or horizontal frame used by these points.
+    private func showroomFill(
+        of points: [SIMD3<Float>],
+        around centre: SIMD3<Float>,
+        yaw: Float = 0,
+        pitch: Float = 0,
+        scale: Float,
+        bias: SIMD3<Float> = .zero,
+        aspect: Float
+    ) -> Float {
+        var pose = CarShowroomOrbit()
+        pose.yawDegrees = yaw
+        pose.pitchDegrees = pitch
+        pose.distanceScale = scale
+        pose.centreBias = bias
+        let eye = pose.eye(around: centre)
+        let target = pose.target(around: centre)
+        let forward = simd_normalize(target - eye)
+        var right = simd_cross(forward, SIMD3<Float>(0, 1, 0))
+        right = simd_normalize(right)
+        let up = simd_normalize(simd_cross(right, forward))
+        let tanY = tan(CarShowroomOrbit.verticalFieldOfViewDegrees * .pi / 180 / 2)
+        let tanX = tanY * aspect
+        var used: Float = 0
+        for point in points {
+            let depth = simd_dot(point - eye, forward)
+            guard depth > 0.001 else { return 10 }
+            used = max(used, abs(simd_dot(point - eye, right)) / (depth * tanX))
+            used = max(used, abs(simd_dot(point - eye, up)) / (depth * tanY))
+        }
+        return used
+    }
+
+    @Test func showroomColourStepsWrapTheCatalogue() {
+        let last = TeslaPaint.catalogue.count - 1
+        #expect(CarShowroom.colourIndex(after: nil, delta: 1) == 0)
+        #expect(CarShowroom.colourIndex(after: nil, delta: -1) == last)
+        #expect(CarShowroom.colourIndex(after: 0, delta: -1) == last)
+        #expect(CarShowroom.colourIndex(after: last, delta: 1) == 0)
+    }
+
+    @Test func cybertruckShowroomKeepsTheGlassRoofAndCanTakeAColour() {
+        guard let index = CarShowroom.catalogueModels.firstIndex(of: .cybertruck) else {
+            Issue.record("Cybertruck is missing from the catalogue")
+            return
+        }
+        var request = CarShowroom.catalogueRequest(index: index)
+        let scene = CarShowroom.scene(for: request)
+        let glass = material(named: "Glass", in: scene)
+        let paint = material(named: "Paint", in: scene)
+        #expect(abs((glass?.transparency ?? 0) - VehicleGlass.transparency) < 0.001)
+        #expect(glass?.isDoubleSided == true)
+        #expect((glassNode(in: scene)?.geometry?.boundingBox.max.y ?? 0) > 1.7)
+        let fileMetal = number(paint?.metalness.contents) ?? -1
+
+        request.paintColorOverride = TeslaPaint.catalogue[0].demoOverride
+        request.displayBoost = 1
+        let coloured = CarShowroom.scene(for: request)
+        let colouredMetal = number(material(named: "Paint", in: coloured)?.metalness.contents) ?? -1
+        #expect(abs(fileMetal - 0.35) < 0.001)
+        #expect(abs(colouredMetal - Double(TeslaPaint.catalogue[0].metallic)) < 0.001)
+        #expect(abs((material(named: "Glass", in: coloured)?.transparency ?? 0) - VehicleGlass.transparency) < 0.001)
+    }
+
+    private func glassNode(in scene: SCNScene) -> SCNNode? {
+        var found: SCNNode?
+        scene.rootNode.enumerateChildNodes { node, stop in
+            guard node.geometry?.materials.contains(where: { $0.name == "Glass" }) == true else { return }
+            found = node
+            stop.pointee = true
+        }
+        return found
+    }
+
+    private func material(named name: String, in scene: SCNScene) -> SCNMaterial? {
+        var found: SCNMaterial?
+        scene.rootNode.enumerateChildNodes { node, stop in
+            guard let material = node.geometry?.materials.first(where: { $0.name == name }) else { return }
+            found = material
+            stop.pointee = true
+        }
+        return found
+    }
+
+    private func number(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let number = value as? Double { return number }
+        if let number = value as? CGFloat { return Double(number) }
+        return nil
+    }
+
+    @Test func showroomTransitionZoomsTheHomeAwayThenFadesBackAtRest() {
+        let home = CarShowroomTransition()
+        #expect(home.homeOpacity == 1)
+        #expect(home.homeScale == 1)
+        #expect(home.showroomOpacity == 0)
+
+        let leaving = CarShowroomTransition.homeDeparted
+        #expect(leaving.homeOpacity == 0)
+        #expect(leaving.homeScale == CarShowroomTransition.zoom)
+        #expect(leaving.showroomOpacity == 0)
+
+        var halfway = CarShowroomTransition()
+        halfway.holdsZoom = true
+        halfway.homeReveal = 0.5
+        #expect(abs(halfway.homeScale - (1 + (CarShowroomTransition.zoom - 1) / 2)) < 0.001)
+        #expect(halfway.homeOpacity == 0.5)
+        #expect(halfway.showroomOpacity == 0)
+
+        let showroom = CarShowroomTransition.showroom
+        #expect(showroom.homeOpacity == 0)
+        #expect(showroom.homeScale == CarShowroomTransition.zoom)
+        #expect(showroom.showroomOpacity == 1)
+
+        let returned = CarShowroomTransition.showroomDeparted
+        #expect(returned.homeOpacity == 0)
+        #expect(returned.homeScale == 1)
+        #expect(returned.showroomOpacity == 0)
+    }
+
+    @Test func showroomCatalogueCyclesModelsWhenTheAccountHasNoCars() {
+        let idle = PowerwallData(
+            battery: .init(instantPower: 0, count: 1),
+            load: .init(instantPower: 0),
+            solar: .init(instantPower: 0, energyExported: 0),
+            site: .init(instantPower: 0),
+            wallConnectors: [.init(vin: "5YJYGDEE5LF000001", din: "1", wallConnectorState: 0, wallConnectorPower: 0)]
+        )
+        let shopper = CarShowroom.select(
+            data: idle,
+            fallbackVIN: "",
+            appearances: [:],
+            solar: .panels,
+            vehicles: [],
+            charges: [:],
+            displayBoost: 4,
+            isDemoMode: false
+        )
+        let models = CarShowroom.catalogueModels
+        #expect(models == VehicleModel.allCases.filter { $0 != .generic })
+        #expect(shopper?.browsesCatalogue == true)
+        #expect(shopper?.model == models.first)
+        #expect(shopper?.lines == [CarShowroom.catalogueName(models[0])])
+
+        let owner = CarShowroom.select(
+            data: idle,
+            fallbackVIN: "",
+            appearances: [:],
+            solar: .panels,
+            vehicles: [FleetVehicle(vin: "5YJYGDEE5LF000001", displayName: "Daydream", state: "online")],
+            charges: [:],
+            displayBoost: 4,
+            isDemoMode: false
+        )
+        #expect(owner == nil)
+        let demo = CarShowroom.select(
+            data: idle,
+            fallbackVIN: "",
+            appearances: [:],
+            solar: .panels,
+            vehicles: [],
+            charges: [:],
+            displayBoost: 1,
+            isDemoMode: true
+        )
+        #expect(demo == nil)
+        let parkedDemo = DemoHouseTour.parkedCar(at: 1)
+        let demoCharging = PowerwallData(
+            battery: .init(instantPower: 0, count: 1),
+            load: .init(instantPower: 0),
+            solar: .init(instantPower: 0, energyExported: 0),
+            site: .init(instantPower: 0),
+            wallConnectors: [.init(vin: parkedDemo.vehicle.vin, din: "1", wallConnectorState: 1, wallConnectorPower: 512)]
+        )
+        let demoShowroom = CarShowroom.select(
+            data: demoCharging,
+            fallbackVIN: "",
+            appearances: [parkedDemo.vehicle.vin: parkedDemo.appearance],
+            solar: .panels,
+            vehicles: [FleetVehicle(vin: parkedDemo.vehicle.vin, displayName: parkedDemo.vehicle.displayName, state: "online")],
+            charges: [:],
+            displayBoost: 1,
+            isDemoMode: true
+        )
+        let demoLines = demoShowroom?.lines.joined(separator: "\n") ?? ""
+        #expect(demoLines.contains("80% battery"))
+        #expect(demoLines.contains("Charging"))
+        #expect(demoLines.contains("45 minutes to full charge"))
+        #expect(demoLines.contains(parkedDemo.vehicle.displayName))
+
+        var seen: [VehicleModel] = []
+        for index in 0..<models.count {
+            let page = CarShowroom.catalogueRequest(index: index)
+            seen.append(page.model)
+            #expect(page.browsesCatalogue)
+            #expect(page.lines == [CarShowroom.catalogueName(page.model)])
+            #expect(!page.lines.joined(separator: "\n").lowercased().contains("minute"))
+            #expect(!page.lines.joined(separator: "\n").contains("%"))
+            let url = CarShowroom.orderURL(for: page.model)
+            #expect(url.scheme == "https")
+            #expect(url.host == "www.tesla.com")
+        }
+        #expect(seen == models)
+        #expect(CarShowroom.catalogueRequest(index: models.count).model == models.first)
+        #expect(CarShowroom.catalogueRequest(index: -1).model == models.last)
+        #expect(CarShowroom.orderURL(for: .model3) == CarShowroom.orderURL(for: .model3Highland))
+        #expect(CarShowroom.orderURL(for: .modelY) == CarShowroom.orderURL(for: .modelYJuniper))
+        #expect(CarShowroom.orderURL(for: .modelS).path.contains("models"))
+        #expect(CarShowroom.orderURL(for: .cybertruck).path.contains("cybertruck"))
+
+        let charging = PowerwallData(
+            battery: .init(instantPower: 0, count: 1),
+            load: .init(instantPower: 0),
+            solar: .init(instantPower: 0, energyExported: 0),
+            site: .init(instantPower: 0),
+            wallConnectors: [.init(vin: "5YJYGDEE5LF000001", din: "1", wallConnectorState: 1, wallConnectorPower: 2000)]
+        )
+        let parked = CarShowroom.select(
+            data: charging,
+            fallbackVIN: "",
+            appearances: [:],
+            solar: .panels,
+            vehicles: [],
+            charges: [:],
+            displayBoost: 4,
+            isDemoMode: false
+        )
+        #expect(parked?.browsesCatalogue == false)
+        #expect(parked?.vin == GaragePresentation.connectedVIN(wallConnectors: charging.wallConnectors, fallbackVIN: ""))
+    }
+
+    private func plateDiffuseMatches(_ showroom: SCNMaterial?, _ reference: SCNMaterial?) -> Bool {
+        guard let left = showroom?.diffuse.contents as? HouseColor,
+              let right = reference?.diffuse.contents as? HouseColor,
+              let leftRGB = left.usingColorSpace(.deviceRGB),
+              let rightRGB = right.usingColorSpace(.deviceRGB) else { return false }
+        return abs(leftRGB.redComponent - rightRGB.redComponent) < 0.004
+            && abs(leftRGB.greenComponent - rightRGB.greenComponent) < 0.004
+            && abs(leftRGB.blueComponent - rightRGB.blueComponent) < 0.004
+    }
+
     private func ribbonColor(_ material: SCNMaterial, matches color: PowerFlowColor?) -> Bool {
         guard let color, let painted = material.diffuse.contents as? HouseColor else { return false }
         let resolved = painted.usingColorSpace(.sRGB) ?? painted

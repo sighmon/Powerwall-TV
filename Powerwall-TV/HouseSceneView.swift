@@ -386,6 +386,8 @@ final class HouseSceneControllerStore: ObservableObject {
 
 struct HouseSceneView: View {
     @ObservedObject var viewModel: PowerwallViewModel
+    /// Garage door or parked car. Empty when the caller has nothing to open.
+    var onShowroom: () -> Void = {}
     @AppStorage("houseHeadingDegrees") private var houseHeadingDegrees = 180.0
     @StateObject private var store = HouseSceneControllerStore()
     private var controller: HouseSceneController { store.controller }
@@ -431,7 +433,9 @@ struct HouseSceneView: View {
                 powerSnapshot: powerFlowSnapshot,
                 revealingWeather: revealingWeather,
                 pauseWhenUnfocused: viewModel.pauseAnimationWhenUnfocused,
-                attention: viewModel.appAttention
+                attention: viewModel.appAttention,
+                showsVehicle: viewModel.garagePresentation.showVehicle,
+                onShowroom: onShowroom
             )
                 .frame(width: size.width, height: size.height)
                 .focusable(false)
@@ -921,12 +925,14 @@ private struct HouseMetalScene: View {
     let revealingWeather: Bool
     let pauseWhenUnfocused: Bool
     let attention: AppAttention
+    let showsVehicle: Bool
+    let onShowroom: () -> Void
 
     var body: some View {
         #if os(macOS)
-        HouseMetalSceneMac(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose, rainIntensity: rainIntensity, snowIntensity: snowIntensity, powerSnapshot: powerSnapshot, revealingWeather: revealingWeather, pauseWhenUnfocused: pauseWhenUnfocused, attention: attention)
+        HouseMetalSceneMac(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose, rainIntensity: rainIntensity, snowIntensity: snowIntensity, powerSnapshot: powerSnapshot, revealingWeather: revealingWeather, pauseWhenUnfocused: pauseWhenUnfocused, attention: attention, showsVehicle: showsVehicle, onShowroom: onShowroom)
         #else
-        HouseMetalSceneIOS(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose, rainIntensity: rainIntensity, snowIntensity: snowIntensity, powerSnapshot: powerSnapshot, revealingWeather: revealingWeather, pauseWhenUnfocused: pauseWhenUnfocused, attention: attention)
+        HouseMetalSceneIOS(scene: scene, pointOfView: pointOfView, powerFlow: powerFlow, pose: pose, onPose: onPose, rainIntensity: rainIntensity, snowIntensity: snowIntensity, powerSnapshot: powerSnapshot, revealingWeather: revealingWeather, pauseWhenUnfocused: pauseWhenUnfocused, attention: attention, showsVehicle: showsVehicle, onShowroom: onShowroom)
         #endif
     }
 }
@@ -1077,7 +1083,11 @@ enum PresentationRefresh {
 final class HouseCameraControlView: SCNView {
     var pose = HouseScenePose.identity
     var onPose: (HouseScenePose) -> Void = { _ in }
+    var onShowroom: () -> Void = {}
+    var showsVehicle = false
     private var revision = 0
+    private var clickOrigin: CGPoint?
+    private var pointerDragged = false
     private var syncedRevision = 0
     private var isAdjustingCamera = false
     private var rainIntensity: Float = 0
@@ -1199,8 +1209,69 @@ final class HouseCameraControlView: SCNView {
         pan.minimumNumberOfTouches = 2
         addGestureRecognizer(pan)
         addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinchZoom(_:))))
+        let tap = UITapGestureRecognizer(target: self, action: #selector(showroomTap(_:)))
+        addGestureRecognizer(tap)
+        #elseif os(tvOS)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(showroomTap(_:)))
+        tap.allowedPressTypes = [NSNumber(value: UIPress.PressType.select.rawValue)]
+        addGestureRecognizer(tap)
         #endif
     }
+
+    /// A click that did not drag. The hidden garage door still counts while a car is parked.
+    /// With no car, only the visible door opens the showroom, so a click on the wall does not.
+    private func selectShowroom(at point: CGPoint) {
+        if showsVehicle {
+            let hits = hitTest(point, options: [
+                SCNHitTestOption.ignoreHiddenNodes: false,
+                SCNHitTestOption.searchMode: SCNHitTestSearchMode.all.rawValue
+            ])
+            guard hits.contains(where: { isGarageDoorOrCar($0.node) }) else { return }
+        } else {
+            let hits = hitTest(point, options: [
+                SCNHitTestOption.searchMode: SCNHitTestSearchMode.closest.rawValue
+            ])
+            guard let nearest = hits.first, isGarageDoor(nearest.node) else { return }
+        }
+        onShowroom()
+    }
+
+    private func isGarageDoorOrCar(_ node: SCNNode) -> Bool {
+        if isGarageDoor(node) { return true }
+        var current: SCNNode? = node
+        while let cursor = current {
+            let name = cursor.name ?? ""
+            if name == "Vehicle" || name.hasPrefix("VehicleBody") || name.hasPrefix("VehicleModel") {
+                return true
+            }
+            current = cursor.parent
+        }
+        return false
+    }
+
+    private func isGarageDoor(_ node: SCNNode) -> Bool {
+        var current: SCNNode? = node
+        while let cursor = current {
+            if cursor.name?.hasPrefix("GarageDoor") == true { return true }
+            current = cursor.parent
+        }
+        return false
+    }
+
+    #if os(iOS) || os(tvOS)
+    @objc private func showroomTap(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+        selectShowroom(at: gesture.location(in: self))
+    }
+    #endif
+
+    #if os(tvOS)
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        super.pressesEnded(presses, with: event)
+        guard presses.contains(where: { $0.type == .select }) else { return }
+        selectShowroom(at: CGPoint(x: bounds.midX, y: bounds.midY))
+    }
+    #endif
 
     #if os(iOS)
     @objc private func orbitPan(_ gesture: UIPanGestureRecognizer) {
@@ -1244,10 +1315,13 @@ final class HouseCameraControlView: SCNView {
     override var acceptsFirstResponder: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
+        clickOrigin = convert(event.locationInWindow, from: nil)
+        pointerDragged = false
         beginCameraAdjustment()
     }
 
     override func mouseDragged(with event: NSEvent) {
+        pointerDragged = true
         if event.modifierFlags.contains(.option) {
             pan(with: event)
         } else {
@@ -1271,7 +1345,14 @@ final class HouseCameraControlView: SCNView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let origin = clickOrigin ?? point
+        let moved = hypot(point.x - origin.x, point.y - origin.y)
         endCameraAdjustment()
+        if !pointerDragged && moved < 5 {
+            selectShowroom(at: point)
+        }
+        clickOrigin = nil
     }
 
     override func rightMouseUp(with event: NSEvent) {
@@ -1306,6 +1387,8 @@ private struct HouseMetalSceneMac: NSViewRepresentable {
     let revealingWeather: Bool
     let pauseWhenUnfocused: Bool
     let attention: AppAttention
+    let showsVehicle: Bool
+    let onShowroom: () -> Void
 
     func makeCoordinator() -> HousePowerFlowDriver { powerFlow }
     func makeNSView(context: Context) -> HouseCameraControlView { configured(context.coordinator) }
@@ -1326,6 +1409,8 @@ private struct HouseMetalSceneMac: NSViewRepresentable {
         view.focusRingType = .none
         view.sync(from: pose)
         view.onPose = onPose
+        view.showsVehicle = showsVehicle
+        view.onShowroom = onShowroom
         if view.delegate !== delegate { view.delegate = delegate }
         view.applyPlayback(rainIntensity: rainIntensity, snowIntensity: snowIntensity, snapshot: powerSnapshot, revealingWeather: revealingWeather, attention: attention, pauseWhenUnfocused: pauseWhenUnfocused)
     }
@@ -1343,6 +1428,8 @@ private struct HouseMetalSceneIOS: UIViewRepresentable {
     let revealingWeather: Bool
     let pauseWhenUnfocused: Bool
     let attention: AppAttention
+    let showsVehicle: Bool
+    let onShowroom: () -> Void
 
     func makeCoordinator() -> HousePowerFlowDriver { powerFlow }
     func makeUIView(context: Context) -> HouseCameraControlView { configured(context.coordinator) }
@@ -1362,6 +1449,8 @@ private struct HouseMetalSceneIOS: UIViewRepresentable {
         view.allowsCameraControl = false
         view.sync(from: pose)
         view.onPose = onPose
+        view.showsVehicle = showsVehicle
+        view.onShowroom = onShowroom
         if view.delegate !== delegate { view.delegate = delegate }
         view.applyPlayback(rainIntensity: rainIntensity, snowIntensity: snowIntensity, snapshot: powerSnapshot, revealingWeather: revealingWeather, attention: attention, pauseWhenUnfocused: pauseWhenUnfocused)
     }

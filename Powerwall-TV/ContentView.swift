@@ -146,6 +146,10 @@ struct ContentView: View {
     @State private var demoTourTick = 0
     @State private var lastPowerwallRuntimeEstimateTimerCycle: Int?
     @State private var houseCallouts: HouseCalloutPoints?
+    @State private var carShowroom: CarShowroomRequest?
+    @State private var showroomTransition = CarShowroomTransition()
+    @State private var showroomTransitionID = 0
+    @State private var showroomTransitionSettled = true
     @FocusState private var hasKeyboardFocus: Bool
     /// Takes focus on tvOS while the control buttons are hidden, so a remote press can bring them back.
     @FocusState private var overlayRevealFocused: Bool
@@ -194,13 +198,25 @@ struct ContentView: View {
                 Color(red: 22/255, green: 23/255, blue: 24/255)
                     .ignoresSafeArea()
 
+                ZStack {
                 if showsHouseScene {
                     // The metric overlay stays in the 16:9 frame. The house itself fills the window.
-                    HouseSceneView(viewModel: viewModel)
+                    HouseSceneView(viewModel: viewModel, onShowroom: { openCarShowroom() })
                         .ignoresSafeArea()
                         .opacity(showBackground ? 1 : 0)
                         .scaleEffect(showBackground ? 1 : 1.04)
                 }
+
+                #if os(tvOS)
+                if showsHouseScene, (viewModel.garagePresentation.showVehicle || !userOwnsCars), let houseCallouts {
+                    Button(action: openCarShowroom) {
+                        Color.clear.frame(width: 160, height: 100)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Garage")
+                    .position(houseCallouts.vehicle)
+                }
+                #endif
 
                 if showsHouseScene, viewModel.isOffGrid(), let houseCallouts {
                     offGridImage(sceneSize: sceneSize)
@@ -259,6 +275,9 @@ struct ContentView: View {
                     overlayRevealCatcher
                 }
                 #endif
+                }
+                .scaleEffect(showroomTransition.homeScale)
+                .opacity(showroomTransition.homeOpacity)
             }
             .coordinateSpace(name: "contentView")
             .onPreferenceChange(OverlayFramePreferenceKey.self) { frames in
@@ -404,6 +423,14 @@ struct ContentView: View {
                 )
         }
 #endif
+        .overlay {
+            if let request = carShowroom {
+                CarShowroomView(request: request, onDismiss: closeCarShowroom)
+                    .ignoresSafeArea()
+                    .transition(.identity)
+                    .opacity(showroomTransition.showroomOpacity)
+            }
+        }
         .task(id: weatherPrefetchIdentity) {
             guard !showingSettings, !viewModel.isDemoMode, viewModel.loginMode == .fleetAPI,
                   let siteID = viewModel.energySiteId, !viewModel.accessToken.isEmpty else { return }
@@ -461,8 +488,7 @@ struct ContentView: View {
                     solarEnergyExported: 409600,
                     sitePower: homeLoad * 0.1,
                     gridStatus: "SystemGridConnected",
-                    wallConnectorPower: homeLoad * 0.05,
-                    vehicleBatteryLevel: 64
+                    wallConnectorPower: homeLoad * 0.05
                 )
             } else {
                 switch viewModel.loginMode {
@@ -1162,18 +1188,92 @@ struct ContentView: View {
     }
 
     private func wallConnectorMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
-        VStack(spacing: 2) {
-            Text(wallConnectorDisplay(data: data, precision: precision))
-                .fontWeight(.bold)
-                .font(valueFont)
-                .numericUpdateAnimation(for: wallConnectorDisplay(data: data, precision: precision))
-            Text(vehicleMetricCaption(connectorCount: data.wallConnectors.count))
-                .opacity(0.6)
-                .fontWeight(.bold)
-                .font(labelFont)
-                .id(viewModel.isDemoMode ? viewModel.demoColourIndex : 0)
+        Button(action: openCarShowroom) {
+            VStack(spacing: 2) {
+                Text(wallConnectorDisplay(data: data, precision: precision))
+                    .fontWeight(.bold)
+                    .font(valueFont)
+                    .numericUpdateAnimation(for: wallConnectorDisplay(data: data, precision: precision))
+                Text(vehicleMetricCaption(connectorCount: data.wallConnectors.count))
+                    .opacity(0.6)
+                    .fontWeight(.bold)
+                    .font(labelFont)
+                    .id(viewModel.isDemoMode ? viewModel.demoColourIndex : 0)
+            }
+            .multilineTextAlignment(.center)
         }
-        .multilineTextAlignment(.center)
+        .buttonStyle(.plain)
+    }
+
+    /// True when the account already has a car. Demo cars count. An empty Fleet list does not.
+    private var userOwnsCars: Bool {
+        viewModel.isDemoMode || !viewModel.vehicles.isEmpty
+    }
+
+    /// Garage door, parked car, and the charging readout. A parked car wins. With no cars on the
+    /// account, the garage opens the model catalogue instead.
+    private func openCarShowroom() {
+        guard showroomTransitionSettled, carShowroom == nil else { return }
+        guard let request = CarShowroom.select(
+            data: viewModel.data,
+            fallbackVIN: viewModel.lastChargingWallConnectorVIN,
+            appearances: viewModel.vehicleAppearances,
+            solar: viewModel.garageSolar,
+            vehicles: viewModel.vehicles,
+            charges: viewModel.vehicleChargeStates,
+            displayBoost: viewModel.isDemoMode ? 1 : 4,
+            isDemoMode: viewModel.isDemoMode
+        ) else { return }
+        showroomTransitionSettled = false
+        showroomTransitionID += 1
+        let transitionID = showroomTransitionID
+        // Mount while invisible so the car loads during the zoom, without fading in yet.
+        carShowroom = request
+        withAnimation(.easeIn(duration: CarShowroomTransition.homeDuration), completionCriteria: .logicallyComplete) {
+            showroomTransition = .homeDeparted
+        } completion: {
+            guard transitionID == showroomTransitionID else { return }
+            withAnimation(.easeOut(duration: CarShowroomTransition.showroomDuration)) {
+                showroomTransition = .showroom
+            }
+        }
+    }
+
+    /// The showroom close button, Escape, and the tvOS exit command.
+    private func closeCarShowroom() {
+        guard carShowroom != nil else { return }
+        showroomTransitionID += 1
+        let transitionID = showroomTransitionID
+        // Escape during the zoom, before the showroom has appeared: ease the home back.
+        if showroomTransition.showroomReveal == 0 {
+            withAnimation(.easeOut(duration: CarShowroomTransition.homeDuration), completionCriteria: .logicallyComplete) {
+                showroomTransition.homeReveal = 1
+                carShowroom = nil
+            } completion: {
+                guard transitionID == showroomTransitionID else { return }
+                showroomTransition.holdsZoom = false
+                showroomTransitionSettled = true
+            }
+            return
+        }
+        withAnimation(.easeIn(duration: CarShowroomTransition.showroomDuration), completionCriteria: .logicallyComplete) {
+            showroomTransition.showroomReveal = 0
+        } completion: {
+            guard transitionID == showroomTransitionID else { return }
+            // The home is still invisible, so dropping the zoom here does not show a zoom-out.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                showroomTransition = .showroomDeparted
+                carShowroom = nil
+            }
+            withAnimation(.easeOut(duration: CarShowroomTransition.homeDuration), completionCriteria: .logicallyComplete) {
+                showroomTransition.homeReveal = 1
+            } completion: {
+                guard transitionID == showroomTransitionID else { return }
+                showroomTransitionSettled = true
+            }
+        }
     }
 
     private func gridMetricView(data: PowerwallData, valueFont: Font, labelFont: Font) -> some View {
@@ -1497,15 +1597,11 @@ struct ContentView: View {
         return "\(name) \(batteryDisplay)"
     }
 
-    private func configureDemoVehicleData(batteryLevel: Double, vehicle: DemoVehicle) {
+    private func configureDemoVehicleData(vehicle: DemoVehicle) {
         viewModel.vehicles = [
             FleetVehicle(vin: vehicle.vin, displayName: vehicle.displayName, state: "online")
         ]
-        viewModel.vehicleChargeStates[vehicle.vin] = VehicleChargeSnapshot(
-            batteryLevel: batteryLevel,
-            chargingState: "Charging",
-            minutesToFullCharge: 45
-        )
+        viewModel.vehicleChargeStates[vehicle.vin] = DemoHouseTour.exampleCharge
         viewModel.showVehicles = true
     }
 
@@ -1524,7 +1620,6 @@ struct ContentView: View {
             sitePower: 1024,
             gridStatus: "SystemIslandedActive",
             wallConnectorPower: 512,
-            vehicleBatteryLevel: 80,
             siteName: "Home sweet home"
         )
     }
@@ -1538,7 +1633,6 @@ struct ContentView: View {
         sitePower: Double,
         gridStatus: String,
         wallConnectorPower: Double,
-        vehicleBatteryLevel: Double,
         siteName: String? = nil
     ) {
         let parked = DemoHouseTour.parkedCar(at: viewModel.demoColourIndex)
@@ -1563,7 +1657,7 @@ struct ContentView: View {
             if let siteName {
                 viewModel.siteName = siteName
             }
-            configureDemoVehicleData(batteryLevel: vehicleBatteryLevel, vehicle: vehicle)
+            configureDemoVehicleData(vehicle: vehicle)
             var appearances = viewModel.vehicleAppearances
             appearances[vehicle.vin] = parked.appearance
             viewModel.vehicleAppearances = appearances
@@ -1575,7 +1669,6 @@ struct ContentView: View {
     private func showDemoParkedCar() {
         let parked = DemoHouseTour.parkedCar(at: viewModel.demoColourIndex)
         let connectorPower = viewModel.data?.wallConnectors.first?.wallConnectorPower ?? 512
-        let batteryLevel = viewModel.vehicleChargeStates[parked.vehicle.vin]?.batteryLevel ?? 64
         guard let data = viewModel.data else { return }
         viewModel.data = PowerwallData(
             battery: data.battery,
@@ -1589,7 +1682,7 @@ struct ContentView: View {
         var appearances = viewModel.vehicleAppearances
         appearances[parked.vehicle.vin] = parked.appearance
         viewModel.vehicleAppearances = appearances
-        configureDemoVehicleData(batteryLevel: batteryLevel, vehicle: parked.vehicle)
+        configureDemoVehicleData(vehicle: parked.vehicle)
     }
 
     private func queueDemoElectricityGridData() {
@@ -2455,6 +2548,21 @@ private extension View {
                     )
             }
         )
+    }
+}
+
+extension View {
+    /// The glass circle used by the home settings buttons.
+    func homeSettingsButtonChrome() -> some View {
+        overlayControlButtonStyle()
+    }
+
+    func homeSettingsButtonCluster() -> some View {
+        overlayGlassButtonCluster()
+    }
+
+    func homeSettingsDarkChrome() -> some View {
+        overlayDarkChrome()
     }
 }
 

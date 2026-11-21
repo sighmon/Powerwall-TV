@@ -488,6 +488,25 @@ enum VehicleModel: String, CaseIterable, Identifiable {
 
 // MARK: - Applying to the loaded scene
 
+/// UsdPreviewSurface stores glass opacity on `transparent.contents` (0.85) and a
+/// near-black albedo. On the dark plate the Cybertruck roof then reads as a hole.
+enum VehicleGlass {
+    static let transparency: CGFloat = 0.62
+
+    static func reveal(_ material: SCNMaterial) {
+        guard material.name == "Glass" else { return }
+        material.lightingModel = .physicallyBased
+        material.isDoubleSided = true
+        material.diffuse.contents = HouseColor(red: 0.16, green: 0.20, blue: 0.24, alpha: 1)
+        material.metalness.contents = 0.9
+        material.roughness.contents = 0.08
+        material.transparent.contents = HouseColor.white
+        material.transparency = transparency
+        material.transparencyMode = .dualLayer
+        material.blendMode = .alpha
+    }
+}
+
 final class HouseLighting {
     let root: SCNNode
     private var buildingMaterials: [SCNMaterial] = []
@@ -828,10 +847,7 @@ final class HouseLighting {
             guard let geometry = node.geometry else { return }
             for material in geometry.materials {
                 material.isDoubleSided = true
-                if material.name == "Glass" {
-                    material.transparent.contents = HouseColor.white
-                    material.transparency = 1
-                }
+                VehicleGlass.reveal(material)
                 if material.name == "vehicle" {
                     material.lightingModel = .physicallyBased
                     material.diffuse.contents = HouseColor(white: 0.78, alpha: 1)

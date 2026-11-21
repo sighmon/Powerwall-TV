@@ -37,6 +37,12 @@ struct DemoVehicle: Equatable {
 enum DemoHouseTour {
     static let powerTicksPerScene = 2
     static let colourInterval: TimeInterval = 2
+    /// Sample `vehicle_data` charge state. Demo has no Fleet account, so every parked car uses this.
+    static let exampleCharge = VehicleChargeSnapshot(
+        batteryLevel: 80,
+        chargingState: "Charging",
+        minutesToFullCharge: 45
+    )
 
     static let weather: [DemoWeatherScene] = [
         DemoWeatherScene(title: "Clear", sunAltitude: 52, sunAzimuth: 180, isDaylight: true, cloudCover: 0.05, condition: .clear, precipitationMillimetresPerHour: 0),
@@ -94,6 +100,21 @@ enum DemoHouseTour {
                 carType: nil
             )
         )
+    }
+
+    /// Keeps a title that is already on the request, and adds the sample charge lines when they are missing.
+    static func applyingExampleFleetData(to request: CarShowroomRequest) -> CarShowroomRequest {
+        var copy = request
+        let sample = CarShowroom.statLines(displayName: "Vehicle", exteriorColor: nil, snapshot: exampleCharge)
+        for line in sample.dropFirst() {
+            let alreadyShown = copy.lines.contains { existing in
+                if line.contains("% battery") { return existing.contains("% battery") }
+                if line.contains("minutes to full") { return existing.contains("minutes to full") }
+                return existing == line
+            }
+            if !alreadyShown { copy.lines.append(line) }
+        }
+        return copy
     }
 
     /// Demo chip text. Generic has no paint name, so it stays the display name alone.
