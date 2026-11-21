@@ -207,17 +207,6 @@ struct ContentView: View {
                         .scaleEffect(showBackground ? 1 : 1.04)
                 }
 
-                #if os(tvOS)
-                if showsHouseScene, (viewModel.garagePresentation.showVehicle || !userOwnsCars), let houseCallouts {
-                    Button(action: openCarShowroom) {
-                        Color.clear.frame(width: 160, height: 100)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Garage")
-                    .position(houseCallouts.vehicle)
-                }
-                #endif
-
                 if showsHouseScene, viewModel.isOffGrid(), let houseCallouts {
                     offGridImage(sceneSize: sceneSize)
                         .position(houseCallouts.gridRibbon)
@@ -278,6 +267,11 @@ struct ContentView: View {
                 }
                 .scaleEffect(showroomTransition.homeScale)
                 .opacity(showroomTransition.homeOpacity)
+                #if os(tvOS)
+                // The showroom is an overlay on top of this stack. Disable the house so its
+                // buttons and the scene do not keep the remote while the car is open.
+                .disabled(carShowroom != nil)
+                #endif
             }
             .coordinateSpace(name: "contentView")
             .onPreferenceChange(OverlayFramePreferenceKey.self) { frames in
@@ -1354,6 +1348,23 @@ struct ContentView: View {
                 }
                 .overlayControlButtonStyle()
                 .accessibilityLabel("Settings")
+
+                #if os(tvOS)
+                if showsHouseScene, viewModel.garagePresentation.showVehicle || !userOwnsCars {
+                    Button(action: {
+                        revealAutoHiddenOverlays()
+                        openCarShowroom()
+                    }) {
+                        ZStack {
+                            Image(systemName: "car.fill")
+                                .font(.title3)
+                                .frame(width: 80, height: 80)
+                        }
+                    }
+                    .overlayControlButtonStyle()
+                    .accessibilityLabel("Car")
+                }
+                #endif
 
                 if viewModel.isDemoMode || viewModel.loginMode == .fleetAPI {
                     if viewModel.loginMode == .fleetAPI && !viewModel.isDemoMode && viewModel.showSchedulerButton {

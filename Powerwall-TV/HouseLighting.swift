@@ -507,6 +507,134 @@ enum VehicleGlass {
     }
 }
 
+/// The exported lamp mesh is one untextured red material. Vertices sit in a front
+/// cluster and a rear cluster (the nose is −Z), with a few side markers between them.
+/// There is no separate headlamp, indicator, or brake geometry, so each cluster
+/// becomes one lens: warm white at the front, amber at the side, red at the rear.
+enum VehicleLights {
+    static let frontName = "LightsFront"
+    static let rearName = "LightsRear"
+    static let sideName = "LightsSide"
+    /// Object-space Z that separates the front lamps from the rear lamps.
+    static let split: Float = 1.15
+
+    /// Replaces a single Lights geometry with one element per cluster.
+    static func illuminate(_ node: SCNNode) {
+        guard let geometry = node.geometry,
+              geometry.materials.count == 1,
+              geometry.materials[0].name == "Lights",
+              let splitGeometry = split(geometry) else { return }
+        node.geometry = splitGeometry
+    }
+
+    private static func split(_ geometry: SCNGeometry) -> SCNGeometry? {
+        guard let vertex = geometry.sources(for: .vertex).first,
+              let element = geometry.elements.first,
+              element.primitiveType == .triangles else { return nil }
+        let depth = vertexDepths(vertex)
+        guard !depth.isEmpty, let triangles = triangleIndices(element), !triangles.isEmpty else { return nil }
+        var front: [Int32] = []
+        var rear: [Int32] = []
+        var side: [Int32] = []
+        var index = 0
+        while index + 2 < triangles.count {
+            let a = triangles[index]
+            let b = triangles[index + 1]
+            let c = triangles[index + 2]
+            index += 3
+            guard a >= 0, b >= 0, c >= 0,
+                  Int(a) < depth.count, Int(b) < depth.count, Int(c) < depth.count else { continue }
+            let mean = (depth[Int(a)] + depth[Int(b)] + depth[Int(c)]) / 3
+            if mean < -split {
+                front.append(contentsOf: [a, b, c])
+            } else if mean > split {
+                rear.append(contentsOf: [a, b, c])
+            } else {
+                side.append(contentsOf: [a, b, c])
+            }
+        }
+        var elements: [SCNGeometryElement] = []
+        var materials: [SCNMaterial] = []
+        func add(_ indices: [Int32], name: String, diffuse: SIMD3<Float>, glow: SIMD3<Float>) {
+            guard !indices.isEmpty else { return }
+            let data = indices.withUnsafeBytes { Data($0) }
+            elements.append(SCNGeometryElement(
+                data: data,
+                primitiveType: .triangles,
+                primitiveCount: indices.count / 3,
+                bytesPerIndex: MemoryLayout<Int32>.size
+            ))
+            materials.append(lens(name: name, diffuse: diffuse, glow: glow))
+        }
+        add(front, name: frontName, diffuse: SIMD3(0.72, 0.76, 0.80), glow: SIMD3(0.42, 0.40, 0.34))
+        add(rear, name: rearName, diffuse: SIMD3(0.34, 0.02, 0.015), glow: SIMD3(0.62, 0.04, 0.015))
+        add(side, name: sideName, diffuse: SIMD3(0.62, 0.28, 0.04), glow: SIMD3(0.7, 0.28, 0.03))
+        guard !elements.isEmpty else { return nil }
+        let rebuilt = SCNGeometry(sources: geometry.sources, elements: elements)
+        rebuilt.materials = materials
+        rebuilt.subdivisionLevel = 0
+        return rebuilt
+    }
+
+    private static func lens(name: String, diffuse: SIMD3<Float>, glow: SIMD3<Float>) -> SCNMaterial {
+        let material = SCNMaterial()
+        material.name = name
+        material.lightingModel = .physicallyBased
+        material.diffuse.contents = color(diffuse)
+        material.emission.contents = color(glow)
+        material.metalness.contents = 0.02
+        material.roughness.contents = 0.2
+        return material
+    }
+
+    private static func color(_ value: SIMD3<Float>) -> HouseColor {
+        HouseColor(red: CGFloat(value.x), green: CGFloat(value.y), blue: CGFloat(value.z), alpha: 1)
+    }
+
+    private static func vertexDepths(_ source: SCNGeometrySource) -> [Float] {
+        let count = source.vectorCount
+        guard count > 0 else { return [] }
+        var depths = [Float](repeating: 0, count: count)
+        source.data.withUnsafeBytes { raw in
+            for index in 0..<count {
+                let base = index * source.dataStride + source.dataOffset
+                guard base + 12 <= raw.count else { return }
+                depths[index] = raw.load(fromByteOffset: base + 8, as: Float.self)
+            }
+        }
+        return depths
+    }
+
+    private static func triangleIndices(_ element: SCNGeometryElement) -> [Int32]? {
+        let count = element.primitiveCount * 3
+        guard count > 0 else { return nil }
+        var indices = [Int32](repeating: 0, count: count)
+        let bytes = element.bytesPerIndex
+        var valid = true
+        element.data.withUnsafeBytes { raw in
+            for index in 0..<count {
+                let base = index * bytes
+                guard base + bytes <= raw.count else {
+                    valid = false
+                    return
+                }
+                switch bytes {
+                case 1:
+                    indices[index] = Int32(raw.load(fromByteOffset: base, as: UInt8.self))
+                case 2:
+                    indices[index] = Int32(raw.load(fromByteOffset: base, as: UInt16.self))
+                case 4:
+                    indices[index] = Int32(raw.load(fromByteOffset: base, as: UInt32.self))
+                default:
+                    valid = false
+                    return
+                }
+            }
+        }
+        return valid ? indices : nil
+    }
+}
+
 final class HouseLighting {
     let root: SCNNode
     private var buildingMaterials: [SCNMaterial] = []
@@ -855,6 +983,7 @@ final class HouseLighting {
                     material.roughness.contents = 0.25
                 }
             }
+            VehicleLights.illuminate(node)
             let name = geometry.materials.first?.name ?? ""
             guard name == "Paint" || name == "Glass" || name == "vehicle",
                   node.childNode(withName: "CabinCaps", recursively: false) == nil,

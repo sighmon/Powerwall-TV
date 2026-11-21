@@ -202,7 +202,8 @@ enum CarShowroom {
         camera.zNear = 0.05
         camera.zFar = 80
         cameraNode.camera = camera
-        cameraNode.simdPosition = SIMD3(centre.x + 3.1, 1.25, centre.z - 5.4)
+        let eye = SIMD3(centre.x, CarShowroomOrbit.lookHeight, centre.z) + CarShowroomOrbit.restingOffset
+        cameraNode.simdPosition = eye
         scene.rootNode.addChildNode(cameraNode)
         cameraNode.look(at: SCNVector3(centre.x, 0.72, centre.z))
 
@@ -273,6 +274,7 @@ enum CarShowroom {
         }
         wrapper.enumerateHierarchy { node, _ in
             node.geometry?.materials.forEach { VehicleGlass.reveal($0) }
+            VehicleLights.illuminate(node)
         }
         return wrapper
     }
@@ -352,12 +354,16 @@ struct CarShowroomOrbit: Equatable {
     /// Sideways look-point shift at the current zoom. A three-quarter view makes the near
     /// end project larger, so this pulls the car back to the horizontal centre of the window.
     var centreBias = SIMD3<Float>.zero
+    /// Extra look-point shift from a pan. Same ±3 m limit as the house camera.
+    var pan = SIMD3<Float>.zero
+    static let panRange: ClosedRange<Float> = -3...3
 
     static let pitchRange: ClosedRange<Float> = -20...50
     /// Wide enough that a portrait window can still back up to fit a Cybertruck.
     static let distanceRange: ClosedRange<Float> = 0.2...6
-    /// Eye minus the look target at the resting view. The car's nose is −Z.
-    static let restingOffset = SIMD3<Float>(3.1, 0.53, -5.4)
+    /// Eye minus the look target at the resting view. The car's nose is −Z, and this
+    /// offset sits on the car's left so that nose points toward the left of the screen.
+    static let restingOffset = SIMD3<Float>(-3.1, 0.53, -5.4)
     static let lookHeight: Float = 0.72
     /// Share of the window the fitted car may use. The rest stays clear of the edges.
     static let fitFill: Float = 0.9
@@ -371,7 +377,32 @@ struct CarShowroomOrbit: Equatable {
     }
 
     func target(around centre: SIMD3<Float>) -> SIMD3<Float> {
-        SIMD3(centre.x, Self.lookHeight, centre.z) + centreBias
+        SIMD3(centre.x, Self.lookHeight, centre.z) + centreBias + pan
+    }
+
+    /// Adds a world-space pan and keeps each axis inside `panRange`.
+    mutating func pan(by world: SIMD3<Float>) {
+        pan += world
+        pan.x = min(max(pan.x, Self.panRange.lowerBound), Self.panRange.upperBound)
+        pan.y = min(max(pan.y, Self.panRange.lowerBound), Self.panRange.upperBound)
+        pan.z = min(max(pan.z, Self.panRange.lowerBound), Self.panRange.upperBound)
+    }
+
+    /// Moves the look point so the car follows the pointer.
+    /// `screenX` is positive to the right. `screenY` is positive up.
+    mutating func pan(screenX: Float, screenY: Float, viewHeight: Float, around centre: SIMD3<Float>) {
+        let eyePoint = eye(around: centre)
+        let look = target(around: centre)
+        let forward = look - eyePoint
+        let distance = simd_length(forward)
+        guard distance > 0.001, viewHeight > 1 else { return }
+        let direction = forward / distance
+        var right = simd_cross(direction, SIMD3<Float>(0, 1, 0))
+        guard simd_length(right) > 0.001 else { return }
+        right = simd_normalize(right)
+        let up = simd_normalize(simd_cross(right, direction))
+        let metresPerPoint = distance * tan(Self.verticalFieldOfViewDegrees * .pi / 180 / 2) * 2 / viewHeight
+        pan(by: -right * screenX * metresPerPoint - up * screenY * metresPerPoint)
     }
 
     /// Sideways look shift that centres the points at this zoom.
@@ -496,6 +527,47 @@ struct CarShowroomView: View {
     @State private var browseIndex = 0
     /// Nil keeps the file or Fleet colour. Up and down walk `TeslaPaint.catalogue`.
     @State private var colourIndex: Int?
+    #if os(tvOS)
+    private enum ShowroomFocus: Hashable {
+        case previous
+        case next
+        case close
+        case buy
+    }
+    @FocusState private var showroomFocus: ShowroomFocus?
+
+    /// Left and right move between the catalogue arrows. Up walks to Buy a Tesla, then Close.
+    /// Down from those returns to the next-car arrow. Elsewhere, up and down change colour.
+    private struct ShowroomRemote: ViewModifier {
+        let item: ShowroomFocus
+        let browses: Bool
+        var focus: FocusState<ShowroomFocus?>.Binding
+        let shift: (Int) -> Void
+
+        func body(content: Content) -> some View {
+            content.onMoveCommand { direction in
+                switch direction {
+                case .left where browses:
+                    focus.wrappedValue = .previous
+                case .right where browses:
+                    focus.wrappedValue = .next
+                case .up where browses && (item == .previous || item == .next):
+                    focus.wrappedValue = .buy
+                case .up where browses && item == .buy:
+                    focus.wrappedValue = .close
+                case .down where browses && (item == .buy || item == .close):
+                    focus.wrappedValue = .next
+                case .up:
+                    shift(1)
+                case .down:
+                    shift(-1)
+                default:
+                    break
+                }
+            }
+        }
+    }
+    #endif
 
     private var displayed: CarShowroomRequest {
         var shown = request.browsesCatalogue ? CarShowroom.catalogueRequest(index: browseIndex) : request
@@ -562,20 +634,15 @@ struct CarShowroomView: View {
             }
         }
         #if os(tvOS)
-        .focusable(true)
-        .onMoveCommand { direction in
-            switch direction {
-            case .up: shiftColour(1)
-            case .down: shiftColour(-1)
-            default: break
-            }
-        }
+        .focusSection()
+        .defaultFocus($showroomFocus, request.browsesCatalogue ? .next : .close, priority: .userInitiated)
         #endif
         #if !os(iOS)
         .onExitCommand(perform: onDismiss)
         #endif
     }
 
+    #if !os(tvOS)
     private func colourKey(delta: Int, key: KeyEquivalent, label: String) -> some View {
         Button(action: { shiftColour(delta) }) { Color.clear.frame(width: 1, height: 1) }
             .buttonStyle(.plain)
@@ -584,6 +651,7 @@ struct CarShowroomView: View {
             .opacity(0)
             .allowsHitTesting(false)
     }
+    #endif
 
     private func carDetails(valueFont: Font, labelFont: Font, width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -606,6 +674,10 @@ struct CarShowroomView: View {
                     .opacity(0.6)
                     .padding(.top, 8)
                     .accessibilityLabel("Buy a Tesla")
+                    #if os(tvOS)
+                    .focused($showroomFocus, equals: .buy)
+                    .modifier(ShowroomRemote(item: .buy, browses: true, focus: $showroomFocus, shift: { shiftColour($0) }))
+                    #endif
             }
         }
         .foregroundColor(.white)
@@ -639,7 +711,10 @@ struct CarShowroomView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close")
-        #if !os(tvOS)
+        #if os(tvOS)
+        .focused($showroomFocus, equals: .close)
+        .modifier(ShowroomRemote(item: .close, browses: request.browsesCatalogue, focus: $showroomFocus, shift: { shiftColour($0) }))
+        #else
         .keyboardShortcut(.cancelAction)
         #endif
     }
@@ -682,7 +757,10 @@ struct CarShowroomView: View {
         }
         .homeSettingsButtonChrome()
         .accessibilityLabel(title)
-        #if !os(tvOS)
+        #if os(tvOS)
+        .focused($showroomFocus, equals: delta > 0 ? .next : .previous)
+        .modifier(ShowroomRemote(item: delta > 0 ? .next : .previous, browses: true, focus: $showroomFocus, shift: { shiftColour($0) }))
+        #else
         .keyboardShortcut(key, modifiers: [])
         #endif
     }
@@ -751,7 +829,8 @@ private struct CarShowroomMetalView: View {
     }
 }
 
-/// Drag orbits the car. Scroll, pinch, and magnify zoom. A vertical swipe steps the colour.
+/// Drag orbits the car. Option-drag, right-drag, and a two-finger drag pan.
+/// Scroll, pinch, and magnify zoom. A vertical swipe steps the colour.
 /// The orbit survives a model change.
 final class CarShowroomControlView: SCNView {
     var orbit = CarShowroomOrbit()
@@ -861,6 +940,16 @@ final class CarShowroomControlView: SCNView {
         aim()
     }
 
+    private func pan(screenX: Float, screenY: Float) {
+        orbit.pan(
+            screenX: screenX,
+            screenY: screenY,
+            viewHeight: Float(bounds.height),
+            around: CarShowroom.stageCentre
+        )
+        aim()
+    }
+
     private func zoom(multiplier: Float) {
         guard multiplier.isFinite, multiplier > 0 else { return }
         userZoomed = true
@@ -870,11 +959,16 @@ final class CarShowroomControlView: SCNView {
     }
 
     private func installGestures() {
-        #if os(iOS) || os(tvOS)
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(orbitPan(_:)))
-        pan.maximumNumberOfTouches = 1
+        #if os(iOS)
+        let orbit = UIPanGestureRecognizer(target: self, action: #selector(orbitPan(_:)))
+        orbit.maximumNumberOfTouches = 1
+        addGestureRecognizer(orbit)
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(twoFingerPan(_:)))
+        pan.minimumNumberOfTouches = 2
         addGestureRecognizer(pan)
         addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinchZoom(_:))))
+        #elseif os(tvOS)
+        addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(orbitPan(_:))))
         #endif
     }
 
@@ -926,6 +1020,7 @@ final class CarShowroomControlView: SCNView {
         if gesture.state == .ended { finishSwipe() }
     }
 
+    #if os(iOS)
     @objc private func pinchZoom(_ gesture: UIPinchGestureRecognizer) {
         guard gesture.state == .changed || gesture.state == .ended else { return }
         let factor = gesture.scale
@@ -933,10 +1028,19 @@ final class CarShowroomControlView: SCNView {
         guard factor > 0 else { return }
         zoom(multiplier: Float(1 / factor))
     }
+
+    @objc private func twoFingerPan(_ gesture: UIPanGestureRecognizer) {
+        let delta = gesture.translation(in: self)
+        gesture.setTranslation(.zero, in: self)
+        // UIKit Y grows downward. The pan wants pointer-up to be positive.
+        pan(screenX: Float(delta.x), screenY: Float(-delta.y))
+    }
+    #endif
     #endif
 
     #if os(tvOS)
-    override var canBecomeFocused: Bool { true }
+    /// The next-car arrow is the remote's focus. A focusable scene would take it.
+    override var canBecomeFocused: Bool { false }
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         if presses.contains(where: { $0.type == .upArrow }) {
@@ -959,8 +1063,23 @@ final class CarShowroomControlView: SCNView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if event.modifierFlags.contains(.option) {
+            pan(with: event)
+            return
+        }
         trackSwipe(deltaX: event.deltaX, deltaY: event.deltaY)
         orbit(by: event.deltaX, deltaY: event.deltaY)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {}
+
+    override func rightMouseDragged(with event: NSEvent) {
+        pan(with: event)
+    }
+
+    /// `pan` treats a positive screen Y as pointer-up. AppKit's drag deltaY grows downward.
+    private func pan(with event: NSEvent) {
+        pan(screenX: Float(event.deltaX), screenY: Float(-event.deltaY))
     }
 
     override func mouseUp(with event: NSEvent) {

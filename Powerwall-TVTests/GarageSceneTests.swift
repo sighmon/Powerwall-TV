@@ -1892,6 +1892,12 @@ struct GarageSceneTests {
         var raised = resting
         raised.pitchDegrees = 20
         #expect(raised.eye(around: centre).y > eye.y)
+
+        let forward = simd_normalize(target - eye)
+        let right = simd_normalize(simd_cross(forward, SIMD3<Float>(0, 1, 0)))
+        let nose = SIMD3<Float>(0, 0, -1)
+        #expect(simd_dot(nose, right) < -0.2)
+        #expect(simd_dot(eye - target, nose) > 1)
     }
 
     @Test func showroomStartZoomFitsTheCarToTheWindow() {
@@ -1943,7 +1949,7 @@ struct GarageSceneTests {
             SIMD3<Float>(1.2, 0.8, 2.2),
         ].map { target + $0 }
         let leaning = showroomHorizontalCentre(of: box, around: centre, scale: 1, bias: .zero, aspect: 16 / 9)
-        #expect(leaning > 0.05)
+        #expect(abs(leaning) > 0.05)
         let bias = CarShowroomOrbit.centreBias(
             fitting: box, around: centre, yawDegrees: 0, pitchDegrees: 0, distanceScale: 1
         )
@@ -2049,6 +2055,57 @@ struct GarageSceneTests {
         return used
     }
 
+    @Test func showroomPanFollowsThePointerAndStaysNearTheCar() {
+        let centre = CarShowroom.stageCentre
+        var pose = CarShowroomOrbit()
+        let before = pose.target(around: centre)
+        let eye = pose.eye(around: centre)
+        let forward = simd_normalize(before - eye)
+        let right = simd_normalize(simd_cross(forward, SIMD3<Float>(0, 1, 0)))
+        let up = simd_normalize(simd_cross(right, forward))
+        pose.pan(screenX: 180, screenY: 0, viewHeight: 900, around: centre)
+        let moved = pose.target(around: centre) - before
+        #expect(simd_dot(moved, right) < -0.15)
+        #expect(abs(simd_dot(moved, up)) < 0.02)
+        #expect(abs(simd_dot(moved, forward)) < 0.05)
+        let offset = pose.eye(around: centre) - pose.target(around: centre)
+        #expect(simd_length(offset - (eye - before)) < 0.001)
+
+        var limited = CarShowroomOrbit()
+        limited.pan(by: SIMD3(2, 0, 0))
+        limited.pan(by: SIMD3(2, -8, 4))
+        #expect(abs(limited.pan.x - 3) < 0.001)
+        #expect(abs(limited.pan.y + 3) < 0.001)
+        #expect(abs(limited.pan.z - 3) < 0.001)
+    }
+
+    @Test func showroomLampsSplitIntoHeadTailAndIndicator() {
+        guard let index = CarShowroom.catalogueModels.firstIndex(of: .model3) else {
+            Issue.record("Model 3 is missing from the catalogue")
+            return
+        }
+        let scene = CarShowroom.scene(for: CarShowroom.catalogueRequest(index: index))
+        let front = material(named: VehicleLights.frontName, in: scene)
+        let rear = material(named: VehicleLights.rearName, in: scene)
+        let frontGlow = rgb(front?.emission.contents)
+        let rearGlow = rgb(rear?.emission.contents)
+        #expect(frontGlow.red > 0.3)
+        #expect(frontGlow.blue > 0.25)
+        #expect(abs(frontGlow.red - frontGlow.blue) < 0.15)
+        #expect(rearGlow.red > rearGlow.green * 4)
+        #expect(rearGlow.red > 0.4)
+        let generic = CarShowroom.scene(for: CarShowroomRequest(
+            vin: nil,
+            model: .generic,
+            exteriorColor: nil,
+            paintColorOverride: nil,
+            colorizerRemap: false,
+            displayBoost: 1,
+            lines: []
+        ))
+        #expect(material(named: "Lights", in: generic) == nil)
+    }
+
     @Test func showroomColourStepsWrapTheCatalogue() {
         let last = TeslaPaint.catalogue.count - 1
         #expect(CarShowroom.colourIndex(after: nil, delta: 1) == 0)
@@ -2098,6 +2155,25 @@ struct GarageSceneTests {
             stop.pointee = true
         }
         return found
+    }
+
+    private func rgb(_ value: Any?) -> (red: Double, green: Double, blue: Double) {
+        #if canImport(AppKit)
+        if let color = (value as? NSColor)?.usingColorSpace(.deviceRGB) {
+            return (Double(color.redComponent), Double(color.greenComponent), Double(color.blueComponent))
+        }
+        #elseif canImport(UIKit)
+        if let color = value as? UIColor {
+            var red: CGFloat = 0
+            var green: CGFloat = 0
+            var blue: CGFloat = 0
+            var alpha: CGFloat = 0
+            if color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+                return (Double(red), Double(green), Double(blue))
+            }
+        }
+        #endif
+        return (0, 0, 0)
     }
 
     private func number(_ value: Any?) -> Double? {
