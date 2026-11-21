@@ -158,6 +158,7 @@ struct ContentView: View {
 #endif
     private static let timerUpdateInterval: TimeInterval = 10
     private let timer = Timer.publish(every: Self.timerUpdateInterval, on: .main, in: .common).autoconnect()
+    private let demoColourTimer = Timer.publish(every: DemoHouseTour.colourInterval, on: .main, in: .common).autoconnect()
     private let timerTodaysTotal = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     private let timerElectricityMaps = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
@@ -423,6 +424,7 @@ struct ContentView: View {
             exportAdvisor.invalidate()
             if isDemo {
                 viewModel.demoSceneIndex = 0
+                viewModel.demoColourIndex = 0
                 demoTourTick = 0
                 queueInitialDemoData()
             }
@@ -472,6 +474,11 @@ struct ContentView: View {
                     viewModel.fetchData()
                 }
             }
+        }
+        .onReceive(demoColourTimer) { _ in
+            guard viewModel.isDemoMode, !showingSettings else { return }
+            viewModel.demoColourIndex += 1
+            showDemoParkedCar()
         }
         .onReceive(timerTodaysTotal) { _ in
             if !viewModel.accessToken.isEmpty {
@@ -678,17 +685,11 @@ struct ContentView: View {
                 hideInlineSiteSummary: hideInlineSiteSummary
             )
                 .foregroundColor(.white)
-        } else {
-            Group {
-                if viewModel.loginMode == .fleetAPI && !hasFleetAccessTokenConfigured {
-                    Button("Login with your Tesla account") {
-                        _ = viewModel.startFleetLoginManually()
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Text("Loading...")
-                }
+        } else if viewModel.loginMode == .fleetAPI && !hasFleetAccessTokenConfigured {
+            Button("Login with your Tesla account") {
+                _ = viewModel.startFleetLoginManually()
             }
+            .buttonStyle(.plain)
             .opacity(0.6)
             .fontWeight(.bold)
             .font(labelFont(for: sceneSize))
@@ -1166,10 +1167,11 @@ struct ContentView: View {
                 .fontWeight(.bold)
                 .font(valueFont)
                 .numericUpdateAnimation(for: wallConnectorDisplay(data: data, precision: precision))
-            Text("VEHICLE\(data.wallConnectors.count > 1 ? "S (\(data.wallConnectors.count))" : "")")
+            Text(vehicleMetricCaption(connectorCount: data.wallConnectors.count))
                 .opacity(0.6)
                 .fontWeight(.bold)
                 .font(labelFont)
+                .id(viewModel.isDemoMode ? viewModel.demoColourIndex : 0)
         }
         .multilineTextAlignment(.center)
     }
@@ -1226,6 +1228,7 @@ struct ContentView: View {
 
     private func controlsOverlay(sceneSize: CGSize) -> some View {
         HStack(alignment: .bottom) {
+            HStack(alignment: .center, spacing: 16) {
             HStack(spacing: controlsButtonSpacing) {
                 Button(action: {
                     revealAutoHiddenOverlays()
@@ -1342,9 +1345,18 @@ struct ContentView: View {
             .reportFrame(.controlsOverlay)
             .overlayDarkChrome()
 
+            if showsLoadingLabel {
+                LoadingEllipsis()
+                    .fontWeight(.bold)
+                    .font(labelFont(for: sceneSize))
+                    .foregroundColor(.white)
+                    .opacity(0.6)
+            }
+            }
+
             Spacer()
 
-            if viewModel.loginMode == .fleetAPI && viewModel.showVehicles && !viewModel.vehicles.isEmpty {
+            if showsVehicleChips {
                 HStack {
                     ForEach(viewModel.vehicles, id: \.vin) { vehicle in
                         vehicleStatusView(vehicle: vehicle, labelFont: labelFont(for: sceneSize))
@@ -1428,20 +1440,19 @@ struct ContentView: View {
                 .padding()
 #endif
 
-            Text(vehicleFirstName(vehicle))
+            Text(vehicleChipTitle(vehicle))
                 .fontWeight(.bold)
                 .font(labelFont)
                 .foregroundColor(.white)
                 .opacity(0.6)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+                .id(viewModel.isDemoMode ? viewModel.demoColourIndex : 0)
         }
-#if os(tvOS)
-        .frame(width: 80)
-#elseif os(macOS)
-        .frame(width: 80)
+#if os(tvOS) || os(macOS)
+        .frame(minWidth: 80, maxWidth: viewModel.isDemoMode ? 280 : 80)
 #else
-        .frame(width: 40)
+        .frame(minWidth: 40, maxWidth: viewModel.isDemoMode ? 220 : 40)
 #endif
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(vehicleAccessibilityLabel(vehicle: vehicle))
@@ -1454,8 +1465,32 @@ struct ContentView: View {
         return "\(Int(batteryLevel.rounded()))%"
     }
 
+    /// Corner chips. Demo always shows the parked car, even when the Fleet vehicle list is off.
+    private var showsVehicleChips: Bool {
+        guard !viewModel.vehicles.isEmpty else { return false }
+        if viewModel.isDemoMode { return true }
+        return viewModel.loginMode == .fleetAPI && viewModel.showVehicles
+    }
+
+    /// The caption under the charger readout. Demo appends the paint name.
+    private func vehicleMetricCaption(connectorCount: Int) -> String {
+        let base = connectorCount > 1 ? "VEHICLES (\(connectorCount))" : "VEHICLE"
+        guard viewModel.isDemoMode else { return base }
+        let parked = DemoHouseTour.parkedCar(at: viewModel.demoColourIndex)
+        return DemoHouseTour.vehicleLabel(displayName: base, exteriorColor: parked.appearance.exteriorColor)
+    }
+
+    private func vehicleChipTitle(_ vehicle: FleetVehicle) -> String {
+        guard viewModel.isDemoMode else { return vehicleFirstName(vehicle) }
+        let parked = DemoHouseTour.parkedCar(at: viewModel.demoColourIndex)
+        return DemoHouseTour.vehicleLabel(
+            displayName: parked.vehicle.displayName,
+            exteriorColor: parked.appearance.exteriorColor
+        )
+    }
+
     private func vehicleAccessibilityLabel(vehicle: FleetVehicle) -> String {
-        let name = vehicle.displayName ?? "Vehicle"
+        let name = vehicleChipTitle(vehicle)
         guard let batteryDisplay = vehicleBatteryDisplay(vehicle: vehicle) else {
             return name
         }
@@ -1506,7 +1541,8 @@ struct ContentView: View {
         vehicleBatteryLevel: Double,
         siteName: String? = nil
     ) {
-        let vehicle = DemoHouseTour.vehicle(at: viewModel.demoSceneIndex)
+        let parked = DemoHouseTour.parkedCar(at: viewModel.demoColourIndex)
+        let vehicle = parked.vehicle
         DispatchQueue.main.async {
             guard viewModel.isDemoMode else { return }
             viewModel.data = PowerwallData(
@@ -1528,8 +1564,32 @@ struct ContentView: View {
                 viewModel.siteName = siteName
             }
             configureDemoVehicleData(batteryLevel: vehicleBatteryLevel, vehicle: vehicle)
+            var appearances = viewModel.vehicleAppearances
+            appearances[vehicle.vin] = parked.appearance
+            viewModel.vehicleAppearances = appearances
             configureDemoElectricityGridData()
         }
+    }
+
+    /// Swaps the parked demo car without drawing a new power sample.
+    private func showDemoParkedCar() {
+        let parked = DemoHouseTour.parkedCar(at: viewModel.demoColourIndex)
+        let connectorPower = viewModel.data?.wallConnectors.first?.wallConnectorPower ?? 512
+        let batteryLevel = viewModel.vehicleChargeStates[parked.vehicle.vin]?.batteryLevel ?? 64
+        guard let data = viewModel.data else { return }
+        viewModel.data = PowerwallData(
+            battery: data.battery,
+            load: data.load,
+            solar: data.solar,
+            site: data.site,
+            wallConnectors: [
+                WallConnector(vin: parked.vehicle.vin, din: "def456", wallConnectorState: 1, wallConnectorPower: connectorPower)
+            ]
+        )
+        var appearances = viewModel.vehicleAppearances
+        appearances[parked.vehicle.vin] = parked.appearance
+        viewModel.vehicleAppearances = appearances
+        configureDemoVehicleData(batteryLevel: batteryLevel, vehicle: parked.vehicle)
     }
 
     private func queueDemoElectricityGridData() {
@@ -1573,6 +1633,14 @@ struct ContentView: View {
         showBackground = false
         showMetrics = false
         startAnimations = false
+    }
+
+    /// Shown beside the settings buttons, on their vertical centre, until the first sample arrives.
+    private var showsLoadingLabel: Bool {
+        if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local { return false }
+        if viewModel.data != nil { return false }
+        if viewModel.loginMode == .fleetAPI && !hasFleetAccessTokenConfigured { return false }
+        return true
     }
 
     private func vehicleFirstName(_ vehicle: FleetVehicle) -> String {
@@ -2262,6 +2330,24 @@ private struct WindowChromeVisibilityConfigurator: NSViewRepresentable {
     }
 }
 #endif
+
+/// Steps the ellipsis so the word stays put and the dots fill in one at a time.
+private struct LoadingEllipsis: View {
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.45)) { context in
+            let phase = Int(context.date.timeIntervalSinceReferenceDate / 0.45) % 3
+            HStack(spacing: 0) {
+                Text("Loading")
+                ForEach(0..<3, id: \.self) { index in
+                    Text(".")
+                        .opacity(index <= phase ? 1 : 0.22)
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading")
+    }
+}
 
 private struct OverlayMaterialPlate: ViewModifier {
     var cornerRadius: CGFloat

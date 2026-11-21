@@ -463,7 +463,11 @@ struct HouseSceneView: View {
             }
             controller.apply(pose: viewModel.houseScenePose)
             controller.prepareIfNeeded()
-            controller.apply(viewModel.garagePresentation, heading: houseHeadingDegrees)
+            controller.apply(
+                viewModel.garagePresentation,
+                heading: houseHeadingDegrees,
+                displayBoost: viewModel.isDemoMode ? 1 : nil
+            )
             controller.applyPowerFlow(powerFlowSnapshot, solar: viewModel.garagePresentation.solar)
             controller.setBatteryLevel(viewModel.batteryPercentage?.percentage)
             noteSky()
@@ -472,7 +476,7 @@ struct HouseSceneView: View {
             controller.setBatteryLevel(percentage)
         }
         .onChange(of: viewModel.garagePresentation) { presentation in
-            controller.apply(presentation, heading: houseHeadingDegrees)
+            controller.apply(presentation, heading: houseHeadingDegrees, displayBoost: viewModel.isDemoMode ? 1 : nil)
             controller.applyPowerFlow(powerFlowSnapshot, solar: presentation.solar)
         }
         .onChange(of: powerFlowSnapshot) { snapshot in
@@ -678,7 +682,7 @@ final class HouseSceneController {
         syncWeatherMotion()
     }
 
-    func apply(_ presentation: GaragePresentation, heading: Double) {
+    func apply(_ presentation: GaragePresentation, heading: Double, displayBoost: CGFloat? = nil) {
         self.heading = heading
         guard let lighting else { return }
         lighting.setSolar(presentation.solar.sceneOption)
@@ -694,18 +698,20 @@ final class HouseSceneController {
             appliedModel = presentation.model
             appliedPaint = nil
         }
+        // The baked generic body has no paint shell. Live cars and the demo both leave it.
         guard presentation.model != .generic else { return }
-        // Cybertruck stays on the file's stainless mix unless Fleet sent a wrap override.
+        // Cybertruck stays on the file's stainless mix unless Fleet sent a wrap or a demo colour.
         if presentation.model == .cybertruck && presentation.paintColorOverride == nil {
             return
         }
-        let paintKey = "\(presentation.exteriorColor ?? "")|\(presentation.paintColorOverride ?? "")|\(presentation.colorizerRemap)"
+        let boost = displayBoost ?? paintDisplayBoost
+        let paintKey = "\(presentation.exteriorColor ?? "")|\(presentation.paintColorOverride ?? "")|\(presentation.colorizerRemap)|\(boost)"
         guard appliedPaint != paintKey else { return }
         lighting.setVehiclePaint(
             exteriorColor: presentation.exteriorColor,
             paintColorOverride: presentation.paintColorOverride,
             colorizerRemap: presentation.colorizerRemap,
-            displayBoost: paintDisplayBoost
+            displayBoost: boost
         )
         appliedPaint = paintKey
     }

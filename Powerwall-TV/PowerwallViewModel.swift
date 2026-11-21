@@ -47,8 +47,10 @@ class PowerwallViewModel: ObservableObject {
 
     var isDemoMode: Bool { ipAddress.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "demo" }
 
-    /// Which `DemoHouseTour` sky and car demo mode is showing. Not saved.
+    /// Which `DemoHouseTour` sky demo mode is showing. Not saved.
     @Published var demoSceneIndex: Int = 0
+    /// Which demo car and paint is parked. Advances faster than the sky. Not saved.
+    @Published var demoColourIndex: Int = 0
 
     // Local login
     @Published var loginMode: LoginMode = LoginMode(rawValue: UserDefaults.standard.string(forKey: "loginMode") ?? LoginMode.fleetAPI.rawValue) ?? .fleetAPI
@@ -367,12 +369,7 @@ class PowerwallViewModel: ObservableObject {
     }
 
     private func persistLastChargingWallConnectorVIN(from wallConnectors: [WallConnector]) {
-        guard let vin = wallConnectors.first(where: { wallConnector in
-            let normalizedVIN = wallConnector.vin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let activelyCharging = (wallConnector.wallConnectorPower ?? 0) > 10
-                || wallConnector.wallConnectorState == 1.0
-            return activelyCharging && !normalizedVIN.isEmpty
-        })?.vin?.trimmingCharacters(in: .whitespacesAndNewlines), !vin.isEmpty else {
+        guard let vin = GaragePresentation.chargingVIN(wallConnectors: wallConnectors), !vin.isEmpty else {
             return
         }
 

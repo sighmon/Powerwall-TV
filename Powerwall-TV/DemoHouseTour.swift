@@ -30,11 +30,13 @@ struct DemoVehicle: Equatable {
     let model: VehicleModel
 }
 
-/// Demo mode walks these skies and cars. The power sample still refreshes
-/// every 10 seconds; each scene stays up for two of those samples so the
-/// five-second weather fade can finish.
+/// Demo mode walks these skies and, for each exported car, every distinct Tesla paint.
+/// The baked generic body stays its file colour. Paint changes every `colourInterval`.
+/// The sky still waits for two 10-second power samples so its five-second fade can finish.
+/// A car changes only after its colours.
 enum DemoHouseTour {
     static let powerTicksPerScene = 2
+    static let colourInterval: TimeInterval = 2
 
     static let weather: [DemoWeatherScene] = [
         DemoWeatherScene(title: "Clear", sunAltitude: 52, sunAzimuth: 180, isDaylight: true, cloudCover: 0.05, condition: .clear, precipitationMillimetresPerHour: 0),
@@ -69,6 +71,35 @@ enum DemoHouseTour {
 
     static func vehicle(at index: Int) -> DemoVehicle {
         vehicles[wrapped(index, count: vehicles.count)]
+    }
+
+    /// The baked generic body stays its file colour for one step. Every other car
+    /// then walks `TeslaPaint.catalogue` before the next model.
+    static func parkedCar(at index: Int) -> (vehicle: DemoVehicle, appearance: VehicleAppearance) {
+        let paints = TeslaPaint.catalogue
+        let colourCount = max(paints.count, 1)
+        let generic = vehicles.first { $0.model == .generic } ?? vehicles[0]
+        let painted = vehicles.filter { $0.model != .generic }
+        let step = wrapped(index, count: 1 + painted.count * colourCount)
+        let blank = VehicleAppearance(exteriorColor: nil, paintColorOverride: nil, colorizerRemap: false, carType: nil)
+        guard step > 0 else { return (generic, blank) }
+        let paintStep = step - 1
+        let paint = paints[paintStep % colourCount]
+        return (
+            painted[paintStep / colourCount],
+            VehicleAppearance(
+                exteriorColor: paint.name,
+                paintColorOverride: paint.demoOverride,
+                colorizerRemap: false,
+                carType: nil
+            )
+        )
+    }
+
+    /// Demo chip text. Generic has no paint name, so it stays the display name alone.
+    static func vehicleLabel(displayName: String, exteriorColor: String?) -> String {
+        guard let exteriorColor, !exteriorColor.isEmpty else { return displayName }
+        return "\(displayName) · \(TeslaPaint.spacedName(exteriorColor))"
     }
 
     private static func wrapped(_ index: Int, count: Int) -> Int {

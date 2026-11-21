@@ -96,6 +96,56 @@ struct GarageSceneTests {
         #expect(GaragePresentation.make(data: nil, fallbackVIN: "", appearances: [:], solar: .panels).showWallConnector == false)
     }
 
+    @Test func chargingCarBeatsAnEarlierPluggedInCar() {
+        let model3 = "5YJ3GDEE5NF000001"
+        let modelY = "5YJYGDEE5LF000001"
+        let both = PowerwallData(
+            battery: .init(instantPower: 0, count: 1),
+            load: .init(instantPower: 0),
+            solar: .init(instantPower: 0, energyExported: 0),
+            site: .init(instantPower: 0),
+            wallConnectors: [
+                .init(vin: model3, din: "stall-a", wallConnectorState: 4, wallConnectorPower: 0),
+                .init(vin: modelY, din: "stall-b", wallConnectorState: 1, wallConnectorPower: 7000)
+            ]
+        )
+        let parked = GaragePresentation.make(
+            data: both,
+            fallbackVIN: model3,
+            appearances: [
+                model3: VehicleAppearance(exteriorColor: nil, paintColorOverride: nil, colorizerRemap: false, carType: "model3"),
+                modelY.lowercased(): VehicleAppearance(exteriorColor: "PearlWhite", paintColorOverride: nil, colorizerRemap: false, carType: "modely")
+            ],
+            solar: .panels
+        )
+        #expect(parked.model == .modelY)
+        #expect(parked.exteriorColor == "PearlWhite")
+        #expect(GaragePresentation.connectedVIN(wallConnectors: both.wallConnectors, fallbackVIN: model3) == modelY)
+        #expect(GaragePresentation.chargingVIN(wallConnectors: both.wallConnectors) == modelY)
+
+        let twoCharging = [
+            WallConnector(vin: model3, din: "stall-a", wallConnectorState: 1, wallConnectorPower: 1000),
+            WallConnector(vin: modelY, din: "stall-b", wallConnectorState: 1, wallConnectorPower: 11000)
+        ]
+        #expect(GaragePresentation.connectedVIN(wallConnectors: twoCharging, fallbackVIN: "") == model3)
+
+        let exporting = PowerwallData(
+            battery: .init(instantPower: 0, count: 1),
+            load: .init(instantPower: 0),
+            solar: .init(instantPower: 0, energyExported: 0),
+            site: .init(instantPower: 0),
+            wallConnectors: [.init(vin: modelY, din: "1", wallConnectorState: nil, wallConnectorPower: -4000)]
+        )
+        let sendingHome = GaragePresentation.make(data: exporting, fallbackVIN: model3, appearances: [:], solar: .panels)
+        #expect(sendingHome.showVehicle)
+        #expect(sendingHome.model == .modelY)
+        #expect(GaragePresentation.chargingVIN(wallConnectors: exporting.wallConnectors) == modelY)
+
+        let onlyPlugged = [WallConnector(vin: model3, din: "stall-a", wallConnectorState: 4, wallConnectorPower: 0)]
+        #expect(GaragePresentation.connectedVIN(wallConnectors: onlyPlugged, fallbackVIN: modelY) == model3)
+        #expect(GaragePresentation.chargingVIN(wallConnectors: onlyPlugged) == nil)
+    }
+
     @Test func paintOverrideBeatsExteriorColorAndUnknownColorsFallBack() {
         let pearl = TeslaPaint.resolve(exteriorColor: "pearl white", paintColorOverride: nil)
         #expect(pearl.name == "PearlWhite")
@@ -115,6 +165,7 @@ struct GarageSceneTests {
     @Test func demoTourCyclesEveryWeatherAndEveryCar() {
         #expect(DemoHouseTour.vehicles.map(\.model) == VehicleModel.allCases)
         #expect(DemoHouseTour.powerTicksPerScene >= 2)
+        #expect(DemoHouseTour.colourInterval == 2)
         for vehicle in DemoHouseTour.vehicles {
             #expect(GarageVehicleModel.resolve(vin: vehicle.vin) == vehicle.model)
             let parked = PowerwallData(
@@ -196,6 +247,75 @@ struct GarageSceneTests {
         #expect(Set(signatures).count == DemoHouseTour.weather.count)
         #expect(DemoHouseTour.weather(at: DemoHouseTour.weather.count).title == "Clear")
         #expect(DemoHouseTour.weather(at: -1).title == "Rainy night")
+    }
+
+    @Test func demoTourCyclesEveryColourOnEachCar() {
+        let paints = TeslaPaint.catalogue
+        #expect(paints.map(\.name) == TeslaPaint.catalogueNames)
+        #expect(paints.count > 10)
+        let looks = Set(paints.map { "\($0.hex)|\($0.metallic)|\($0.roughness)" })
+        #expect(looks.count == paints.count)
+        for paint in paints {
+            let parsed = TeslaPaint(paintColorOverride: paint.fleetOverride)
+            #expect(parsed?.hex == paint.hex)
+            #expect(parsed.map { abs($0.metallic - paint.metallic) < 0.001 } == true)
+        }
+
+        let first = DemoHouseTour.parkedCar(at: 0)
+        #expect(first.vehicle.model == .generic)
+        #expect(first.appearance.exteriorColor == nil)
+        #expect(first.appearance.paintColorOverride == nil)
+
+        let model3 = DemoHouseTour.parkedCar(at: 1)
+        #expect(model3.vehicle.model == .model3)
+        #expect(model3.appearance.exteriorColor == paints[0].name)
+
+        let endOfModel3 = DemoHouseTour.parkedCar(at: paints.count)
+        #expect(endOfModel3.vehicle.model == .model3)
+        #expect(endOfModel3.appearance.exteriorColor == paints.last?.name)
+
+        let highland = DemoHouseTour.parkedCar(at: paints.count + 1)
+        #expect(highland.vehicle.model == .model3Highland)
+        #expect(highland.appearance.exteriorColor == paints[0].name)
+
+        let previous = DemoHouseTour.parkedCar(at: -1)
+        #expect(previous.vehicle.model == .cybertruck)
+        #expect(previous.appearance.exteriorColor == paints.last?.name)
+
+        let paintedCars = DemoHouseTour.vehicles.filter { $0.model != .generic }
+        let truck = DemoHouseTour.parkedCar(at: 1 + (paintedCars.count - 1) * paints.count)
+        #expect(truck.vehicle.model == .cybertruck)
+        let data = PowerwallData(
+            battery: .init(instantPower: 0, count: 1),
+            load: .init(instantPower: 0),
+            solar: .init(instantPower: 0, energyExported: 0),
+            site: .init(instantPower: 0),
+            wallConnectors: [.init(vin: truck.vehicle.vin, din: "def456", wallConnectorState: 1, wallConnectorPower: 512)]
+        )
+        let parked = GaragePresentation.make(
+            data: data,
+            fallbackVIN: "",
+            appearances: [truck.vehicle.vin: truck.appearance],
+            solar: .panels
+        )
+        #expect(parked.showVehicle)
+        #expect(parked.model == .cybertruck)
+        #expect(parked.paintColorOverride == truck.appearance.paintColorOverride)
+        #expect(parked.exteriorColor == truck.appearance.exteriorColor)
+
+        let white = TeslaPaint.table["White"]!
+        let pearl = TeslaPaint.table["PearlWhite"]!
+        let black = TeslaPaint.table["SolidBlack"]!
+        let silver = TeslaPaint.table["SilverMetallic"]!
+        #expect((TeslaPaint(paintColorOverride: white.demoOverride)?.hex ?? 0) > 0xE0E0E0)
+        #expect(TeslaPaint(paintColorOverride: white.demoOverride)?.hex != TeslaPaint(paintColorOverride: pearl.demoOverride)?.hex)
+        #expect(TeslaPaint(paintColorOverride: white.demoOverride)?.hex != TeslaPaint(paintColorOverride: silver.demoOverride)?.hex)
+        #expect((TeslaPaint(paintColorOverride: black.demoOverride)?.hex ?? 0xFFFFFF) < 0x303030)
+        #expect(TeslaPaint.catalogueNames.allSatisfy { TeslaPaint.demoDisplayHex[$0] != nil })
+        #expect(DemoHouseTour.vehicleLabel(displayName: "Model 3", exteriorColor: "PearlWhite") == "Model 3 · Pearl White")
+        #expect(DemoHouseTour.vehicleLabel(displayName: "VEHICLE", exteriorColor: "White") == "VEHICLE · White")
+        #expect(DemoHouseTour.vehicleLabel(displayName: "Generic", exteriorColor: nil) == "Generic")
+        #expect(TeslaPaint.spacedName("MidnightCherryRed") == "Midnight Cherry Red")
     }
 
     @Test @MainActor func demoSkyStaysPutWhenTheClockAdvances() {

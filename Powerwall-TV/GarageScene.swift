@@ -138,7 +138,7 @@ struct GaragePresentation: Equatable {
                 || connectors.contains(where: \.isVehicleConnected)
         )
         let vin = connectedVIN(wallConnectors: connectors, fallbackVIN: fallbackVIN)
-        let appearance = vin.flatMap { appearances[$0] }
+        let appearance = appearance(for: vin, in: appearances)
         let model = showVehicle
             ? GarageVehicleModel.resolve(vin: vin, carType: appearance?.carType)
             : .generic
@@ -155,21 +155,59 @@ struct GaragePresentation: Equatable {
         )
     }
 
-    /// Same choice the flat backgrounds used: a live charging or plugged-in VIN, then the last VIN
-    /// that was charging. Local Wall Connector vitals have no VIN, so the fallback still matters.
+    /// The car the garage should show. A connector that is charging (state 1) wins, in list order,
+    /// which is the same VIN the kW readout uses. A connector moving energy without that state,
+    /// including vehicle-to-home, is next. A car that is only plugged in is used when nothing is
+    /// charging. Local Wall Connector vitals have no VIN, so the last charging VIN is the fallback.
     static func connectedVIN(wallConnectors: [WallConnector], fallbackVIN: String) -> String? {
-        if let liveVIN = wallConnectors.first(where: { wallConnector in
-            let chargingOrConnected = (wallConnector.wallConnectorPower ?? 0) > 10
-                || wallConnector.wallConnectorState == 1.0
-                || wallConnector.wallConnectorState == 4.0
-            let normalizedVIN = wallConnector.vin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return chargingOrConnected && !normalizedVIN.isEmpty
-        })?.vin?.trimmingCharacters(in: .whitespacesAndNewlines), !liveVIN.isEmpty {
+        if let liveVIN = rankedVIN(wallConnectors: wallConnectors, includePlugged: true) {
             return liveVIN
         }
-
         let normalizedFallbackVIN = fallbackVIN.trimmingCharacters(in: .whitespacesAndNewlines)
         return normalizedFallbackVIN.isEmpty ? nil : normalizedFallbackVIN
+    }
+
+    /// VIN to remember after this sample. Plugged-in-only connectors do not replace the last car
+    /// that was actually charging.
+    static func chargingVIN(wallConnectors: [WallConnector]) -> String? {
+        rankedVIN(wallConnectors: wallConnectors, includePlugged: false)
+    }
+
+    private static func appearance(for vin: String?, in appearances: [String: VehicleAppearance]) -> VehicleAppearance? {
+        guard let vin, !vin.isEmpty else { return nil }
+        if let exact = appearances[vin] { return exact }
+        return appearances.first { $0.key.caseInsensitiveCompare(vin) == .orderedSame }?.value
+    }
+
+    /// Lower priority wins. State 1 keeps list order so it stays aligned with the readout.
+    /// Energy without that state keeps the larger flow, then the earlier connector.
+    private static func rankedVIN(wallConnectors: [WallConnector], includePlugged: Bool) -> String? {
+        var bestPriority = Int.max
+        var bestMagnitude = -1.0
+        var bestVIN: String?
+        for wallConnector in wallConnectors {
+            let vin = wallConnector.vin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !vin.isEmpty else { continue }
+            let magnitude = abs(wallConnector.wallConnectorPower ?? 0)
+            let state = wallConnector.wallConnectorState
+            let priority: Int
+            if state == 1 {
+                priority = 0
+            } else if magnitude > 10 {
+                priority = 1
+            } else if includePlugged && state == 4 {
+                priority = 2
+            } else {
+                continue
+            }
+            let betterPriority = priority < bestPriority
+            let strongerFlow = priority == 1 && bestPriority == 1 && magnitude > bestMagnitude
+            guard betterPriority || strongerFlow else { continue }
+            bestPriority = priority
+            bestMagnitude = magnitude
+            bestVIN = vin
+        }
+        return bestVIN
     }
 }
 

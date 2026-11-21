@@ -70,6 +70,80 @@ struct TeslaPaint: Equatable {
         "CoastalBlue": .init(name: "CoastalBlue", hex: 0x040710, metallic: 0.5, roughness: 0.04),
     ]
 
+    /// Distinct paints in Fleet-table order. Later aliases that share the same look are left out.
+    static let catalogueNames: [String] = [
+        "RedMulticoat", "SolidBlack", "SilverMetallic", "MidnightSilver", "DeepBlue",
+        "PearlWhite", "TitaniumCopper", "SignatureBlue", "White", "Pearl", "Green",
+        "Brown", "SigRed", "Blue", "MidnightCherryRed", "Quicksilver", "UltraRed",
+        "StealthGrey", "LunarSilver", "GlacierBlue", "DiamondBlack", "FrostBlue",
+        "SilkroadSilver", "MarineBlue", "GarnetRed", "CoastalBlue",
+    ]
+
+    static var catalogue: [TeslaPaint] {
+        catalogueNames.compactMap { table[$0] }
+    }
+
+    /// `vehicle_config.paint_color_override`, rgb in 0–255. Decimal point stays a dot.
+    var fleetOverride: String {
+        overrideString(hex: hex)
+    }
+
+    /// Readable stand-ins for the demo. The Fleet hexes are reflection albedos:
+    /// White is `0x141414` and Pearl White is `0x181818`, so both paint as dark grey
+    /// once `displayBoost` is applied, and Silver lands on top of them.
+    static let demoDisplayHex: [String: UInt32] = [
+        "RedMulticoat": 0x8E1B1B,
+        "SolidBlack": 0x1A1A1A,
+        "SilverMetallic": 0xC5C8CE,
+        "MidnightSilver": 0x5A5E66,
+        "DeepBlue": 0x1A3F8F,
+        "PearlWhite": 0xF3F0E8,
+        "TitaniumCopper": 0xB08D6A,
+        "SignatureBlue": 0x3B6FB6,
+        "White": 0xF7F7F7,
+        "Pearl": 0xE6E0D4,
+        "Green": 0x2F6B45,
+        "Brown": 0x6B4A32,
+        "SigRed": 0x9A2430,
+        "Blue": 0x2451A3,
+        "MidnightCherryRed": 0x6A1A2A,
+        "Quicksilver": 0xD5D7DE,
+        "UltraRed": 0xD01020,
+        "StealthGrey": 0x6A6E74,
+        "LunarSilver": 0xE4E5E8,
+        "GlacierBlue": 0xA9C0D4,
+        "DiamondBlack": 0x101014,
+        "FrostBlue": 0x7F9AAD,
+        "SilkroadSilver": 0xCFCDD0,
+        "MarineBlue": 0x163A5F,
+        "GarnetRed": 0x8A2A32,
+        "CoastalBlue": 0x4E78A8,
+    ]
+
+    /// Demo paint in display space. Apply it with `displayBoost` 1, not the live lift of 4.
+    var demoOverride: String {
+        overrideString(hex: TeslaPaint.demoDisplayHex[name] ?? hex)
+    }
+
+    /// "PearlWhite" → "Pearl White".
+    static func spacedName(_ name: String) -> String {
+        var words = ""
+        for character in name {
+            if character.isUppercase, !words.isEmpty { words.append(" ") }
+            words.append(character)
+        }
+        return words
+    }
+
+    private func overrideString(hex displayHex: UInt32) -> String {
+        let red = Int((displayHex >> 16) & 0xff)
+        let green = Int((displayHex >> 8) & 0xff)
+        let blue = Int(displayHex & 0xff)
+        let metal = String(format: "%.4f", locale: Locale(identifier: "en_US_POSIX"), Double(metallic))
+        let rough = String(format: "%.4f", locale: Locale(identifier: "en_US_POSIX"), Double(roughness))
+        return "\(red),\(green),\(blue),\(metal),\(rough)"
+    }
+
     private static func normalise(_ s: String) -> String {
         s.lowercased().filter { $0.isLetter || $0.isNumber }
     }
