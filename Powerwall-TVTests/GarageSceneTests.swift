@@ -2152,21 +2152,50 @@ struct GarageSceneTests {
         #expect(abs(limited.pan.z - 3) < 0.001)
     }
 
-    @Test func showroomLampsSplitIntoHeadTailAndIndicator() {
+    @Test func showroomLampsUseTheTeslaAppMaterials() {
         guard let index = CarShowroom.catalogueModels.firstIndex(of: .model3) else {
             Issue.record("Model 3 is missing from the catalogue")
             return
         }
         let scene = CarShowroom.scene(for: CarShowroom.catalogueRequest(index: index))
-        let front = material(named: VehicleLights.frontName, in: scene)
-        let rear = material(named: VehicleLights.rearName, in: scene)
-        let frontGlow = rgb(front?.emission.contents)
-        let rearGlow = rgb(rear?.emission.contents)
-        #expect(frontGlow.red > 0.3)
-        #expect(frontGlow.blue > 0.25)
-        #expect(abs(frontGlow.red - frontGlow.blue) < 0.15)
-        #expect(rearGlow.red > rearGlow.green * 4)
-        #expect(rearGlow.red > 0.4)
+        #expect(material(named: "Lights", in: scene) == nil)
+        guard let housing = material(named: VehicleLamps.housingName, in: scene),
+              let lens = material(named: VehicleLamps.glassName, in: scene) else {
+            Issue.record("Model 3 has no lamp housing or lamp glass")
+            return
+        }
+        #expect(housing.lightingModel == .physicallyBased)
+        #expect(housing.diffuse.contents != nil)
+        #expect(abs(housing.diffuse.intensity - 0.102) < 0.001)
+        #expect(housing.metalness.textureComponents == .red)
+        #expect(housing.roughness.textureComponents == .green)
+        #expect(housing.ambientOcclusion.textureComponents == .blue)
+        #expect(abs(housing.metalness.intensity - 0.7) < 0.001)
+        let glow = rgb(housing.emission.contents)
+        #expect(glow.red + glow.green + glow.blue < 0.01)
+        #expect(abs(lens.transparency - 0.51) < 0.001)
+        #expect(lens.blendMode == .alpha)
+        #expect(!lens.writesToDepthBuffer)
+
+        var housingHasTextureCoordinates = false
+        scene.rootNode.enumerateChildNodes { node, stop in
+            guard let geometry = node.geometry,
+                  geometry.materials.contains(where: { $0.name == VehicleLamps.housingName }) else { return }
+            housingHasTextureCoordinates = !geometry.sources(for: .texcoord).isEmpty
+            stop.pointee = true
+        }
+        #expect(housingHasTextureCoordinates)
+
+        for model in VehicleModel.allCases where model != .generic {
+            #expect(VehicleLamps.housing(for: model) != nil)
+            #expect(VehicleLamps.lens(for: model) != nil)
+            if let texture = VehicleLamps.housing(for: model)?.texture {
+                #expect(HouseLighting.resourceURL(name: "\(texture)_Lamps_BC", ext: "png") != nil)
+                #expect(HouseLighting.resourceURL(name: "\(texture)_Lamps_MRA", ext: "png") != nil)
+            }
+        }
+        #expect(VehicleLamps.housing(for: .modelYJuniper)?.texture == nil)
+
         let generic = CarShowroom.scene(for: CarShowroomRequest(
             vin: nil,
             model: .generic,
@@ -2177,6 +2206,7 @@ struct GarageSceneTests {
             lines: []
         ))
         #expect(material(named: "Lights", in: generic) == nil)
+        #expect(material(named: VehicleLamps.housingName, in: generic) == nil)
     }
 
     @Test func showroomColourStepsWrapTheCatalogue() {

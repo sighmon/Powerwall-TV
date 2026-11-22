@@ -38,3 +38,41 @@ These are Tesla's copyrighted assets. Keep them in this private repository.
 - `ShowroomStage.environmentIntensity` sets how bright the studio reflections are.
 - If the studio reflections look mirrored left to right, flip `ShowroomStudio.png` horizontally.
   SceneKit's equirectangular convention was not checked on a device.
+
+## Lamps
+
+![Headlights and taillights before and after](headlights.jpg)
+
+In the Tesla app the car is parked with its lamps off, so nothing glows. The lamps look right
+because of the lamp housing material. Lights_BC is a texture atlas of chrome reflectors,
+projector bowls, LED strips, and red and amber lenses. Lights_MRA packs metallic, roughness, and
+occlusion. A thin smoked lens (Glass_Lights) sits over the housing. The mobile environment
+(`env/mobile.tres`) has no glow or bloom. No vehicle scene contains an OmniLight or a SpotLight,
+and there is no welcome animation.
+
+| Car | Housing (`Light`/`Lights`) albedo × BC, metallic × R, roughness × G, AO = B | Lens (`Glass_Lights`) colour, alpha, roughness |
+| --- | --- | --- |
+| Model 3 | 0.102, 0.7, 0.0 (mirror) | 0.0118, 0.51, 0.05 |
+| Model 3 Highland | 0.137, 1.0, 1.0 | 0.0118, 0.39, 0.05 |
+| Model Y | 0.102, 0.7, 0.5 | 0.0118, 0.39, 0.05 |
+| Model Y Juniper | `Light_Off` flat 0.0196, roughness 0.45 | 0.0118, 0.39, 0.05 |
+| Model S | 0.098, 0.75, 0.5 | 0.0118, 0.43, 0.1 |
+| Model X | 0.098, 1.0, 1.0 | 0.0118, 0.51, 0.1 |
+| Cybertruck | `Lights1` 0.349, 0, 1.0 | 0, 0.51, 0.01 |
+
+The glowing "lights on" meshes are separate. `Headlights`, `DRL`, `Brake_Lights_*`,
+`Reverse_Light`, and the turn signals use `Illumination`, which is additive, unshaded black,
+and shows the `Lights_E.png` emission map at energy 0.65–0.8. The `*_Projections` meshes add the
+light pools on the ground. All of them are hidden by default. `Vehicle.gd` shows the headlights
+only while the car is driving (`set_headlights_on(data.isDriving())`). The Godot glTF export
+skips hidden nodes, so these meshes are not in our models.
+
+`tools/build_vehicles_v2.py` now writes the lamp housing as `Lamps`, with `primvars:st`, and the
+lens as `LampGlass`. It skips the `*_Global` lamp meshes, which use a different atlas. Before this
+change both went into one flat red `Lights` mesh, which `VehicleLights` split into three glowing
+lenses. `VehicleLamps` in `HouseLighting.swift` puts `<Model>_Lamps_BC.png` and
+`<Model>_Lamps_MRA.png` on the housing, using `textureComponents` red, green, and blue, and makes
+the lens the smoked glass.
+
+`tools/headlights.py` makes the close-ups. Run it with `LAMPS=before|after`, `USDZ=`, and
+`VIEW=front|rear`. The renders are Cycles approximations, not SceneKit captures.

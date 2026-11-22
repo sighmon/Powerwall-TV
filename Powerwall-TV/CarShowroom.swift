@@ -276,8 +276,8 @@ enum CarShowroom {
         }
         wrapper.enumerateHierarchy { node, _ in
             node.geometry?.materials.forEach { VehicleGlass.reveal($0) }
-            VehicleLights.illuminate(node)
         }
+        VehicleLamps.dress(wrapper, model: model)
         return wrapper
     }
 
