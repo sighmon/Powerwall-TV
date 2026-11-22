@@ -1831,25 +1831,32 @@ struct GarageSceneTests {
         }
 
         let scene = CarShowroom.scene(for: opened)
-        let referenceRoot = SCNNode()
-        HouseGroundPlate.install(on: referenceRoot)
-        let referenceNode = referenceRoot.childNode(withName: HouseGroundPlate.name, recursively: false)
-        let showroomNode = scene.rootNode.childNode(withName: HouseGroundPlate.name, recursively: false)
-        let referenceFloor = referenceNode?.geometry as? SCNFloor
-        let showroomFloor = showroomNode?.geometry as? SCNFloor
-        #expect(referenceFloor != nil)
+        let floorNode = scene.rootNode.childNode(withName: ShowroomStage.floorName, recursively: false)
+        let showroomFloor = floorNode?.geometry as? SCNFloor
         #expect(showroomFloor != nil)
-        #expect(abs((referenceFloor?.reflectivity ?? 0) - (showroomFloor?.reflectivity ?? -1)) < 0.001)
-        #expect(abs((referenceFloor?.reflectionFalloffStart ?? -1) - (showroomFloor?.reflectionFalloffStart ?? 0)) < 0.001)
-        #expect(abs((referenceFloor?.reflectionFalloffEnd ?? -1) - (showroomFloor?.reflectionFalloffEnd ?? 0)) < 0.001)
-        #expect(abs((referenceFloor?.reflectionFalloffStart ?? 0) - 0.08) < 0.001)
-        #expect(abs((referenceFloor?.reflectionFalloffEnd ?? 0) - 0.32) < 0.001)
-        #expect(showroomFloor?.materials.first?.lightingModel == referenceFloor?.materials.first?.lightingModel)
-        #expect(referenceFloor?.materials.first?.lightingModel == .constant)
-        #expect(plateDiffuseMatches(showroomFloor?.materials.first, referenceFloor?.materials.first))
-        #if os(macOS)
-        #expect(showroomNode?.filters?.isEmpty != false)
-        #endif
+        #expect(scene.rootNode.childNode(withName: HouseGroundPlate.name, recursively: false) == nil)
+        #expect(abs((showroomFloor?.reflectivity ?? 0) - ShowroomStage.reflectionStrength) < 0.001)
+        #expect(abs((showroomFloor?.reflectionResolutionScaleFactor ?? 0) - 0.5) < 0.001)
+        #expect((showroomFloor?.reflectionFalloffEnd ?? 1) == (showroomFloor?.reflectionFalloffStart ?? 0))
+        #expect(showroomFloor?.reflectionCategoryBitMask == HouseGroundPlate.reflectionBit)
+        #expect(showroomFloor?.materials.first?.lightingModel == .constant)
+        #expect(showroomFloor?.materials.first?.shaderModifiers?[.fragment]?.contains("smoothstep(5.0, 15.0") == true)
+        #expect((floorNode?.categoryBitMask ?? 0) & HouseGroundPlate.reflectionBit == 0)
+        #expect(scene.lightingEnvironment.contents != nil)
+        #expect(abs(scene.lightingEnvironment.intensity - ShowroomStage.environmentIntensity) < 0.001)
+        var lights = 0
+        scene.rootNode.enumerateHierarchy { node, _ in
+            if node.light != nil { lights += 1 }
+        }
+        #expect(lights == 0)
+        let glow = scene.rootNode.childNode(withName: ShowroomStage.glowName, recursively: false)
+        #expect(glow != nil)
+        #expect((glow?.categoryBitMask ?? 0) & HouseGroundPlate.reflectionBit == 0)
+        #expect((glow?.renderingOrder ?? 0) < (floorNode?.renderingOrder ?? 0))
+        let shadow = scene.rootNode.childNode(withName: ShowroomStage.groundShadowName, recursively: false)
+        #expect(shadow != nil)
+        #expect((shadow?.renderingOrder ?? -100) > (floorNode?.renderingOrder ?? 0))
+        #expect((shadow?.categoryBitMask ?? 0) & HouseGroundPlate.reflectionBit == 0)
         var vehicle: SCNNode?
         var shell = false
         scene.rootNode.enumerateHierarchy { node, _ in
@@ -1865,6 +1872,72 @@ struct GarageSceneTests {
         }
         #expect(meshes > 0)
         #expect(shell == false)
+    }
+
+    @Test func showroomStageUsesTheTeslaAppValues() {
+        #expect(abs(CarShowroomOrbit.verticalFieldOfViewDegrees - 30) < 0.001)
+        let offset = CarShowroomOrbit.restingOffset
+        let elevation = asin(offset.y / simd_length(offset)) * 180 / .pi
+        #expect(abs(elevation - 25) < 0.5)
+        let yaw = atan2(offset.x, offset.z) * 180 / .pi
+        #expect(abs(yaw - -138) < 0.5)
+        #expect(abs(ShowroomStage.backgroundRGB.x - 22 / 255) < 0.001)
+        #expect(abs(ShowroomStage.backgroundRGB.z - 24 / 255) < 0.001)
+        #expect(HouseLighting.resourceURL(name: ShowroomStage.environmentName, ext: "png") != nil)
+        for model in VehicleModel.allCases {
+            let shadow = ShowroomStage.groundShadow(for: model)
+            #expect(HouseLighting.resourceURL(name: shadow.texture, ext: "png") != nil)
+            #expect(shadow.width > 4 && shadow.length > 6)
+        }
+    }
+
+    @Test func showroomGlowFollowsThePaintLikeTheTeslaFloor() {
+        func request(_ model: VehicleModel, colour: String?, override: String? = nil, catalogue: Bool = false) -> CarShowroomRequest {
+            CarShowroomRequest(
+                vin: nil, model: model, exteriorColor: colour, paintColorOverride: override,
+                colorizerRemap: false, displayBoost: 1, lines: [], browsesCatalogue: catalogue
+            )
+        }
+        let white = ShowroomStage.highlight(for: request(.modelY, colour: "PearlWhite"))
+        #expect(simd_length(white - ShowroomStage.rgb(0xdadada)) < 0.001)
+        let red = ShowroomStage.highlight(for: request(.model3, colour: "Ultra Red", override: TeslaPaint.table["UltraRed"]?.demoOverride))
+        #expect(simd_length(red - ShowroomStage.rgb(0xf03042)) < 0.001)
+        let truck = ShowroomStage.highlight(for: request(.cybertruck, colour: nil))
+        #expect(simd_length(truck - ShowroomStage.rgb(0xc1c1c1)) < 0.001)
+        let catalogue = ShowroomStage.highlight(for: request(.model3Highland, colour: nil, catalogue: true))
+        #expect(simd_length(catalogue - ShowroomStage.rgb(0x1667ee)) < 0.001)
+        // Not in the table: value is lifted to 0.7 and the hue is kept.
+        let green = ShowroomStage.highlight(forPaint: SIMD3(0.2, 0.6, 0.3))
+        #expect(abs(max(green.x, green.y, green.z) - 0.7) < 0.01)
+        #expect(green.y > green.x && green.y > green.z)
+        // Near-black paint becomes a soft grey rather than vanishing.
+        let black = ShowroomStage.highlight(forPaint: SIMD3(0.02, 0.02, 0.02))
+        #expect(black.x > 0.35 && black.x < 0.6)
+    }
+
+    @Test func showroomGlowSitsBehindTheCarAndFadesWhenLookingDown() {
+        let centre = CarShowroom.stageCentre
+        let resting = CarShowroomOrbit()
+        let eye = resting.eye(around: centre)
+        let forward = simd_normalize(resting.target(around: centre) - eye)
+        guard let placement = ShowroomStage.glowPlacement(eye: eye, forward: forward, centre: centre) else {
+            Issue.record("No glow placement at the resting camera")
+            return
+        }
+        let origin = SIMD3(placement.transform.columns.3.x, placement.transform.columns.3.y, placement.transform.columns.3.z)
+        let glowCentre = SIMD3(centre.x, ShowroomStage.glowCentreHeight, centre.z)
+        #expect(abs(simd_length(origin - glowCentre) - ShowroomStage.glowDistance) < 0.01)
+        #expect(simd_length(origin - eye) > simd_length(glowCentre - eye))
+        let normal = SIMD3(placement.transform.columns.2.x, placement.transform.columns.2.y, placement.transform.columns.2.z)
+        #expect(simd_dot(simd_normalize(eye - origin), normal) > 0.999)
+        #expect(abs(placement.opacity - ShowroomStage.glowOpacity) < 0.001)
+
+        var overhead = resting
+        overhead.pitchDegrees = CarShowroomOrbit.pitchRange.upperBound
+        let highEye = overhead.eye(around: centre)
+        let highForward = simd_normalize(overhead.target(around: centre) - highEye)
+        let high = ShowroomStage.glowPlacement(eye: highEye, forward: highForward, centre: centre)
+        #expect((high?.opacity ?? 1) < 0.01)
     }
 
     @Test func showroomOrbitStartsOnTheRestingCameraAndStaysOnTheCar() {
@@ -2321,16 +2394,6 @@ struct GarageSceneTests {
         )
         #expect(parked?.browsesCatalogue == false)
         #expect(parked?.vin == GaragePresentation.connectedVIN(wallConnectors: charging.wallConnectors, fallbackVIN: ""))
-    }
-
-    private func plateDiffuseMatches(_ showroom: SCNMaterial?, _ reference: SCNMaterial?) -> Bool {
-        guard let left = showroom?.diffuse.contents as? HouseColor,
-              let right = reference?.diffuse.contents as? HouseColor,
-              let leftRGB = left.usingColorSpace(.deviceRGB),
-              let rightRGB = right.usingColorSpace(.deviceRGB) else { return false }
-        return abs(leftRGB.redComponent - rightRGB.redComponent) < 0.004
-            && abs(leftRGB.greenComponent - rightRGB.greenComponent) < 0.004
-            && abs(leftRGB.blueComponent - rightRGB.blueComponent) < 0.004
     }
 
     private func ribbonColor(_ material: SCNMaterial, matches color: PowerFlowColor?) -> Bool {

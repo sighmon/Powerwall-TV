@@ -2,8 +2,8 @@
 //  CarShowroom.swift
 //  Powerwall-TV
 //
-//  Fullscreen view of the car already parked in the garage. The plate is the
-//  home ground glass. The house shell stays out of this scene.
+//  Fullscreen view of the car already parked in the garage, staged the way the
+//  Tesla app shows it (see ShowroomStage.swift). The house shell stays out of this scene.
 //
 
 import SceneKit
@@ -188,32 +188,34 @@ enum CarShowroom {
         return lines
     }
 
-    /// The parked car on a plate from `HouseGroundPlate.install`. The car is marked for the mirror
-    /// after install, because that install clears the reflection bit on vehicle names.
+    /// The parked car on the Tesla app's showroom stage (`ShowroomStage`): studio panorama
+    /// lighting, a faded mirror floor, the car's baked contact shadow, and a paint-coloured glow.
+    /// The car is the only thing marked for the mirror.
     static func scene(for request: CarShowroomRequest) -> SCNScene {
         let scene = SCNScene()
-        scene.background.contents = HouseColor(red: 22 / 255, green: 23 / 255, blue: 24 / 255, alpha: 1)
         let centre = stageCentre
+        let carPosition = SIMD3<Float>(centre.x, 0, centre.z)
 
         let cameraNode = SCNNode()
         cameraNode.name = cameraName
         let camera = SCNCamera()
         camera.fieldOfView = CGFloat(CarShowroomOrbit.verticalFieldOfViewDegrees)
         camera.zNear = 0.05
-        camera.zFar = 80
+        camera.zFar = 150
         cameraNode.camera = camera
-        let eye = SIMD3(centre.x, CarShowroomOrbit.lookHeight, centre.z) + CarShowroomOrbit.restingOffset
-        cameraNode.simdPosition = eye
         scene.rootNode.addChildNode(cameraNode)
-        cameraNode.look(at: SCNVector3(centre.x, 0.72, centre.z))
+        CarShowroomOrbit().aim(cameraNode, around: centre)
 
-        addLight(named: "ShowroomKey", type: .directional, intensity: 900, at: cameraNode.simdPosition, lookingAt: centre, in: scene)
-        addLight(named: "ShowroomFill", type: .ambient, intensity: 280, at: centre, lookingAt: nil, in: scene)
-
-        HouseGroundPlate.install(on: scene.rootNode)
+        ShowroomStage.install(
+            in: scene,
+            carPosition: carPosition,
+            model: request.model,
+            highlight: ShowroomStage.highlight(for: request)
+        )
+        ShowroomStage.updateGlow(in: scene, camera: cameraNode, centre: centre)
 
         let vehicle = loadVehicle(model: request.model)
-        vehicle.simdPosition = SIMD3(centre.x, 0, centre.z)
+        vehicle.simdPosition = carPosition
         // Catalogue cars keep the colour exported in the file until a colour step sets a wrap.
         // An owned car still uses Fleet paint.
         let wrap = request.paintColorOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -323,27 +325,6 @@ enum CarShowroom {
             includeInReflection(child)
         }
     }
-
-    private static func addLight(
-        named name: String,
-        type: SCNLight.LightType,
-        intensity: CGFloat,
-        at position: SIMD3<Float>,
-        lookingAt centre: SIMD3<Float>?,
-        in scene: SCNScene
-    ) {
-        let node = SCNNode()
-        node.name = name
-        let light = SCNLight()
-        light.type = type
-        light.intensity = intensity
-        node.light = light
-        node.simdPosition = position
-        scene.rootNode.addChildNode(node)
-        if let centre {
-            node.look(at: SCNVector3(centre.x, 0.6, centre.z))
-        }
-    }
 }
 
 /// Orbit around the showroom car. Identity matches the camera `CarShowroom.scene` installs.
@@ -358,16 +339,20 @@ struct CarShowroomOrbit: Equatable {
     var pan = SIMD3<Float>.zero
     static let panRange: ClosedRange<Float> = -3...3
 
-    static let pitchRange: ClosedRange<Float> = -20...50
+    /// Relative to the resting view, which already looks down about 25°.
+    static let pitchRange: ClosedRange<Float> = -20...40
     /// Wide enough that a portrait window can still back up to fit a Cybertruck.
     static let distanceRange: ClosedRange<Float> = 0.2...6
     /// Eye minus the look target at the resting view. The car's nose is −Z, and this
     /// offset sits on the car's left so that nose points toward the left of the screen.
-    static let restingOffset = SIMD3<Float>(-3.1, 0.53, -5.4)
+    /// Direction of the Tesla app's PARKED camera (Snapshots.gd: rotation (−25°, −138°),
+    /// 7 m out), so the car is seen from the same front three-quarter angle and height.
+    static let restingOffset = SIMD3<Float>(-4.244, 2.958, -4.713)
     static let lookHeight: Float = 0.72
     /// Share of the window the fitted car may use. The rest stays clear of the edges.
     static let fitFill: Float = 0.9
-    static let verticalFieldOfViewDegrees: Float = 28
+    /// Snapshots.gd PARKED `cam_fov`.
+    static let verticalFieldOfViewDegrees: Float = 30
 
     func clamped() -> CarShowroomOrbit {
         var copy = self
@@ -445,7 +430,7 @@ struct CarShowroomOrbit: Equatable {
     }
 
     /// Distance that places every point inside the window at this orbit angle.
-    /// `aspect` is view width divided by height. The vertical field of view stays 28°.
+    /// `aspect` is view width divided by height. The vertical field of view stays 30°.
     static func distanceScale(
         fitting points: [SIMD3<Float>],
         around centre: SIMD3<Float>,
@@ -863,7 +848,7 @@ final class CarShowroomControlView: SCNView {
         allowsCameraControl = false
         antialiasingMode = .multisampling4X
         rendersContinuously = false
-        backgroundColor = HouseColor(red: 22 / 255, green: 23 / 255, blue: 24 / 255, alpha: 1)
+        backgroundColor = ShowroomStage.backgroundColour
         fitToWindow()
         aim()
     }
@@ -924,6 +909,9 @@ final class CarShowroomControlView: SCNView {
         guard let camera = scene?.rootNode.childNode(withName: CarShowroom.cameraName, recursively: true) else { return }
         alignToCentre()
         orbit.aim(camera, around: CarShowroom.stageCentre)
+        if let scene {
+            ShowroomStage.updateGlow(in: scene, camera: camera, centre: CarShowroom.stageCentre)
+        }
         pointOfView = camera
         #if os(macOS)
         setNeedsDisplay(bounds)
