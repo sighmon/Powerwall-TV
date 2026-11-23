@@ -146,10 +146,41 @@ example:
 ```
 [Lamps] ModelY: 2 lamp material(s) matched
 [Lamps] ModelY: housing node=Lamps material=Lamps texcoords=true atlas from bundle ModelY_Lamps_BC.png
-[Lamps] ModelY: lens node=LampGlass material=LampGlass transparency=0.39
+[Lamps] ModelY: lens node=LampGlass material=LampGlass transparency=0.2 tint=0.6 (Tesla 0.39)
 ```
 
 `texcoords=false` or `nothing named Lamps or LampGlass` points straight at the import.
+
+### Brightness (bb2f130)
+
+Simon's `-debugLamps` log came back healthy for that commit: the housing matched,
+`texcoords=true`, and the atlas loaded from the bundle. So what was left was brightness. Three
+things kept the lamps dark:
+
+- **The lens.** It still had Tesla's near-black tint (0.0118) at 0.39 to 0.51 opacity, so it
+  covered the housing in black smoke.
+- **The housing colour.** It was at 0.75.
+- **The glow floor.** At 0.12, it was faint.
+
+The atlas PNGs have no colour profile. SceneKit reads them as sRGB, the same as Godot does, so no
+colour-space fix was needed.
+
+The showroom lights the housing through its `lightingEnvironment` (`ShowroomStudio.png`, 2.2).
+The home and garage views use the car studio rig (`HouseCarLighting`).
+
+Tuning knobs, all in `VehicleLamps` (`HouseLighting.swift`):
+
+| Knob | Value | Effect |
+| --- | --- | --- |
+| `displayAlbedo` | 1.0 | Housing atlas brightness. Chrome and LED strips are light grey to white; black stays black. |
+| `emissionFloor` | 0.3 | The atlas glows this much, so it reads under any lighting. Black areas stay black. |
+| `housingRoughness` | 0.35 | Housing gloss (lower is glossier) |
+| `lensTint` | 0.6 | Lens colour, from 0 (black) to 1 (white). Tesla's is 0.0118. |
+| `lensOpacity` | 0.2 | Lens opacity. Tesla's is 0.39 to 0.51. |
+| `lensMaxRoughness` | 0.1 | Cap on lens roughness, so it stays glossy |
+| `fallbackGrey` | 0.35 | Housing colour if the atlas or the UVs are missing |
+
+`-debugLamps YES` now also prints the albedo, emission, lens tint and opacity in use.
 
 `build_vehicles_v2.py` now writes the lens single-sided for future exports. The shipped usdz files
 are unchanged, because the app sets this on the material.

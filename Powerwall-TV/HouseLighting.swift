@@ -638,18 +638,31 @@ enum VehicleGlass {
 /// diffuse atlas plus a small emission of it, and a mid-grey fallback when the atlas or the
 /// texture coordinates are missing. The usdz files also wire the atlas through a UV reader
 /// (tools/embed_lamp_textures.py), so SceneKit's import keeps the housing's `st` coordinates.
-/// The lens keeps Tesla's smoke, alpha 0.39 to 0.51, drawn as one layer with no depth writes.
+/// The lens was still Tesla's near-black smoke at 0.39 to 0.51 and kept the lamps dark, so it is
+/// now a near-clear, glossy light grey at `lensOpacity`, drawn as one layer with no depth writes.
 /// `-debugLamps YES` logs every matched lamp material.
 enum VehicleLamps {
     static let housingName = "Lamps"
     static let glassName = "LampGlass"
-    /// Colour multiplier for the housing atlas, in place of the app's ~0.1.
-    static let displayAlbedo: CGFloat = 0.75
-    /// The atlas also glows this much, so the housing never renders fully black.
-    static let emissionFloor: CGFloat = 0.12
+    // MARK: Tuning knobs (Simon: these are the ones to adjust)
+
+    /// Colour multiplier for the housing atlas (the app uses ~0.1 and relies on reflections).
+    /// 1 shows the atlas as authored: chrome and LED strips light grey to white, black stays black.
+    static let displayAlbedo: CGFloat = 1.0
+    /// The housing atlas also glows this much, so it reads under any lighting. Black atlas areas
+    /// (trim, bezels) stay black because the glow is the atlas itself. This is not "lamps on".
+    static let emissionFloor: CGFloat = 0.3
+    /// Housing roughness. Lower is glossier.
     static let housingRoughness: CGFloat = 0.35
     /// Used when the atlas or the texture coordinates are missing.
     static let fallbackGrey: CGFloat = 0.35
+    /// Lens tint (0 black … 1 white). Tesla's Glass_Lights is 0.0118 (near black); light grey reads
+    /// as clear glass over the housing.
+    static let lensTint: CGFloat = 0.6
+    /// Lens opacity (0 invisible … 1 solid). Tesla's is 0.39 to 0.51, which smoked the lamps dark.
+    static let lensOpacity: CGFloat = 0.2
+    /// Lens roughness ceiling. Tesla's are 0.01 to 0.1; capped so the lens stays glossy.
+    static let lensMaxRoughness: CGFloat = 0.1
 
     /// The lamp housing material. `texture` is the asset prefix for `<texture>_Lamps_BC.png`
     /// and `<texture>_Lamps_MRA.png`. `albedo`, `metallic`, and `roughness` multiply the maps,
@@ -712,11 +725,11 @@ enum VehicleLamps {
             case .housing?:
                 guard let housing = housing(for: model) else { continue }
                 let how = apply(housing, to: material, hasTexcoords: hasTexcoords)
-                lines.append("housing node=\(nodeName ?? "-") material=\(material.name ?? "-") texcoords=\(hasTexcoords) \(how)")
+                lines.append("housing node=\(nodeName ?? "-") material=\(material.name ?? "-") texcoords=\(hasTexcoords) \(how) albedo=\(displayAlbedo) emission=\(emissionFloor)")
             case .lens?:
                 guard let lens = lens(for: model) else { continue }
                 apply(lens, to: material)
-                lines.append("lens node=\(nodeName ?? "-") material=\(material.name ?? "-") transparency=\(lens.opacity)")
+                lines.append("lens node=\(nodeName ?? "-") material=\(material.name ?? "-") transparency=\(lensOpacity) tint=\(lensTint) (Tesla \(lens.opacity))")
             case nil:
                 continue
             }
@@ -817,14 +830,15 @@ enum VehicleLamps {
         material.emission.contents = HouseColor.black
         material.multiply.contents = HouseColor.white
         material.ambientOcclusion.contents = nil
-        material.diffuse.contents = HouseColor(white: lens.albedo, alpha: 1)
+        // Near-clear light grey instead of Tesla's near-black tint; glossy so it still reads as glass.
+        material.diffuse.contents = HouseColor(white: lensTint, alpha: 1)
         material.diffuse.intensity = 1
         material.metalness.contents = NSNumber(value: 0)
-        material.roughness.contents = NSNumber(value: Double(lens.roughness))
+        material.roughness.contents = NSNumber(value: Double(min(lens.roughness, lensMaxRoughness)))
         // USD import puts the opacity on `transparent`; replace it so only `transparency` counts.
         material.transparent.contents = HouseColor.white
         material.transparent.intensity = 1
-        material.transparency = lens.opacity
+        material.transparency = lensOpacity
         material.transparencyMode = .aOne
         material.blendMode = .alpha
         material.writesToDepthBuffer = false

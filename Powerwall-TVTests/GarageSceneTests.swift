@@ -2341,7 +2341,8 @@ struct GarageSceneTests {
         #expect(housing.ambientOcclusion.contents == nil)
         #expect(housing.emission.contents != nil)
         #expect(abs(housing.emission.intensity - VehicleLamps.emissionFloor) < 0.001)
-        #expect(VehicleLamps.emissionFloor < 0.2)
+        #expect(VehicleLamps.emissionFloor >= 0.25 && VehicleLamps.emissionFloor <= 0.35)
+        #expect(VehicleLamps.displayAlbedo >= 1)
         #expect(housing.transparency == 1)
         #expect(housing.writesToDepthBuffer)
         let lensGlow = rgb(lens.emission.contents)
@@ -2349,8 +2350,11 @@ struct GarageSceneTests {
         #expect(rgb(lens.multiply.contents).red > 0.99)
         #expect(rgb(lens.transparent.contents).red > 0.99)
         // Tesla's Glass_Lights smoke, drawn as one see-through layer.
-        #expect(abs(lens.transparency - 0.51) < 0.001)
-        #expect(lens.transparency < 0.6)
+        // Near-clear glossy glass, not Tesla's near-black smoke at 0.51.
+        #expect(abs(lens.transparency - VehicleLamps.lensOpacity) < 0.001)
+        #expect(lens.transparency <= 0.3)
+        #expect(rgb(lens.diffuse.contents).red > 0.5)
+        #expect(((lens.roughness.contents as? NSNumber)?.doubleValue ?? 1) <= Double(VehicleLamps.lensMaxRoughness))
         #expect(lens.blendMode == .alpha)
         #expect(lens.transparencyMode == .aOne)
         #expect(!lens.isDoubleSided)
@@ -2438,7 +2442,7 @@ struct GarageSceneTests {
                 continue
             }
             #expect(!lens.isDoubleSided)
-            #expect(lens.transparency < 0.6)
+            #expect(lens.transparency <= 0.3)
             // The floor mirror culls the flipped lens from the other side and leaves the car's alone.
             if let mirror = scene.rootNode.childNode(withName: ShowroomStage.mirrorName, recursively: true) {
                 mirror.enumerateHierarchy { node, _ in
@@ -2469,7 +2473,7 @@ struct GarageSceneTests {
                 if material.name == VehicleLamps.glassName {
                     lenses += 1
                     #expect(!material.isDoubleSided)
-                    #expect(material.transparency < 0.6)
+                    #expect(material.transparency <= 0.3)
                 }
                 if material.name == VehicleLamps.housingName {
                     housings += 1
