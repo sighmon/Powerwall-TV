@@ -102,34 +102,53 @@ sky wash (0) and before the house (2). If the PNG is missing, the card stays hid
 To make the shadow stronger or weaker, change `STRENGTH` in the bake script and rebake.
 
 **Garage car lighting.** The house shell is unlit (`.constant` plus the Building shader port), but
-the car is PBR. Under the house's ambient and sun lights alone, it looked flat. The car is now lit
-by a radiance probe light that uses the showroom's `ShowroomStudio.png`, plus a weak directional
-light that follows the house sun (`HouseCarLighting`). Both lights, and every node of the car, use
-category bit `1 << 4`. `HouseFill` and `HouseSun` exclude that bit. The result:
+the car is PBR. Under the house's ambient and sun lights alone, it looked flat. The car now has a
+small studio rig of its own (`HouseCarLighting`):
 
-- the car gets only the studio lighting;
-- the windows, solar panels and Powerwall keep exactly the lighting they had;
-- the house shell is unchanged.
+- an ambient fill (`HouseCarFill`);
+- an overhead key (`HouseCarKey`);
+- a low rim from behind (`HouseCarRim`);
+- a weak sun that follows the house sun (`HouseCarSun`).
 
-No scene-wide `lightingEnvironment` is set. `setVehicleModel` marks a swapped-in car the same way.
+Every rig light, and every node of the car, uses category bit `1 << 4`. `HouseFill` and
+`HouseSun` exclude that bit. So the car gets only the rig, and the windows, solar panels and
+Powerwall keep exactly the lighting they had. The house shell is unchanged. `setVehicleModel`
+marks a swapped-in car the same way.
+
+No light probe and no `lightingEnvironment` in the home view. cf3d74f lit the car with a radiance
+`SCNLight` probe fed the equirectangular `ShowroomStudio.png`. That gave the car paint and the solar
+panels black highlights in the home view (the showroom was fine):
+
+- SceneKit applies a probe to every physically based material inside its extents and ignores
+  `categoryBitMask`, so the probe reached the solar panels as well as the car.
+- With `probeUpdateType = .never`, the probe never gets usable radiance from that image, so
+  specular reflections sampled black.
+- The car had also lost the house fill, so it was left with only the weak sun.
+
+Plain ambient and directional lights do honour category bits. A test checks that the home view
+has no probe.
 
 Tuning knobs (all in `HouseCarLighting`):
 
 | Knob | Value | Meaning |
 | --- | --- | --- |
-| `dayStrength` | 1.2 | Probe intensity in full daylight (× 1000 SceneKit units). The showroom uses 2.2. |
-| `nightFraction` | 0.25 | Share of the probe that remains at night (theme 0). |
-| `sunFraction` | 0.35 | Car sun as a share of the house sun (`350 + 650 · theme · ambientScale`). |
-| `probeExtent` | 30 m | Probe box size, which covers the garage. |
+| `dayStrength` | 1.2 | Scale on the whole rig in full daylight |
+| `fillLumens` / `keyLumens` / `rimLumens` | 320 / 600 / 300 | Each studio light at `dayStrength` 1. The fill matches the house fill. |
+| `keyFrom` / `rimFrom` | (0.15, 1, 0.35) / (−0.5, 0.45, −1) | Model-space directions the key and rim shine from |
+| `nightFraction` | 0.4 | Share of the rig left at night (theme 0) |
+| `sunFraction` | 0.35 | Car sun as a share of the house sun (`350 + 650 · theme · ambientScale`) |
 
-Cloud cover (`ambientScale`) dims both lights, the same way it dims the house.
+Cloud cover (`ambientScale`) dims the whole rig, the same way it dims the house.
 The 4× display boost on paint (`paintDisplayBoost`) stays. The live Fleet paint albedos are dark,
 and the showroom needs the same boost even under its stronger studio light.
-The live ground-plate mirror (`HouseGroundPlate`) is unchanged.
 
-Not checked on a device: whether SceneKit accepts an equirectangular PNG as `probeEnvironment`
-contents. If the car comes out unlit, try a cube map, or set a temporary `lightingEnvironment` on
-the car's materials instead.
+**Solar out of the floor mirror.** The ground plate is an `SCNFloor` with
+`reflectionCategoryBitMask` set to the reflection bit (`1 << 3`). Solar never had that bit, but the
+panels still showed in the mirror on Simon's Mac. Now the materials under `SolarPanels` and
+`SolarRoof` (`HouseGroundPlate.discardedFromMirror`) are also copied and given `reflectedFragment`,
+the same mirrored-camera discard the gateway and the power-flow ribbons already use. The panels are
+dropped from the reflection pass whatever the floor does with the category bits. They look the
+same in the main view. The house shell, windows and Powerwall still reflect as before.
 
 ## Model Y Juniper glass and B pillars
 

@@ -658,20 +658,21 @@ struct GarageSceneTests {
         lighting.setVehicleModel(.modelY)
         lighting.showVehicle(true)
 
-        let probe = try #require(house.childNode(withName: HouseCarLighting.probeName, recursively: true)?.light)
-        #expect(probe.type == .probe)
-        #expect(probe.probeType == .radiance)
-        #expect(probe.probeUpdateType == .never)
-        #expect(probe.categoryBitMask == HouseCarLighting.lightBit)
-        let environment: SCNMaterialProperty? = probe.probeEnvironment
-        #expect(environment?.contents != nil)
-        let carSun = try #require(house.childNode(withName: HouseCarLighting.sunName, recursively: true)?.light)
-        #expect(carSun.categoryBitMask == HouseCarLighting.lightBit)
+        for role in HouseCarLighting.Role.allCases {
+            let light = try #require(house.childNode(withName: role.rawValue, recursively: true)?.light)
+            #expect(light.type == (role == .fill ? .ambient : .directional))
+            #expect(light.categoryBitMask == HouseCarLighting.lightBit)
+            #expect(light.intensity > 0)
+        }
         for name in ["HouseFill", "HouseSun"] {
             let light = try #require(house.childNode(withName: name, recursively: true)?.light)
             #expect(light.categoryBitMask & HouseCarLighting.lightBit == 0)
         }
-        // No scene-wide environment: the windows, solar and gateway would change with it.
+        // A light probe ignores category bits and gave the car and the solar panels black
+        // highlights (cf3d74f). No probe and no scene-wide environment in the home view.
+        house.enumerateHierarchy { node, _ in
+            #expect(node.light?.type != .probe)
+        }
         #expect(scene.lightingEnvironment.contents == nil)
 
         let vehicle = try #require(house.childNode(withName: "Vehicle", recursively: true))
@@ -681,7 +682,7 @@ struct GarageSceneTests {
             if node.geometry != nil { carMeshes += 1 }
         }
         #expect(carMeshes > 0)
-        for name in ["Home", "Windows", "SolarPanels", "Powerwall"] {
+        for name in ["Home", "Windows", "SolarPanels", "SolarRoof", "Powerwall"] {
             guard let node = house.childNode(withName: name, recursively: true) else { continue }
             node.enumerateHierarchy { child, _ in
                 #expect(child.categoryBitMask & HouseCarLighting.lightBit == 0)
@@ -691,16 +692,46 @@ struct GarageSceneTests {
     }
 
     @Test func carStudioDimsAtNightAndUnderCloud() {
-        let day = HouseCarLighting.environmentIntensity(theme: 1, ambientScale: 1)
-        let night = HouseCarLighting.environmentIntensity(theme: 0, ambientScale: 1)
-        #expect(abs(day - 1000 * HouseCarLighting.dayStrength) < 0.001)
-        #expect(abs(night - day * HouseCarLighting.nightFraction) < 0.001)
-        #expect(HouseCarLighting.environmentIntensity(theme: 1, ambientScale: 0.75) < day)
-        #expect(HouseCarLighting.environmentIntensity(theme: 2, ambientScale: 1) == day)
-        // Weaker than the showroom, which runs the same panorama at 2.2.
-        #expect(HouseCarLighting.dayStrength < ShowroomStage.environmentIntensity)
-        #expect(abs(HouseCarLighting.sunIntensity(theme: 1, ambientScale: 1) - 1000 * HouseCarLighting.sunFraction) < 0.001)
-        #expect(abs(HouseCarLighting.sunIntensity(theme: 0, ambientScale: 1) - 350 * HouseCarLighting.sunFraction) < 0.001)
+        typealias L = HouseCarLighting
+        let fill = L.intensity(.fill, theme: 1, ambientScale: 1)
+        #expect(abs(fill - L.fillLumens * L.dayStrength) < 0.001)
+        #expect(abs(L.intensity(.key, theme: 1, ambientScale: 1) - L.keyLumens * L.dayStrength) < 0.001)
+        #expect(abs(L.intensity(.rim, theme: 1, ambientScale: 1) - L.rimLumens * L.dayStrength) < 0.001)
+        #expect(abs(L.intensity(.fill, theme: 0, ambientScale: 1) - fill * L.nightFraction) < 0.001)
+        #expect(L.intensity(.key, theme: 1, ambientScale: 0.75) < L.intensity(.key, theme: 1, ambientScale: 1))
+        #expect(L.intensity(.fill, theme: 2, ambientScale: 1) == fill)
+        #expect(abs(L.intensity(.sun, theme: 1, ambientScale: 1) - 1000 * L.sunFraction) < 0.001)
+        #expect(abs(L.intensity(.sun, theme: 0, ambientScale: 1) - 350 * L.sunFraction) < 0.001)
+    }
+
+    @Test func solarStaysOutOfTheFloorMirror() throws {
+        guard let scene = ResidentialClassicScene.load() else { return }
+        let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+        let lighting = HouseLighting(root: house)
+        let floor = try #require(house.childNode(withName: HouseGroundPlate.name, recursively: true)?.geometry as? SCNFloor)
+        #expect(floor.reflectionCategoryBitMask == HouseGroundPlate.reflectionBit)
+        for option in [SolarOption.panels, .solarRoof] {
+            lighting.setSolar(option)
+            for name in HouseGroundPlate.discardedFromMirror {
+                let solar = try #require(house.childNode(withName: name, recursively: true))
+                var meshes = 0
+                solar.enumerateHierarchy { node, _ in
+                    #expect(node.categoryBitMask & HouseGroundPlate.reflectionBit == 0)
+                    guard let geometry = node.geometry else { return }
+                    meshes += 1
+                    for material in geometry.materials {
+                        #expect(material.shaderModifiers?[.fragment] == HouseGroundPlate.reflectedFragment)
+                    }
+                }
+                #expect(meshes > 0)
+            }
+        }
+        // The house shell and the Powerwall still show in the mirror.
+        for name in ["Home", "Powerwall"] {
+            let node = try #require(house.childNode(withName: name, recursively: true))
+            #expect(node.categoryBitMask & HouseGroundPlate.reflectionBit != 0)
+            #expect(node.childNodes.filter { $0.geometry != nil }.allSatisfy { $0.categoryBitMask & HouseGroundPlate.reflectionBit != 0 })
+        }
     }
 
     @Test func powerwallKeepsASingleRibbon() {
