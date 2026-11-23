@@ -76,3 +76,26 @@ the lens the smoked glass.
 
 `tools/headlights.py` makes the close-ups. Run it with `LAMPS=before|after`, `USDZ=`, and
 `VIEW=front|rear`. The renders are Cycles approximations, not SceneKit captures.
+
+## Floor reflection
+
+The reflection used to come from `SCNFloor` (reflectivity 0.1, half resolution), with a Metal
+fragment shader modifier fading the floor out. It did not show on an older macOS. Now the
+reflection is the car again, flipped through the floor (`ShowroomStage.makeMirror`). The copy
+shares the car's geometry and materials. A plain `SCNPlane` floor in the background colour covers
+it at 90% (`reflection_strength` 0.1). The floor's alpha comes from a generated texture
+(`floorImage`) and fades out between 5 m and 15 m, like `reflective_floor.shader`. Nothing depends
+on SCNFloor reflections, reflection bit masks, or shader modifiers. The draw order is glow (−20),
+mirror (−15), floor (−10), contact shadow (−5), then the car.
+
+## Model Y Juniper glass and B pillars
+
+![Model Y Juniper before and after](juniper.jpg)
+
+Juniper's roof (`Fade`), rear glass (`Trunk_Cover`), and rear door and quarter windows
+(`Back_*_window`, `Static_Exterior`) use `glass_skybox` ShaderMaterials (`Glass_Windows_Dark`,
+`Glass_Top_Fade`). The glTF export writes no material for these, and the converter had mapped
+them to opaque Trim. They now map to Glass, like the windscreen and front windows. No other car
+has unnamed exterior surfaces. The B pillars sit on the `Interior` mesh, which is dropped: the
+outer cover is on its Trim surface and the inner trim on its `Pillar` surface. The converter keeps
+the triangles of those two surfaces between the door windows, as a gloss black `Pillar` material.

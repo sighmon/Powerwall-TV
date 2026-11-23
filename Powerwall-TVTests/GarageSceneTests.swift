@@ -1832,16 +1832,21 @@ struct GarageSceneTests {
 
         let scene = CarShowroom.scene(for: opened)
         let floorNode = scene.rootNode.childNode(withName: ShowroomStage.floorName, recursively: false)
-        let showroomFloor = floorNode?.geometry as? SCNFloor
+        let showroomFloor = floorNode?.geometry as? SCNPlane
         #expect(showroomFloor != nil)
         #expect(scene.rootNode.childNode(withName: HouseGroundPlate.name, recursively: false) == nil)
-        #expect(abs((showroomFloor?.reflectivity ?? 0) - ShowroomStage.reflectionStrength) < 0.001)
-        #expect(abs((showroomFloor?.reflectionResolutionScaleFactor ?? 0) - 0.5) < 0.001)
-        #expect((showroomFloor?.reflectionFalloffEnd ?? 1) == (showroomFloor?.reflectionFalloffStart ?? 0))
-        #expect(showroomFloor?.reflectionCategoryBitMask == HouseGroundPlate.reflectionBit)
+        #expect(abs((showroomFloor?.width ?? 0) - ShowroomStage.floorSize) < 0.001)
         #expect(showroomFloor?.materials.first?.lightingModel == .constant)
-        #expect(showroomFloor?.materials.first?.shaderModifiers?[.fragment]?.contains("smoothstep(5.0, 15.0") == true)
+        // No SCNFloor reflection and no shader modifier: both failed on an older macOS.
+        #expect(showroomFloor?.materials.first?.shaderModifiers == nil)
+        #expect(abs(ShowroomStage.floorOpacity(atDistance: 0) - 0.9) < 0.001)
+        #expect(abs(ShowroomStage.floorOpacity(atDistance: 4.9) - 0.9) < 0.001)
+        #expect(ShowroomStage.floorOpacity(atDistance: 15) < 0.001)
         #expect((floorNode?.categoryBitMask ?? 0) & HouseGroundPlate.reflectionBit == 0)
+        let mirror = scene.rootNode.childNode(withName: ShowroomStage.mirrorName, recursively: false)
+        #expect(mirror != nil)
+        #expect(abs((mirror?.simdScale.y ?? 1) + 1) < 0.001)
+        #expect((mirror?.renderingOrder ?? 0) < (floorNode?.renderingOrder ?? 0))
         #expect(scene.lightingEnvironment.contents != nil)
         #expect(abs(scene.lightingEnvironment.intensity - ShowroomStage.environmentIntensity) < 0.001)
         var lights = 0
@@ -1865,7 +1870,20 @@ struct GarageSceneTests {
             if name.hasPrefix("Home") || name.hasPrefix("GarageDoor") { shell = true }
         }
         #expect(vehicle != nil)
-        #expect((vehicle?.categoryBitMask ?? 0) & HouseGroundPlate.reflectionBit != 0)
+        if let vehicle, let mirror {
+            var carMaterials: [SCNMaterial] = []
+            vehicle.enumerateHierarchy { node, _ in carMaterials += node.geometry?.materials ?? [] }
+            var mirrorMaterials: [SCNMaterial] = []
+            mirror.enumerateHierarchy { node, _ in mirrorMaterials += node.geometry?.materials ?? [] }
+            // Shared, so a paint change reaches the reflection too.
+            #expect(carMaterials.count == mirrorMaterials.count)
+            #expect(zip(carMaterials, mirrorMaterials).allSatisfy { $0 === $1 })
+            var renderedAfterTheFloor = false
+            mirror.enumerateHierarchy { node, _ in
+                if node.renderingOrder >= (floorNode?.renderingOrder ?? 0) { renderedAfterTheFloor = true }
+            }
+            #expect(!renderedAfterTheFloor)
+        }
         var meshes = 0
         vehicle?.enumerateHierarchy { node, _ in
             if node.geometry != nil { meshes += 1 }
@@ -2207,6 +2225,29 @@ struct GarageSceneTests {
         ))
         #expect(material(named: "Lights", in: generic) == nil)
         #expect(material(named: VehicleLamps.housingName, in: generic) == nil)
+    }
+
+    @Test func juniperKeepsItsBPillarsAndGlassRoof() {
+        let scene = CarShowroom.scene(for: CarShowroomRequest(
+            vin: nil,
+            model: .modelYJuniper,
+            exteriorColor: nil,
+            paintColorOverride: nil,
+            colorizerRemap: false,
+            displayBoost: 1,
+            lines: []
+        ))
+        #expect(material(named: "Pillar", in: scene) != nil)
+        // The roof glass sits on top of the car. It used to come through as Trim.
+        var glassTop: Float = -.infinity
+        var trimTop: Float = -.infinity
+        scene.rootNode.childNode(withName: "Vehicle", recursively: false)?.enumerateHierarchy { node, _ in
+            guard let geometry = node.geometry, let name = geometry.materials.first?.name else { return }
+            let top = Float(geometry.boundingBox.max.y)
+            if name == "Glass" { glassTop = max(glassTop, top) }
+            if name == "Trim" { trimTop = max(trimTop, top) }
+        }
+        #expect(glassTop >= trimTop)
     }
 
     @Test func showroomColourStepsWrapTheCatalogue() {

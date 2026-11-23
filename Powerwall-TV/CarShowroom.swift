@@ -230,7 +230,7 @@ enum CarShowroom {
             )
         }
         scene.rootNode.addChildNode(vehicle)
-        includeInReflection(vehicle)
+        scene.rootNode.addChildNode(ShowroomStage.makeMirror(of: vehicle))
         return scene
     }
 
@@ -317,13 +317,6 @@ enum CarShowroom {
         let count = max(count, 1)
         let wrapped = index % count
         return wrapped >= 0 ? wrapped : wrapped + count
-    }
-
-    private static func includeInReflection(_ node: SCNNode) {
-        node.categoryBitMask |= HouseGroundPlate.reflectionBit
-        for child in node.childNodes {
-            includeInReflection(child)
-        }
     }
 }
 

@@ -35,7 +35,11 @@ def cat(node,mat,car):
     # Lamp lens glass and the textured lamp housing (reflectors, red and amber lenses) stay
     # separate so the app can give them the Tesla app's Glass_Lights and Light materials.
     if "glass" in m and "light" in m: return "LampGlass"
-    if "glass" in m or "window" in m or m in ("pillar",): return "Glass"
+    # Model Y Juniper's roof, rear glass, and rear door and quarter windows use glass_skybox
+    # ShaderMaterials (Glass_Windows_Dark, Glass_Top_Fade). The glTF export writes no material
+    # for them, so they came through as opaque Trim. No other car has unnamed exterior surfaces.
+    if m=="" and car=="ModelYJuniper": return "Glass"
+    if "glass" in m or "window" in m: return "Glass"
     # ExteriorFade was wrongly mapped to Glass; on body panels it is body paint (Model Y liftgate).
     if m in ("exteriorfade","exterior_fade"):
         return "Paint" if BODY_PANEL.search(n) else "Trim"
@@ -52,6 +56,8 @@ MATS={"Paint":dict(metallic=0.35,roughness=0.25),
  "Lamps":dict(c=(0.1,0.1,0.1),metallic=0.7,roughness=0.3),
  # LampGlass: Glass_Lights in every car (albedo 0.0118, alpha 0.39, roughness 0.05).
  "LampGlass":dict(c=(0.0118,0.0118,0.0118),metallic=0,roughness=0.05,opacity=0.39),
+ # Pillar: Bayberry Pillar.tres albedo 0.0196, gloss black like the car's pillar trim.
+ "Pillar":dict(c=(0.0196,0.0196,0.0196),metallic=0,roughness=0.25),
  "Chrome":dict(c=(0.6,0.6,0.62),metallic=0.9,roughness=0.3),
  "Tires":dict(c=(0.03,0.03,0.03),metallic=0,roughness=0.9),"Wheels":dict(c=(0.55,0.56,0.58),metallic=0.8,roughness=0.35),
  "Trim":dict(c=(0.04,0.04,0.045),metallic=0,roughness=0.5)}
@@ -83,6 +89,15 @@ def add_cybertruck_tonneau(add):
         print(f"Cybertruck tonneau: CLOSED from standalone+Ry-90 ({n_keep} meshes)")
     else:
         print("Cybertruck tonneau: NO COVER ASSET FOUND (bed will look open)")
+def add_b_pillars(add,P,F,N,UV):
+    """Model Y Juniper's B pillars live on the dropped Interior mesh: the outer cover on its
+    Trim surface and the inner trim on its Pillar surface. Keep only the triangles between
+    the front and rear door windows, above the belt line."""
+    c=P[F].mean(1)
+    keep=(np.abs(c[:,0])>0.6)&(c[:,1]>1.0)&(c[:,1]<1.55)&(c[:,2]>0.05)&(c[:,2]<0.5)
+    if not keep.any(): return
+    F=F[keep]; used=np.unique(F); remap=-np.ones(len(P),np.int64); remap[used]=np.arange(len(used))
+    add("Pillar",P[used],remap[F],N[used],None if UV is None else UV[used])
 def build(name,carf,wheelf,paint):
     groups={}
     def add(k,P,F,N,UV=None):
@@ -91,6 +106,8 @@ def build(name,carf,wheelf,paint):
         if UV is None or len(UV)!=len(P): UV=np.zeros((len(P),2))
         groups.setdefault(k,[]).append((P,F,N,UV))
     for n,m,P,N,UV,F in meshes(R+carf+".glb"):
+        if name=="ModelYJuniper" and n=="Interior" and (m or "").lower() in ("trim","pillar"):
+            add_b_pillars(add,P,F,N,UV); continue
         if DROP_NODE.search(n or "") or drop_mat(m): continue
         ext=P.max(0)-P.min(0)
         if ext[1]<0.02 and ext[0]>1.5: continue  # flat ground/shadow cards

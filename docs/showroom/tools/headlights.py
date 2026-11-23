@@ -161,21 +161,22 @@ def centre_bias(scale):
     return bias
 scale = dist_scale(W / H); bias = centre_bias(scale)
 tgt, eye = eye_of(scale, bias)
-# ---- close-up on a front-left headlight (or rear-left taillight) ----
-lamp_pts = []
-for o in meshes:
-    nm = o.name.split('.')[0]
-    if nm not in ('Lights', 'Lamps', 'LampGlass'): continue
-    Mw = o.matrix_world
-    for v in o.data.vertices:
-        p = Mw @ v.co; q = np.array([p.x, p.z, -p.y])
-        if q[0] < -0.2 and ((q[2] < -1.4) if VIEW == 'front' else (q[2] > 1.4)): lamp_pts.append(q)
-lamp_pts = np.array(lamp_pts)
-tgt = (lamp_pts.min(0) + lamp_pts.max(0)) / 2
-span = np.linalg.norm(lamp_pts.max(0) - lamp_pts.min(0))
-direction = norm(np.array([-0.75, 0.32, -1.0] if VIEW == 'front' else [-0.75, 0.32, 1.0]))
-FOV = 30
-eye = tgt + direction * (span * float(os.environ.get("ZOOM", "0.4")) / math.tan(math.radians(FOV) / 2))
+if VIEW in ('front', 'rear'):
+    # ---- close-up on a front-left headlight (or rear-left taillight) ----
+    lamp_pts = []
+    for o in meshes:
+        nm = o.name.split('.')[0]
+        if nm not in ('Lights', 'Lamps', 'LampGlass'): continue
+        Mw = o.matrix_world
+        for v in o.data.vertices:
+            p = Mw @ v.co; q = np.array([p.x, p.z, -p.y])
+            if q[0] < -0.2 and ((q[2] < -1.4) if VIEW == 'front' else (q[2] > 1.4)): lamp_pts.append(q)
+    lamp_pts = np.array(lamp_pts)
+    tgt = (lamp_pts.min(0) + lamp_pts.max(0)) / 2
+    span = np.linalg.norm(lamp_pts.max(0) - lamp_pts.min(0))
+    direction = norm(np.array([-0.75, 0.32, -1.0] if VIEW == 'front' else [-0.75, 0.32, 1.0]))
+    FOV = 30
+    eye = tgt + direction * (span * float(os.environ.get("ZOOM", "0.4")) / math.tan(math.radians(FOV) / 2))
 cam = bpy.data.cameras.new('cam'); cam.sensor_fit = 'VERTICAL'; cam.angle_y = math.radians(FOV)
 cam.clip_start = 0.05; cam.clip_end = 200
 co = bpy.data.objects.new('cam', cam); sc.collection.objects.link(co); sc.camera = co

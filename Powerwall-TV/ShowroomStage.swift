@@ -46,10 +46,9 @@ enum ShowroomStage {
     // MARK: Floor
 
     static let floorName = "ShowroomFloor"
+    static let mirrorName = "ShowroomMirror"
     /// reflective_floor.tres `reflection_strength`.
     static let reflectionStrength: CGFloat = 0.1
-    /// ReflectiveFloor.REFLECTION_RESOLUTION_SCALE.
-    static let reflectionResolutionScale: CGFloat = 0.5
     /// reflective_floor.shader: `1 - smoothstep(5, 15, distance)`.
     static let floorFadeStart: Float = 5
     static let floorFadeEnd: Float = 15
@@ -178,6 +177,7 @@ enum ShowroomStage {
     // MARK: Install
 
     /// Background, studio lighting, floor, glow, and contact shadow around a car parked at `carPosition`.
+    /// Add the car's reflection with `makeMirror(of:)` once the car is in place.
     static func install(in scene: SCNScene, carPosition: SIMD3<Float>, model: VehicleModel, highlight: SIMD3<Float>) {
         scene.background.contents = backgroundColour
         if let url = HouseLighting.resourceURL(name: environmentName, ext: "png") {
@@ -196,49 +196,87 @@ enum ShowroomStage {
         }
     }
 
+    /// The mirror is an upside-down copy of the car under a floor that lets 10% of it through,
+    /// like the app's reflection camera. It does not use SCNFloor reflections or a shader
+    /// modifier. Neither showed on an older macOS, and a copy renders the same everywhere.
+    /// The floor is the background colour, so only the mirror shows near the car. Far away the
+    /// floor turns transparent and lets the glow behind the car through, like reflective_floor.shader.
     static func makeFloor(centre: SIMD3<Float>) -> SCNNode {
-        let floor = SCNFloor()
-        floor.width = floorSize
-        floor.length = floorSize
-        floor.reflectivity = reflectionStrength
-        // No height falloff: the app mirrors the whole car.
-        floor.reflectionFalloffStart = 0
-        floor.reflectionFalloffEnd = 0
-        floor.reflectionCategoryBitMask = HouseGroundPlate.reflectionBit
-        floor.reflectionResolutionScaleFactor = reflectionResolutionScale
+        let plane = SCNPlane(width: floorSize, height: floorSize)
         let material = SCNMaterial()
         material.name = floorName
         material.lightingModel = .constant
-        material.diffuse.contents = backgroundColour
-        // Below 1 so SceneKit blends the fade the modifier writes into alpha.
-        material.transparency = 0.999
+        material.diffuse.contents = floorImage()
         material.blendMode = .alpha
-        material.shaderModifiers = [.fragment: floorFadeFragment(centre: SIMD2(centre.x, centre.z))]
-        floor.materials = [material]
-        let node = SCNNode(geometry: floor)
+        material.transparencyMode = .aOne
+        material.writesToDepthBuffer = true
+        material.readsFromDepthBuffer = true
+        plane.materials = [material]
+        let node = SCNNode(geometry: plane)
         node.name = floorName
+        node.eulerAngles.x = -.pi / 2
         node.simdPosition = SIMD3(centre.x, 0, centre.z)
-        node.categoryBitMask &= ~HouseGroundPlate.reflectionBit
-        // Drawn after the glow so the near floor covers it, and before the contact shadow.
+        // After the glow and the mirror, before the car and the contact shadow.
         node.renderingOrder = -10
         node.castsShadow = false
         return node
     }
 
-    /// The floor is the background colour, so only its mirror shows near the car. Far away it
-    /// turns transparent and lets the glow behind the car through, like reflective_floor.shader.
-    static func floorFadeFragment(centre: SIMD2<Float>) -> String {
-        let x = String(format: "%.4f", locale: Locale(identifier: "en_US_POSIX"), Double(centre.x))
-        let z = String(format: "%.4f", locale: Locale(identifier: "en_US_POSIX"), Double(centre.y))
-        let start = String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), Double(floorFadeStart))
-        let end = String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), Double(floorFadeEnd))
-        return """
-        #pragma body
-        float4 showroomWorld = scn_frame.inverseViewTransform * float4(_surface.position, 1.0);
-        float showroomDistance = length(showroomWorld.xz - float2(\(x), \(z)));
-        float showroomFade = 1.0 - smoothstep(\(start), \(end), showroomDistance);
-        _output.color *= showroomFade;
-        """
+    /// How much of the floor covers what is under it, `distance` metres from the car centre.
+    static func floorOpacity(atDistance distance: Float) -> Float {
+        (1 - Float(reflectionStrength)) * (1 - HouseSky.smoothstep(floorFadeStart, floorFadeEnd, distance))
+    }
+
+    /// Background colour with `floorOpacity` in alpha, centred on the plane.
+    static func floorImage(size: Int = 256) -> CGImage {
+        var pixels = [UInt8](repeating: 0, count: size * size * 4)
+        let last = Float(size - 1)
+        let half = Float(floorSize) / 2
+        let colour = backgroundRGB
+        for y in 0..<size {
+            for x in 0..<size {
+                let u = Float(x) / last * 2 - 1
+                let v = Float(y) / last * 2 - 1
+                let alpha = floorOpacity(atDistance: sqrt(u * u + v * v) * half)
+                let index = (y * size + x) * 4
+                pixels[index] = UInt8(colour.x * 255 + 0.5)
+                pixels[index + 1] = UInt8(colour.y * 255 + 0.5)
+                pixels[index + 2] = UInt8(colour.z * 255 + 0.5)
+                pixels[index + 3] = UInt8(min(max(alpha, 0), 1) * 255 + 0.5)
+            }
+        }
+        let provider = CGDataProvider(data: Data(pixels) as CFData)!
+        return CGImage(
+            width: size,
+            height: size,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: size * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        )!
+    }
+
+    /// The car flipped through the floor (y = 0). The copy shares the car's geometry and
+    /// materials, so paint changes show in both. Drawn before the floor, which blends over it.
+    static func makeMirror(of vehicle: SCNNode) -> SCNNode {
+        let mirror = vehicle.clone()
+        mirror.name = mirrorName
+        var position = vehicle.simdPosition
+        position.y = -position.y
+        mirror.simdPosition = position
+        mirror.simdScale = vehicle.simdScale * SIMD3(1, -1, 1)
+        mirror.enumerateHierarchy { node, _ in
+            node.renderingOrder = -15
+            node.castsShadow = false
+            // The flip turns the faces inside out.
+            node.geometry?.materials.forEach { $0.isDoubleSided = true }
+        }
+        return mirror
     }
 
     static func makeGlow(colour: SIMD3<Float>) -> SCNNode {
