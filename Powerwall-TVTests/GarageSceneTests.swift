@@ -2335,16 +2335,19 @@ struct GarageSceneTests {
         // Black stays only where the atlas is black (trim); the charge port is its own Trim mesh.
         #expect(abs(housing.diffuse.intensity - VehicleLamps.displayAlbedo) < 0.001)
         #expect(housing.diffuse.intensity >= 0.5)
-        #expect(housing.metalness.textureComponents == .red)
-        #expect(housing.roughness.textureComponents == .green)
-        #expect(housing.ambientOcclusion.textureComponents == .blue)
-        #expect(abs(housing.metalness.intensity - 0.7 * VehicleLamps.metalnessScale) < 0.001)
-        #expect(housing.metalness.intensity < 0.5)
-        // Parked: lamps off.
-        let glow = rgb(housing.emission.contents)
-        #expect(glow.red + glow.green + glow.blue < 0.01)
+        // Never black: no metal (no lighting environment in the home view), no occlusion map,
+        // and a faint emission of the same atlas. That glow is a floor, not the lamps switching on.
+        #expect((housing.metalness.contents as? NSNumber)?.doubleValue == 0)
+        #expect(housing.ambientOcclusion.contents == nil)
+        #expect(housing.emission.contents != nil)
+        #expect(abs(housing.emission.intensity - VehicleLamps.emissionFloor) < 0.001)
+        #expect(VehicleLamps.emissionFloor < 0.2)
+        #expect(housing.transparency == 1)
+        #expect(housing.writesToDepthBuffer)
         let lensGlow = rgb(lens.emission.contents)
         #expect(lensGlow.red + lensGlow.green + lensGlow.blue < 0.01)
+        #expect(rgb(lens.multiply.contents).red > 0.99)
+        #expect(rgb(lens.transparent.contents).red > 0.99)
         // Tesla's Glass_Lights smoke, drawn as one see-through layer.
         #expect(abs(lens.transparency - 0.51) < 0.001)
         #expect(lens.transparency < 0.6)
@@ -2384,6 +2387,43 @@ struct GarageSceneTests {
         ))
         #expect(material(named: "Lights", in: generic) == nil)
         #expect(material(named: VehicleLamps.housingName, in: generic) == nil)
+    }
+
+    @Test func lampMaterialsMatchTheNamesSceneKitMightGive() {
+        #expect(VehicleLamps.role(material: "Lamps", node: nil) == .housing)
+        #expect(VehicleLamps.role(material: "/ModelY/Materials/Lamps", node: nil) == .housing)
+        #expect(VehicleLamps.role(material: "Lamps_1", node: nil) == .housing)
+        #expect(VehicleLamps.role(material: "LampGlass", node: nil) == .lens)
+        #expect(VehicleLamps.role(material: nil, node: "LampGlass") == .lens)
+        #expect(VehicleLamps.role(material: "material", node: "Lamps") == .housing)
+        #expect(VehicleLamps.role(material: "Glass", node: "Glass") == nil)
+        #expect(VehicleLamps.role(material: "Paint", node: nil) == nil)
+    }
+
+    @Test func housingWithoutTextureCoordinatesFallsBackToGreyNotBlack() {
+        let plain = SCNBox(width: 1, height: 1, length: 1, chamferRadius: 0)
+        let source = plain.sources(for: .vertex)
+        let element = plain.elements[0]
+        let bare = SCNGeometry(sources: source, elements: [element])
+        let material = SCNMaterial()
+        material.name = VehicleLamps.housingName
+        bare.materials = [material]
+        let lines = VehicleLamps.dress(bare, nodeName: "Lamps", model: .modelY)
+        #expect(lines.count == 1)
+        #expect(lines.first?.contains("no texture coordinates") == true)
+        #expect(rgb(material.diffuse.contents).red > 0.3)
+        #expect((material.metalness.contents as? NSNumber)?.doubleValue == 0)
+    }
+
+    @Test func usdzWiresTheLampAtlasSoSceneKitKeepsTheUVs() throws {
+        for model in VehicleModel.allCases {
+            guard let texture = VehicleLamps.housing(for: model)?.texture,
+                  let url = HouseLighting.resourceURL(name: model.rawValue, ext: "usdz") else { continue }
+            let data = try Data(contentsOf: url)
+            // The packaged atlas sits next to the layer in the usdz (a zip), named by the tool.
+            let name = Data("0/\(texture)_Lamps_BC.png".utf8)
+            #expect(data.range(of: name) != nil, "\(model.rawValue).usdz has no packaged lamp atlas")
+        }
     }
 
     @Test func everyCarsLampsAreSeeThroughInTheShowroomAndTheGarage() throws {

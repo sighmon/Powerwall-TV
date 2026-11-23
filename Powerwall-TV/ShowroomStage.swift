@@ -275,13 +275,16 @@ enum ShowroomStage {
             node.castsShadow = false
             // The flip turns the faces inside out.
             guard let geometry = node.geometry else { return }
-            if geometry.materials.contains(where: { $0.name == VehicleLamps.glassName }) {
+            func isLens(_ material: SCNMaterial) -> Bool {
+                VehicleLamps.role(material: material.name, node: node.name) == .lens
+            }
+            if geometry.materials.contains(where: isLens) {
                 // The lamp lens draws one layer of smoke. Double-sided would add a second, so the
                 // mirror gets its own lens copy that culls the (now flipped) front faces instead.
                 // The copied geometry still shares the vertex data and every other material.
                 let flipped = (geometry.copy() as? SCNGeometry) ?? geometry
                 flipped.materials = geometry.materials.map { material in
-                    guard material.name == VehicleLamps.glassName,
+                    guard isLens(material),
                           let lens = material.copy() as? SCNMaterial else { return material }
                     lens.isDoubleSided = false
                     lens.cullMode = .front
@@ -290,7 +293,7 @@ enum ShowroomStage {
                 node.geometry = flipped
             }
             node.geometry?.materials.forEach { material in
-                if material.name != VehicleLamps.glassName { material.isDoubleSided = true }
+                if !isLens(material) { material.isDoubleSided = true }
             }
         }
         return mirror

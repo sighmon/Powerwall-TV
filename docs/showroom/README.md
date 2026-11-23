@@ -90,10 +90,9 @@ housing never had opacity.
 
 What changed in `VehicleLamps`:
 
-- The housing shows the atlas at `displayAlbedo` (0.75), and its metalness is scaled by
-  `metalnessScale` (0.35). The chrome reflectors, projector bowls, LED strips, and the red and
-  amber lenses now show through the glass. Black stays only where Tesla's atlas is black, such as
-  lamp trim and bezels.
+- The housing shows the atlas at `displayAlbedo` (0.75). The chrome reflectors, projector bowls,
+  LED strips, and the red and amber lenses now show through the glass. Black stays only where
+  Tesla's atlas is black, such as lamp trim and bezels.
 - The lens keeps Tesla's colour, alpha and roughness, but it's single-sided (`cullMode = .back`,
   `.aOne`), so it reads as lightly smoked glass.
 - `ShowroomStage.makeMirror` gives the reflected car its own lens copy that culls front faces,
@@ -111,6 +110,46 @@ Some black parts are separate meshes, not areas of the atlas:
 Model Y Juniper is still dark. Its lamps use the flat `Light_Off` black (0.0196) in the app too.
 Its red `Reflector` parts were most likely exported as `Trim`, and the raw glTFs needed to split
 them out again are no longer on the box.
+
+### Still black in SceneKit (81f5022)
+
+The Cycles previews looked right, but the iOS Simulator and macOS still drew the lamps black. On
+Linux, the usdz shows the likely reason. The `Lamps` mesh has `primvars:st`, but its material is a
+flat `UsdPreviewSurface` (diffuse 0.1, metallic 0.7) with no `UsdPrimvarReader_float2` or
+`UsdUVTexture`. Every texture in `ResidentialClassic.usdz`, which does show in SceneKit, is wired
+through that reader-texture chain. If SceneKit's import drops the unreferenced UVs, the atlas has
+nothing to map onto. Then, with metalness from the packed map, an occlusion map, and no lighting
+environment in the home and garage views, the housing renders black. Blender reads `st`
+regardless, so it hid this.
+
+The fix covers each link in that chain:
+
+- `tools/embed_lamp_textures.py` packages `0/<Car>_Lamps_BC.png` inside each textured car's usdz
+  and wires it into the `Lamps` material: a reader for `st`, a texture into `diffuseColor`,
+  metallic 0 and roughness 0.35. The import now has a reason to keep the UVs, and even without
+  the app's dressing the housing isn't a dark metal.
+- `VehicleLamps` builds a housing that can't go black:
+  - metalness 0, no occlusion map, opaque, with depth writes;
+  - the atlas on `diffuse` at 0.75, plus the same atlas on `emission` at `emissionFloor` (0.12);
+  - a mid-grey fallback (`fallbackGrey`) if the atlas or the texture coordinates are missing.
+- The lens sets `transparent` and `multiply` to white and `transparency` explicitly (`.aOne`),
+  with depth writes off.
+- Lamp materials match by material name, prim path or numbered copy, with the mesh name as a
+  fallback (`VehicleLamps.role`).
+- The showroom has a `lightingEnvironment` (`ShowroomStudio.png`). The home and garage views
+  don't, which is why the housing no longer uses metal.
+
+To check on a device, launch with the argument `-debugLamps YES`, or set
+`POWERWALL_DEBUG_LAMPS=1` in the scheme. The console then lists each matched lamp material, for
+example:
+
+```
+[Lamps] ModelY: 2 lamp material(s) matched
+[Lamps] ModelY: housing node=Lamps material=Lamps texcoords=true atlas from bundle ModelY_Lamps_BC.png
+[Lamps] ModelY: lens node=LampGlass material=LampGlass transparency=0.39
+```
+
+`texcoords=false` or `nothing named Lamps or LampGlass` points straight at the import.
 
 `build_vehicles_v2.py` now writes the lens single-sided for future exports. The shipped usdz files
 are unchanged, because the app sets this on the material.

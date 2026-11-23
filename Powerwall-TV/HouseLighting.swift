@@ -631,16 +631,25 @@ enum VehicleGlass {
 /// The app multiplies the atlas by an albedo of about 0.1 and leans on its studio reflections.
 /// Copied into SceneKit, which has no environment in the home and garage views, that left every
 /// lamp black. The housing now shows the atlas at `displayAlbedo`, so the black in it is only
-/// where Tesla painted it black. Its metalness is scaled down by `metalnessScale`, so the chrome
-/// still reads without reflections. The lens keeps Tesla's smoke, alpha 0.39 to 0.51, but draws
-/// one layer only, like Godot's back-face culling. Drawn double-sided, the smoke went on twice.
+/// where Tesla painted it black.
+///
+/// SceneKit still drew them black after that. The housing is now built so it can't go black:
+/// metalness 0 (metal with no lighting environment renders black), no occlusion map, an explicit
+/// diffuse atlas plus a small emission of it, and a mid-grey fallback when the atlas or the
+/// texture coordinates are missing. The usdz files also wire the atlas through a UV reader
+/// (tools/embed_lamp_textures.py), so SceneKit's import keeps the housing's `st` coordinates.
+/// The lens keeps Tesla's smoke, alpha 0.39 to 0.51, drawn as one layer with no depth writes.
+/// `-debugLamps YES` logs every matched lamp material.
 enum VehicleLamps {
     static let housingName = "Lamps"
     static let glassName = "LampGlass"
     /// Colour multiplier for the housing atlas, in place of the app's ~0.1.
     static let displayAlbedo: CGFloat = 0.75
-    /// Share of the app's housing metalness kept, so chrome is not black without reflections.
-    static let metalnessScale: CGFloat = 0.35
+    /// The atlas also glows this much, so the housing never renders fully black.
+    static let emissionFloor: CGFloat = 0.12
+    static let housingRoughness: CGFloat = 0.35
+    /// Used when the atlas or the texture coordinates are missing.
+    static let fallbackGrey: CGFloat = 0.35
 
     /// The lamp housing material. `texture` is the asset prefix for `<texture>_Lamps_BC.png`
     /// and `<texture>_Lamps_MRA.png`. `albedo`, `metallic`, and `roughness` multiply the maps,
@@ -685,46 +694,119 @@ enum VehicleLamps {
 
     /// Applies the Tesla app's lamp materials to every lamp material under `node`.
     static func dress(_ node: SCNNode, model: VehicleModel) {
+        var lines: [String] = []
         node.enumerateHierarchy { child, _ in
-            child.geometry?.materials.forEach { dress($0, model: model) }
+            guard let geometry = child.geometry else { return }
+            lines += dress(geometry, nodeName: child.name, model: model)
         }
+        log(model: model, lines: lines)
+    }
+
+    /// Dresses the lamp materials on one geometry. Returns one debug line per material it matched.
+    @discardableResult
+    static func dress(_ geometry: SCNGeometry, nodeName: String?, model: VehicleModel) -> [String] {
+        let hasTexcoords = !geometry.sources(for: .texcoord).isEmpty
+        var lines: [String] = []
+        for material in geometry.materials {
+            switch role(material: material.name, node: nodeName) {
+            case .housing?:
+                guard let housing = housing(for: model) else { continue }
+                let how = apply(housing, to: material, hasTexcoords: hasTexcoords)
+                lines.append("housing node=\(nodeName ?? "-") material=\(material.name ?? "-") texcoords=\(hasTexcoords) \(how)")
+            case .lens?:
+                guard let lens = lens(for: model) else { continue }
+                apply(lens, to: material)
+                lines.append("lens node=\(nodeName ?? "-") material=\(material.name ?? "-") transparency=\(lens.opacity)")
+            case nil:
+                continue
+            }
+        }
+        return lines
     }
 
     static func dress(_ material: SCNMaterial, model: VehicleModel) {
-        if material.name == housingName, let housing = housing(for: model) {
-            apply(housing, to: material)
-        } else if material.name == glassName, let lens = lens(for: model) {
-            apply(lens, to: material)
+        switch role(material: material.name, node: nil) {
+        case .housing?: if let housing = housing(for: model) { apply(housing, to: material, hasTexcoords: true) }
+        case .lens?: if let lens = lens(for: model) { apply(lens, to: material) }
+        case nil: break
         }
     }
 
-    private static func apply(_ housing: Housing, to material: SCNMaterial) {
+    enum Role { case housing, lens }
+
+    /// Matches the converter's names. SceneKit's USD import normally keeps the material prim name
+    /// ("Lamps", "LampGlass"), but a path ("/ModelY/Materials/Lamps") or a numbered copy
+    /// ("Lamps_1") is accepted too, and the mesh prim name is the fallback.
+    static func role(material: String?, node: String?) -> Role? {
+        func match(_ raw: String?) -> Role? {
+            guard var name = raw?.split(separator: "/").last.map(String.init), !name.isEmpty else { return nil }
+            while let last = name.last, last.isNumber || last == "_" || last == "-" || last == "." { name.removeLast() }
+            switch name {
+            case housingName: return .housing
+            case glassName: return .lens
+            default: return nil
+            }
+        }
+        return match(material) ?? match(node)
+    }
+
+    /// The atlas for the housing: from the bundle, else the copy packaged inside the usdz
+    /// (tools/embed_lamp_textures.py), which SceneKit has already put on `diffuse`.
+    private static func atlas(_ housing: Housing, current: Any?) -> (Any, String)? {
+        guard let texture = housing.texture else { return nil }
+        if let image = HouseLighting.bundleImage("\(texture)_Lamps_BC") { return (image, "bundle \(texture)_Lamps_BC.png") }
+        if let current, !(current is HouseColor), !(current is NSNumber) { return (current, "usdz texture") }
+        return nil
+    }
+
+    /// Opaque, near-dielectric, never black. Metal with no lighting environment renders black, and
+    /// the home and garage views have none, so metalness is 0 and there is no occlusion map. A small
+    /// emission of the same atlas keeps the lamp readable in the darkest corner of the garage.
+    @discardableResult
+    private static func apply(_ housing: Housing, to material: SCNMaterial, hasTexcoords: Bool) -> String {
         material.lightingModel = .physicallyBased
         material.isDoubleSided = true
-        material.emission.contents = HouseColor.black
-        let colour = housing.texture.flatMap { HouseLighting.resourceURL(name: "\($0)_Lamps_BC", ext: "png") }
-        let packed = housing.texture.flatMap { HouseLighting.resourceURL(name: "\($0)_Lamps_MRA", ext: "png") }
-        if let colour, let packed {
-            material.diffuse.contents = colour
+        material.transparency = 1
+        material.transparent.contents = HouseColor.white
+        material.transparencyMode = .aOne
+        material.blendMode = .alpha
+        material.writesToDepthBuffer = true
+        material.multiply.contents = HouseColor.white
+        material.metalness.contents = NSNumber(value: 0)
+        material.roughness.contents = NSNumber(value: Double(housingRoughness))
+        material.ambientOcclusion.contents = nil
+        material.selfIllumination.contents = nil
+        let how: String
+        if housing.texture == nil {
+            // Model Y Juniper: the app's Light_Off is a flat near-black on purpose.
+            material.diffuse.contents = HouseColor(white: housing.albedo, alpha: 1)
+            material.diffuse.intensity = 1
+            material.emission.contents = HouseColor.black
+            how = "flat Light_Off \(housing.albedo)"
+        } else if hasTexcoords, let found = atlas(housing, current: material.diffuse.contents) {
+            let (image, source) = found
+            material.diffuse.contents = image
             material.diffuse.intensity = displayAlbedo
-            material.metalness.contents = packed
-            material.metalness.textureComponents = .red
-            material.metalness.intensity = housing.metallic * metalnessScale
-            material.roughness.contents = packed
-            material.roughness.textureComponents = .green
-            material.roughness.intensity = housing.roughness
-            material.ambientOcclusion.contents = packed
-            material.ambientOcclusion.textureComponents = .blue
-            for property in [material.diffuse, material.metalness, material.roughness, material.ambientOcclusion] {
+            material.emission.contents = image
+            material.emission.intensity = emissionFloor
+            for property in [material.diffuse, material.emission] {
                 property.wrapS = .repeat
                 property.wrapT = .repeat
                 property.mappingChannel = 0
+                property.minificationFilter = .linear
+                property.magnificationFilter = .linear
+                property.mipFilter = .linear
             }
+            how = "atlas from \(source)"
         } else {
-            material.diffuse.contents = HouseColor(white: housing.albedo, alpha: 1)
-            material.metalness.contents = housing.metallic
-            material.roughness.contents = housing.roughness
+            // No atlas or no UVs to map it with: a mid grey, not black.
+            material.diffuse.contents = HouseColor(white: fallbackGrey, alpha: 1)
+            material.diffuse.intensity = 1
+            material.emission.contents = HouseColor(white: fallbackGrey, alpha: 1)
+            material.emission.intensity = emissionFloor
+            how = hasTexcoords ? "fallback grey: atlas missing" : "fallback grey: no texture coordinates"
         }
+        return how
     }
 
     private static func apply(_ lens: Lens, to material: SCNMaterial) {
@@ -733,14 +815,34 @@ enum VehicleLamps {
         material.isDoubleSided = false
         material.cullMode = .back
         material.emission.contents = HouseColor.black
+        material.multiply.contents = HouseColor.white
+        material.ambientOcclusion.contents = nil
         material.diffuse.contents = HouseColor(white: lens.albedo, alpha: 1)
-        material.metalness.contents = 0
-        material.roughness.contents = lens.roughness
+        material.diffuse.intensity = 1
+        material.metalness.contents = NSNumber(value: 0)
+        material.roughness.contents = NSNumber(value: Double(lens.roughness))
+        // USD import puts the opacity on `transparent`; replace it so only `transparency` counts.
         material.transparent.contents = HouseColor.white
+        material.transparent.intensity = 1
         material.transparency = lens.opacity
         material.transparencyMode = .aOne
         material.blendMode = .alpha
         material.writesToDepthBuffer = false
+        material.readsFromDepthBuffer = true
+    }
+
+    /// Lists the matched lamp nodes in the console. Turn on with the launch argument
+    /// `-debugLamps YES` (or `defaults write <bundle id> debugLamps -bool YES`).
+    static var debugLogging: Bool {
+        UserDefaults.standard.bool(forKey: "debugLamps")
+            || ProcessInfo.processInfo.environment["POWERWALL_DEBUG_LAMPS"] == "1"
+    }
+
+    static func log(model: VehicleModel, lines: [String]) {
+        guard debugLogging else { return }
+        print("[Lamps] \(model.rawValue): \(lines.count) lamp material(s) matched")
+        if lines.isEmpty { print("[Lamps] \(model.rawValue): nothing named \(housingName) or \(glassName)") }
+        lines.forEach { print("[Lamps] \(model.rawValue): \($0)") }
     }
 }
 
@@ -1103,6 +1205,8 @@ final class HouseLighting {
     /// gaps render black. Exported shells leave openings where the glass does not meet
     /// the frame. Solid paint plus caps across the cabin openings close both.
     private func repairVehicleShell(_ vehicle: SCNNode, model: VehicleModel? = nil) {
+        var lampLines: [String] = []
+        defer { if let model { VehicleLamps.log(model: model, lines: lampLines) } }
         vehicle.enumerateHierarchy { node, _ in
             guard let geometry = node.geometry else { return }
             for material in geometry.materials {
@@ -1116,7 +1220,7 @@ final class HouseLighting {
                 }
             }
             if let model {
-                geometry.materials.forEach { VehicleLamps.dress($0, model: model) }
+                lampLines += VehicleLamps.dress(geometry, nodeName: node.name, model: model)
             }
             let name = geometry.materials.first?.name ?? ""
             guard name == "Paint" || name == "Glass" || name == "vehicle",
