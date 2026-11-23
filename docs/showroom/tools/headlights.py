@@ -19,6 +19,10 @@ SAMPLES = int(os.environ.get('SAMPLES', '96'))
 HOUSING = {'Model3': ('Model3', .102, .7, 0), 'Model3Highland': ('Model3Highland', .137, 1, 1), 'ModelY': ('ModelY', .102, .7, .5),
            'ModelYJuniper': (None, .0196, 0, .45), 'ModelS': ('ModelS', .098, .75, .5), 'ModelX': ('ModelX', .098, 1, 1),
            'Cybertruck': ('Cybertruck', .349, 0, 1)}
+# LAMPS=glass: the translucent-lens fix. The housing atlas is shown at HOUSING_ALBEDO instead of Tesla's
+# 0.1 multiplier, its metalness is scaled by HOUSING_METAL, and the lens is a single layer (back faces see-through).
+HOUSING_ALBEDO = float(os.environ.get('HOUSING_ALBEDO', '0.75'))
+HOUSING_METAL = float(os.environ.get('HOUSING_METAL', '0.35'))
 LENS = {'Model3': (.0118, .51, .05), 'Model3Highland': (.0118, .39, .05), 'ModelY': (.0118, .39, .05), 'ModelYJuniper': (.0118, .39, .05),
         'ModelS': (.0118, .43, .1), 'ModelX': (.0118, .51, .1), 'Cybertruck': (0, .51, .01)}
 BG = (22/255, 23/255, 24/255)
@@ -104,6 +108,8 @@ for o in meshes:
             break
         if n == 'Lamps':
             tex, alb, met, rgh = HOUSING[MODEL]
+            if LAMPS == 'glass' and tex:
+                alb, met = HOUSING_ALBEDO, met * HOUSING_METAL
             nt_ = m.node_tree
             if tex:
                 bc = nt_.nodes.new('ShaderNodeTexImage'); bc.image = bpy.data.images.load(TEX + tex + '_Lamps_BC.png')
@@ -130,6 +136,13 @@ for o in meshes:
             for l_ in list(b.inputs['Alpha'].links): m.node_tree.links.remove(l_)
             b.inputs['Base Color'].default_value = (alb, alb, alb, 1); b.inputs['Metallic'].default_value = 0
             b.inputs['Roughness'].default_value = rgh; b.inputs['Alpha'].default_value = op
+            if LAMPS == 'glass':
+                # SceneKit draws the lens single-sided now: a back face lets everything through.
+                nt_ = m.node_tree; out_ = next(x for x in nt_.nodes if x.type == 'OUTPUT_MATERIAL')
+                geo = nt_.nodes.new('ShaderNodeNewGeometry'); tr = nt_.nodes.new('ShaderNodeBsdfTransparent')
+                mx = nt_.nodes.new('ShaderNodeMixShader')
+                nt_.links.new(geo.outputs['Backfacing'], mx.inputs[0]); nt_.links.new(b.outputs[0], mx.inputs[1])
+                nt_.links.new(tr.outputs[0], mx.inputs[2]); nt_.links.new(mx.outputs[0], out_.inputs['Surface'])
 
 # ---- camera: port of CarShowroomOrbit fit + centre bias ----
 pts = []

@@ -2331,15 +2331,27 @@ struct GarageSceneTests {
         }
         #expect(housing.lightingModel == .physicallyBased)
         #expect(housing.diffuse.contents != nil)
-        #expect(abs(housing.diffuse.intensity - 0.102) < 0.001)
+        // The atlas shows at a readable albedo, not the app's ~0.1 that turned every lamp black.
+        // Black stays only where the atlas is black (trim); the charge port is its own Trim mesh.
+        #expect(abs(housing.diffuse.intensity - VehicleLamps.displayAlbedo) < 0.001)
+        #expect(housing.diffuse.intensity >= 0.5)
         #expect(housing.metalness.textureComponents == .red)
         #expect(housing.roughness.textureComponents == .green)
         #expect(housing.ambientOcclusion.textureComponents == .blue)
-        #expect(abs(housing.metalness.intensity - 0.7) < 0.001)
+        #expect(abs(housing.metalness.intensity - 0.7 * VehicleLamps.metalnessScale) < 0.001)
+        #expect(housing.metalness.intensity < 0.5)
+        // Parked: lamps off.
         let glow = rgb(housing.emission.contents)
         #expect(glow.red + glow.green + glow.blue < 0.01)
+        let lensGlow = rgb(lens.emission.contents)
+        #expect(lensGlow.red + lensGlow.green + lensGlow.blue < 0.01)
+        // Tesla's Glass_Lights smoke, drawn as one see-through layer.
         #expect(abs(lens.transparency - 0.51) < 0.001)
+        #expect(lens.transparency < 0.6)
         #expect(lens.blendMode == .alpha)
+        #expect(lens.transparencyMode == .aOne)
+        #expect(!lens.isDoubleSided)
+        #expect(lens.cullMode == .back)
         #expect(!lens.writesToDepthBuffer)
 
         var housingHasTextureCoordinates = false
@@ -2372,6 +2384,61 @@ struct GarageSceneTests {
         ))
         #expect(material(named: "Lights", in: generic) == nil)
         #expect(material(named: VehicleLamps.housingName, in: generic) == nil)
+    }
+
+    @Test func everyCarsLampsAreSeeThroughInTheShowroomAndTheGarage() throws {
+        for model in VehicleModel.allCases where model != .generic {
+            let scene = CarShowroom.scene(for: CarShowroomRequest(
+                vin: nil, model: model, exteriorColor: nil, paintColorOverride: nil,
+                colorizerRemap: false, displayBoost: 1, lines: []
+            ))
+            guard let lens = material(named: VehicleLamps.glassName, in: scene),
+                  let housing = material(named: VehicleLamps.housingName, in: scene) else {
+                Issue.record("\(model.rawValue) has no lamp glass or housing")
+                continue
+            }
+            #expect(!lens.isDoubleSided)
+            #expect(lens.transparency < 0.6)
+            // The floor mirror culls the flipped lens from the other side and leaves the car's alone.
+            if let mirror = scene.rootNode.childNode(withName: ShowroomStage.mirrorName, recursively: true) {
+                mirror.enumerateHierarchy { node, _ in
+                    node.geometry?.materials.filter { $0.name == VehicleLamps.glassName }.forEach {
+                        #expect(!$0.isDoubleSided)
+                        #expect($0.cullMode == .front)
+                        #expect($0 !== lens)
+                    }
+                }
+            }
+            if VehicleLamps.housing(for: model)?.texture != nil {
+                #expect(abs(housing.diffuse.intensity - VehicleLamps.displayAlbedo) < 0.001)
+            }
+        }
+
+        // The home view's garage dresses the parked car the same way, after its shell repair
+        // has made every material double-sided.
+        guard let houseScene = ResidentialClassicScene.load() else { return }
+        let house = houseScene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? houseScene.rootNode
+        let lighting = HouseLighting(root: house)
+        lighting.setVehicleModel(.modelY)
+        lighting.showVehicle(true)
+        let vehicle = try #require(house.childNode(withName: "Vehicle", recursively: true))
+        var lenses = 0
+        var housings = 0
+        vehicle.enumerateHierarchy { node, _ in
+            node.geometry?.materials.forEach { material in
+                if material.name == VehicleLamps.glassName {
+                    lenses += 1
+                    #expect(!material.isDoubleSided)
+                    #expect(material.transparency < 0.6)
+                }
+                if material.name == VehicleLamps.housingName {
+                    housings += 1
+                    #expect(abs(material.diffuse.intensity - VehicleLamps.displayAlbedo) < 0.001)
+                }
+            }
+        }
+        #expect(lenses > 0)
+        #expect(housings > 0)
     }
 
     @Test func juniperKeepsItsBPillarsAndGlassRoof() {

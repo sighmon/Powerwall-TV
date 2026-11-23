@@ -621,15 +621,26 @@ enum VehicleGlass {
 }
 
 /// The Tesla app parks the car with its lamps off. What makes them read as lamps is the
-/// housing's own material: a texture atlas of chrome reflectors, red and amber lenses, and
-/// LED strips (Lights_BC), with metallic, roughness, and occlusion packed in Lights_MRA,
+/// housing's own material: a texture atlas of chrome reflectors, red and amber lenses, LED strips
+/// and black trim (Lights_BC), with metallic, roughness, and occlusion packed in Lights_MRA,
 /// under a thin smoked lens (Glass_Lights). The converter keeps the housing ("Lamps", with
-/// texture coordinates) apart from the lens ("LampGlass"). The values below are the app's
-/// SpatialMaterial values for each car. The glowing "on" overlays (Illumination, Lights_E)
-/// are hidden until the car is driving, so they are not exported.
+/// texture coordinates) apart from the lens ("LampGlass"). The charge port is its own mesh
+/// (Chargeport.material, exported as Trim), so it stays black. The glowing "on" overlays
+/// (Illumination, Lights_E) are hidden until the car is driving, so they are not exported.
+///
+/// The app multiplies the atlas by an albedo of about 0.1 and leans on its studio reflections.
+/// Copied into SceneKit, which has no environment in the home and garage views, that left every
+/// lamp black. The housing now shows the atlas at `displayAlbedo`, so the black in it is only
+/// where Tesla painted it black. Its metalness is scaled down by `metalnessScale`, so the chrome
+/// still reads without reflections. The lens keeps Tesla's smoke, alpha 0.39 to 0.51, but draws
+/// one layer only, like Godot's back-face culling. Drawn double-sided, the smoke went on twice.
 enum VehicleLamps {
     static let housingName = "Lamps"
     static let glassName = "LampGlass"
+    /// Colour multiplier for the housing atlas, in place of the app's ~0.1.
+    static let displayAlbedo: CGFloat = 0.75
+    /// Share of the app's housing metalness kept, so chrome is not black without reflections.
+    static let metalnessScale: CGFloat = 0.35
 
     /// The lamp housing material. `texture` is the asset prefix for `<texture>_Lamps_BC.png`
     /// and `<texture>_Lamps_MRA.png`. `albedo`, `metallic`, and `roughness` multiply the maps,
@@ -695,10 +706,10 @@ enum VehicleLamps {
         let packed = housing.texture.flatMap { HouseLighting.resourceURL(name: "\($0)_Lamps_MRA", ext: "png") }
         if let colour, let packed {
             material.diffuse.contents = colour
-            material.diffuse.intensity = housing.albedo
+            material.diffuse.intensity = displayAlbedo
             material.metalness.contents = packed
             material.metalness.textureComponents = .red
-            material.metalness.intensity = housing.metallic
+            material.metalness.intensity = housing.metallic * metalnessScale
             material.roughness.contents = packed
             material.roughness.textureComponents = .green
             material.roughness.intensity = housing.roughness
@@ -718,13 +729,16 @@ enum VehicleLamps {
 
     private static func apply(_ lens: Lens, to material: SCNMaterial) {
         material.lightingModel = .physicallyBased
-        material.isDoubleSided = true
+        // One layer of smoke, like Glass_Lights (Godot culls back faces). The lens faces outward.
+        material.isDoubleSided = false
+        material.cullMode = .back
+        material.emission.contents = HouseColor.black
         material.diffuse.contents = HouseColor(white: lens.albedo, alpha: 1)
         material.metalness.contents = 0
         material.roughness.contents = lens.roughness
         material.transparent.contents = HouseColor.white
         material.transparency = lens.opacity
-        material.transparencyMode = .dualLayer
+        material.transparencyMode = .aOne
         material.blendMode = .alpha
         material.writesToDepthBuffer = false
     }

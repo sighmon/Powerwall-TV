@@ -274,7 +274,24 @@ enum ShowroomStage {
             node.renderingOrder = -15
             node.castsShadow = false
             // The flip turns the faces inside out.
-            node.geometry?.materials.forEach { $0.isDoubleSided = true }
+            guard let geometry = node.geometry else { return }
+            if geometry.materials.contains(where: { $0.name == VehicleLamps.glassName }) {
+                // The lamp lens draws one layer of smoke. Double-sided would add a second, so the
+                // mirror gets its own lens copy that culls the (now flipped) front faces instead.
+                // The copied geometry still shares the vertex data and every other material.
+                let flipped = (geometry.copy() as? SCNGeometry) ?? geometry
+                flipped.materials = geometry.materials.map { material in
+                    guard material.name == VehicleLamps.glassName,
+                          let lens = material.copy() as? SCNMaterial else { return material }
+                    lens.isDoubleSided = false
+                    lens.cullMode = .front
+                    return lens
+                }
+                node.geometry = flipped
+            }
+            node.geometry?.materials.forEach { material in
+                if material.name != VehicleLamps.glassName { material.isDoubleSided = true }
+            }
         }
         return mirror
     }

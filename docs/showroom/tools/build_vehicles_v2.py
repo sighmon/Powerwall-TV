@@ -153,7 +153,8 @@ def build(name,carf,wheelf,paint):
         m.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(np.asarray(tm.vertices,np.float32)))
         m.CreateFaceVertexCountsAttr(Vt.IntArray([3]*len(tm.faces))); m.CreateFaceVertexIndicesAttr(Vt.IntArray(tm.faces.reshape(-1).tolist()))
         m.CreateNormalsAttr(Vt.Vec3fArray.FromNumpy(np.asarray(tm.vertex_normals,np.float32))); m.SetNormalsInterpolation("vertex")
-        m.CreateSubdivisionSchemeAttr("none"); m.CreateDoubleSidedAttr(True)
+        # The lamp lens is one layer of smoke (Glass_Lights culls back faces); double-sided doubles it.
+        m.CreateSubdivisionSchemeAttr("none"); m.CreateDoubleSidedAttr(k!="LampGlass")
         if k=="Lamps":
             # glTF UV origin is top left; USD st origin is bottom left.
             uv=np.asarray(uvs[k],np.float32).copy(); uv[:,1]=1-uv[:,1]
@@ -162,7 +163,7 @@ def build(name,carf,wheelf,paint):
         m.CreateExtentAttr([Gf.Vec3f(*tm.bounds[0]),Gf.Vec3f(*tm.bounds[1])])
         UsdShade.MaterialBindingAPI.Apply(m.GetPrim()).Bind(mat)
         pb=PBRMaterial(name=k,baseColorFactor=list(c)+[spec.get("opacity",1)],metallicFactor=spec["metallic"],roughnessFactor=spec["roughness"],
-                       alphaMode="BLEND" if "opacity" in spec else "OPAQUE",doubleSided=True)
+                       alphaMode="BLEND" if "opacity" in spec else "OPAQUE",doubleSided=k!="LampGlass")
         g=trimesh.Trimesh(tm.vertices,tm.faces,vertex_normals=tm.vertex_normals,visual=TextureVisuals(material=pb),process=False)
         sc.add_geometry(g,node_name=k,geom_name=k); tot+=len(tm.faces)
     st.GetRootLayer().Save()

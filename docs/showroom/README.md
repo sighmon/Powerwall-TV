@@ -74,8 +74,50 @@ lenses. `VehicleLamps` in `HouseLighting.swift` puts `<Model>_Lamps_BC.png` and
 `<Model>_Lamps_MRA.png` on the housing, using `textureComponents` red, green, and blue, and makes
 the lens the smoked glass.
 
-`tools/headlights.py` makes the close-ups. Run it with `LAMPS=before|after`, `USDZ=`, and
-`VIEW=front|rear`. The renders are Cycles approximations, not SceneKit captures.
+### Translucent lenses
+
+Copied as is, these values turned every lamp black in SceneKit. There were two causes:
+
+- **Housing too dark.** The app multiplies the atlas by about 0.1 and relies on its studio
+  reflections for the chrome. SceneKit has no environment in the home and garage views, and only
+  a weaker one in the showroom. A metallic surface with a 0.1 albedo then renders almost black.
+- **Smoke drawn twice.** The lens was double-sided with `.dualLayer`, so its back faces and its
+  front faces each laid down the 39–51% smoke. Glass_Lights culls back faces, so the app draws it
+  once.
+
+The conversion didn't lose any transparency: the usdz lens still has opacity 0.39 to 0.51, and the
+housing never had opacity.
+
+What changed in `VehicleLamps`:
+
+- The housing shows the atlas at `displayAlbedo` (0.75), and its metalness is scaled by
+  `metalnessScale` (0.35). The chrome reflectors, projector bowls, LED strips, and the red and
+  amber lenses now show through the glass. Black stays only where Tesla's atlas is black, such as
+  lamp trim and bezels.
+- The lens keeps Tesla's colour, alpha and roughness, but it's single-sided (`cullMode = .back`,
+  `.aOne`), so it reads as lightly smoked glass.
+- `ShowroomStage.makeMirror` gives the reflected car its own lens copy that culls front faces,
+  because the flip turns the faces inside out. The car's own lens stays single-sided.
+- Emission stays black, so the lamps stay off when the car is parked.
+
+The same `VehicleLamps.dress` runs in the showroom (`CarShowroom.loadVehicle`) and in the home and
+garage views (`HouseLighting.setVehicleModel`).
+
+Some black parts are separate meshes, not areas of the atlas:
+
+- The charge port (`Chargeport_1`, Chargeport.material) is exported as `Trim` and stays black.
+- Fog lamp covers are also `Trim`.
+
+Model Y Juniper is still dark. Its lamps use the flat `Light_Off` black (0.0196) in the app too.
+Its red `Reflector` parts were most likely exported as `Trim`, and the raw glTFs needed to split
+them out again are no longer on the box.
+
+`build_vehicles_v2.py` now writes the lens single-sided for future exports. The shipped usdz files
+are unchanged, because the app sets this on the material.
+
+`tools/headlights.py` makes the close-ups. Run it with `LAMPS=before|after|glass`, `USDZ=`, and
+`VIEW=front|rear`. `glass` is the translucent-lens fix, tuned with `HOUSING_ALBEDO` and
+`HOUSING_METAL`. The renders are Cycles approximations, not SceneKit captures.
 
 ## Floor reflection
 
