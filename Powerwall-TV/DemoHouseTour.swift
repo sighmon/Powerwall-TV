@@ -45,7 +45,8 @@ enum DemoHouseTour {
     )
 
     /// Sample `vehicle_data_cached` panel for every demo car. Made-up numbers, no VIN or location,
-    /// and the demo never calls Fleet. It matches `exampleCharge`.
+    /// and the demo never calls Fleet. It matches `exampleCharge`. No `gui_settings` units, so the panel
+    /// uses the device region's: km, °C and bar in Australia.
     static func exampleInfo(now: Date = Date()) -> VehicleInfo {
         VehicleInfo(
             batteryLevel: exampleCharge.batteryLevel,

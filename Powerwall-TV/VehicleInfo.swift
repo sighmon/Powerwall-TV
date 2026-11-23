@@ -125,9 +125,11 @@ struct VehicleInfo: Codable, Equatable {
     var softwareVersion: String?
     var softwareUpdateStatus: String?
     var tyrePressuresBar: [Double]?
-    var usesMiles: Bool = false
-    var usesFahrenheit: Bool = false
-    var usesPSI: Bool = false
+    /// The car's own `gui_settings` strings ("km/hr", "C", "Bar"...). Nil when the car did not send them;
+    /// `VehicleDisplayUnits` then falls back to the device region.
+    var guiDistanceUnits: String?
+    var guiTemperatureUnits: String?
+    var guiTyrePressureUnits: String?
     /// Newest block `timestamp`: when the car last reported, not when we asked.
     var reportedAt: Date?
 
@@ -142,7 +144,8 @@ struct VehicleInfo: Codable, Equatable {
         insideCelsius: Double? = nil, outsideCelsius: Double? = nil, climateOn: Bool? = nil,
         locked: Bool? = nil, sentryMode: Bool? = nil, odometerMiles: Double? = nil,
         softwareVersion: String? = nil, softwareUpdateStatus: String? = nil, tyrePressuresBar: [Double]? = nil,
-        usesMiles: Bool = false, usesFahrenheit: Bool = false, usesPSI: Bool = false, reportedAt: Date? = nil
+        guiDistanceUnits: String? = nil, guiTemperatureUnits: String? = nil, guiTyrePressureUnits: String? = nil,
+        reportedAt: Date? = nil
     ) {
         self.batteryLevel = batteryLevel
         self.chargingState = chargingState
@@ -161,9 +164,9 @@ struct VehicleInfo: Codable, Equatable {
         self.softwareVersion = softwareVersion
         self.softwareUpdateStatus = softwareUpdateStatus
         self.tyrePressuresBar = tyrePressuresBar
-        self.usesMiles = usesMiles
-        self.usesFahrenheit = usesFahrenheit
-        self.usesPSI = usesPSI
+        self.guiDistanceUnits = guiDistanceUnits
+        self.guiTemperatureUnits = guiTemperatureUnits
+        self.guiTyrePressureUnits = guiTyrePressureUnits
         self.reportedAt = reportedAt
     }
 
@@ -190,9 +193,9 @@ struct VehicleInfo: Codable, Equatable {
             softwareVersion: state?.carVersion,
             softwareUpdateStatus: state?.softwareUpdate?.status,
             tyrePressuresBar: Self.tyres(state),
-            usesMiles: gui?.distanceUnits.map { $0.lowercased().hasPrefix("mi") } ?? false,
-            usesFahrenheit: gui?.temperatureUnits.map { $0.uppercased() == "F" } ?? false,
-            usesPSI: gui?.tyrePressureUnits.map { $0.lowercased() == "psi" } ?? false,
+            guiDistanceUnits: gui?.distanceUnits,
+            guiTemperatureUnits: gui?.temperatureUnits,
+            guiTyrePressureUnits: gui?.tyrePressureUnits,
             reportedAt: [charge?.timestamp, climate?.timestamp, state?.timestamp]
                 .compactMap { $0 }
                 .max()
@@ -227,16 +230,129 @@ struct VehicleInfoRow: Equatable, Identifiable {
     let text: String
 }
 
+/// Distance, temperature and tyre pressure units for the panel. The car's `gui_settings` win, so the
+/// panel matches the car's screen. A unit the car did not send comes from the device region.
+struct VehicleDisplayUnits: Equatable {
+    var distance: UnitLength
+    var temperature: UnitTemperature
+    var pressure: UnitPressure
+
+    /// Regions where tyres are usually read in psi, and in kPa. Everywhere else uses bar, as Tesla
+    /// does in Australia and Europe.
+    static let psiRegions: Set<String> = ["US", "GB", "PR", "LR", "MM"]
+    static let kilopascalRegions: Set<String> = ["CA", "JP"]
+
+    /// `temperaturePreference` is the system's own `AppleTemperatureUnit` ("Celsius" or "Fahrenheit")
+    /// when the person has set one in Settings.
+    static func resolve(
+        guiDistance: String?,
+        guiTemperature: String?,
+        guiPressure: String?,
+        locale: Locale,
+        temperaturePreference: String? = UserDefaults.standard.string(forKey: "AppleTemperatureUnit")
+    ) -> VehicleDisplayUnits {
+        VehicleDisplayUnits(
+            distance: distanceUnit(gui: guiDistance) ?? localeDistance(locale),
+            temperature: temperatureUnit(gui: guiTemperature)
+                ?? temperatureUnit(gui: temperaturePreference)
+                ?? localeTemperature(locale),
+            pressure: pressureUnit(gui: guiPressure) ?? localePressure(locale)
+        )
+    }
+
+    /// "km/hr" or "mi/hr".
+    static func distanceUnit(gui: String?) -> UnitLength? {
+        guard let value = gui?.trimmingCharacters(in: .whitespaces).lowercased(), !value.isEmpty else { return nil }
+        if value.hasPrefix("mi") { return .miles }
+        if value.hasPrefix("km") { return .kilometers }
+        return nil
+    }
+
+    /// "C" or "F", or the system's "Celsius" or "Fahrenheit".
+    static func temperatureUnit(gui: String?) -> UnitTemperature? {
+        guard let value = gui?.trimmingCharacters(in: .whitespaces).lowercased(), !value.isEmpty else { return nil }
+        if value.hasPrefix("f") { return .fahrenheit }
+        if value.hasPrefix("c") { return .celsius }
+        return nil
+    }
+
+    /// "Psi", "Bar" or "kPa".
+    static func pressureUnit(gui: String?) -> UnitPressure? {
+        switch gui?.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "psi": return .poundsForcePerSquareInch
+        case "bar": return .bars
+        case "kpa": return .kilopascals
+        default: return nil
+        }
+    }
+
+    static func localeDistance(_ locale: Locale) -> UnitLength {
+        switch locale.measurementSystem {
+        case .us, .uk: return .miles
+        default: return .kilometers
+        }
+    }
+
+    static func localeTemperature(_ locale: Locale) -> UnitTemperature {
+        locale.measurementSystem == .us ? .fahrenheit : .celsius
+    }
+
+    static func localePressure(_ locale: Locale) -> UnitPressure {
+        let region = locale.region?.identifier ?? ""
+        if psiRegions.contains(region) || locale.measurementSystem == .us { return .poundsForcePerSquareInch }
+        if kilopascalRegions.contains(region) { return .kilopascals }
+        return .bars
+    }
+
+    /// Tesla-style symbols. `MeasurementFormatter` would pick its own spacing per locale ("22 °C"),
+    /// and the tyre row shows one unit after four numbers, so the symbol is written here.
+    var distanceSymbol: String { distance == .miles ? "mi" : "km" }
+    var temperatureSymbol: String { temperature == .fahrenheit ? "°F" : "°C" }
+    var pressureSymbol: String {
+        switch pressure {
+        case .poundsForcePerSquareInch: return "psi"
+        case .kilopascals: return "kPa"
+        default: return "bar"
+        }
+    }
+    var pressureDecimals: Int { pressure == .bars ? 1 : 0 }
+}
+
 extension VehicleInfo {
-    static let kilometresPerMile = 1.609344
-    static let psiPerBar = 14.5037738
+    func displayUnits(locale: Locale, temperaturePreference: String?) -> VehicleDisplayUnits {
+        VehicleDisplayUnits.resolve(
+            guiDistance: guiDistanceUnits,
+            guiTemperature: guiTemperatureUnits,
+            guiPressure: guiTyrePressureUnits,
+            locale: locale,
+            temperaturePreference: temperaturePreference
+        )
+    }
 
     /// Rows in reading order. A field Fleet did not send has no row. Battery, charging state and
     /// minutes to full are already on the title lines, so they are not repeated here.
-    func rows(now: Date = Date()) -> [VehicleInfoRow] {
+    func rows(
+        now: Date = Date(),
+        locale: Locale = .current,
+        temperaturePreference: String? = UserDefaults.standard.string(forKey: "AppleTemperatureUnit")
+    ) -> [VehicleInfoRow] {
+        let units = displayUnits(locale: locale, temperaturePreference: temperaturePreference)
         var rows: [VehicleInfoRow] = []
         func add(_ id: String, _ symbol: String, _ text: String) {
             rows.append(VehicleInfoRow(id: id, symbol: symbol, text: text))
+        }
+        func number(_ value: Double, decimals: Int) -> String {
+            Self.number(value, decimals: decimals, locale: locale)
+        }
+        /// Fleet sends miles.
+        func distance(_ miles: Double) -> String {
+            let value = Measurement(value: miles, unit: UnitLength.miles).converted(to: units.distance).value
+            return "\(number(value, decimals: 0)) \(units.distanceSymbol)"
+        }
+        /// Fleet sends Celsius.
+        func temperature(_ celsius: Double) -> String {
+            let value = Measurement(value: celsius, unit: UnitTemperature.celsius).converted(to: units.temperature).value
+            return "\(number(value, decimals: 0))\(units.temperatureSymbol)"
         }
 
         if let rangeMiles, rangeMiles > 0 {
@@ -246,14 +362,14 @@ extension VehicleInfo {
             add("limit", "flag.checkered", "Charge limit \(Int(chargeLimitPercent.rounded()))%")
         }
         if isCharging, let power = chargerPowerKilowatts, power > 0 {
-            var text = "\(Self.number(power, decimals: power < 10 ? 1 : 0)) kW"
+            var text = "\(number(power, decimals: power < 10 ? 1 : 0)) kW"
             if let rate = chargeRateMilesPerHour, rate > 0 {
                 text += " · +\(distance(rate))/h"
             }
             add("rate", "ev.charger", text)
         }
         if let added = energyAddedKilowattHours, added > 0, isCharging || chargingState == "Complete" {
-            add("added", "bolt.fill", "\(Self.number(added, decimals: 1)) kWh added")
+            add("added", "bolt.fill", "\(number(added, decimals: 1)) kWh added")
         }
         var temperatures: [String] = []
         if let insideCelsius { temperatures.append("Inside \(temperature(insideCelsius))") }
@@ -271,8 +387,11 @@ extension VehicleInfo {
             add("sentry", "record.circle", "Sentry Mode on")
         }
         if let tyrePressuresBar, tyrePressuresBar.count == 4 {
-            let values = tyrePressuresBar.map { usesPSI ? Self.number($0 * Self.psiPerBar, decimals: 0) : Self.number($0, decimals: 1) }
-            add("tyres", "tirepressure", "Tyres \(values.joined(separator: " · ")) \(usesPSI ? "psi" : "bar")")
+            // Fleet sends bar.
+            let values = tyrePressuresBar.map { bar in
+                number(Measurement(value: bar, unit: UnitPressure.bars).converted(to: units.pressure).value, decimals: units.pressureDecimals)
+            }
+            add("tyres", "tirepressure", "Tyres \(values.joined(separator: " · ")) \(units.pressureSymbol)")
         }
         if let odometerMiles, odometerMiles > 0 {
             add("odometer", "road.lanes", distance(odometerMiles))
@@ -289,16 +408,6 @@ extension VehicleInfo {
         return rows
     }
 
-    private func distance(_ miles: Double) -> String {
-        let value = usesMiles ? miles : miles * Self.kilometresPerMile
-        return "\(Self.number(value, decimals: 0)) \(usesMiles ? "mi" : "km")"
-    }
-
-    private func temperature(_ celsius: Double) -> String {
-        let value = usesFahrenheit ? celsius * 9 / 5 + 32 : celsius
-        return "\(Self.number(value, decimals: 0))°"
-    }
-
     /// Cached data can be hours old, so the panel says how old.
     static func updatedText(_ reportedAt: Date, now: Date) -> String {
         let minutes = Int(max(0, now.timeIntervalSince(reportedAt)) / 60)
@@ -309,10 +418,10 @@ extension VehicleInfo {
         return "Updated \(hours / 24) days ago"
     }
 
-    static func number(_ value: Double, decimals: Int) -> String {
+    static func number(_ value: Double, decimals: Int, locale: Locale) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
-        formatter.locale = Locale(identifier: "en_AU")
+        formatter.locale = locale
         formatter.minimumFractionDigits = decimals
         formatter.maximumFractionDigits = decimals
         return formatter.string(from: NSNumber(value: value)) ?? String(value)

@@ -112,7 +112,7 @@ bold label font at 60% white, and is drawn only when Fleet sent that field:
 | Charge limit | Charge limit 90% | `flag.checkered` | `charge_state.charge_limit_soc` |
 | Charge rate (only while charging) | 11 kW · +48 km/h | `ev.charger` | `charger_power`, `charge_rate` |
 | Energy added (charging or complete) | 18.4 kWh added | `bolt.fill` | `charge_energy_added` |
-| Temperatures | Inside 22° · Outside 17° | `thermometer.medium` | `climate_state.inside_temp`, `outside_temp` |
+| Temperatures | Inside 22°C · Outside 17°C | `thermometer.medium` | `climate_state.inside_temp`, `outside_temp` |
 | Climate (only when on) | Climate on | `fan` | `climate_state.is_climate_on` |
 | Locks | Locked / Unlocked | `lock.fill` / `lock.open.fill` | `vehicle_state.locked` |
 | Sentry (only when on) | Sentry Mode on | `record.circle` | `vehicle_state.sentry_mode` |
@@ -122,13 +122,26 @@ bold label font at 60% white, and is drawn only when Fleet sent that field:
 | Update | Update available | `arrow.down.circle` | `vehicle_state.software_update.status` |
 | Age | Updated 4 min ago | `clock` | newest block `timestamp` |
 
-Distances, temperatures and tyre pressures follow the car's own `gui_settings` units.
+Distances, temperatures and tyre pressures always show their unit (km or mi, °C or °F, bar, psi or kPa).
+`VehicleDisplayUnits` picks each one in this order:
+
+1. The car's own `gui_settings` (`gui_distance_units`, `gui_temperature_units`, `gui_tirepressure_units`),
+   so the panel matches the car's screen.
+2. For temperature only, the system's own Celsius or Fahrenheit setting (`AppleTemperatureUnit`).
+3. The device region: `Locale.measurementSystem` gives miles for the US and UK and °F for the US.
+   Tyres use psi in the US, UK, Puerto Rico, Liberia and Myanmar, kPa in Canada and Japan, and bar
+   everywhere else, as Tesla does in Australia and Europe.
+
+Fleet sends miles, Celsius and bar, and `Measurement` does the conversions. The unit symbol is written by
+the panel rather than `MeasurementFormatter`, because the formatter's spacing changes by locale
+("22 °C") and the tyre row puts one unit after four numbers. Numbers use the device locale's separators.
 Location and "parked at" are left out on purpose. `vehicle_data_cached` never returns `drive_state` or
 location, and getting them would need a live `vehicle_data` call with `location_data`, which costs
 more and shows the location-sharing icon in the car.
 
 Demo mode shows the same panel from `DemoHouseTour.exampleInfo`, which uses made-up numbers with no VIN
-or location. Demo makes no Fleet calls.
+or location. It sends no `gui_settings`, so its units follow the device region: an Australian device shows
+km, °C and bar, and a US one mi, °F and psi. Demo makes no Fleet calls.
 
 ### Why `vehicle_data_cached`
 

@@ -46,18 +46,19 @@ struct VehicleInfoTests {
         #expect(info.isCharging)
         #expect(info.chargeLimitPercent == 90)
         #expect(info.tyrePressuresBar == [2.9, 2.9, 2.8, 2.9])
-        #expect(info.usesMiles == false && info.usesFahrenheit == false && info.usesPSI == false)
+        #expect(info.guiDistanceUnits == "km/hr" && info.guiTemperatureUnits == "C" && info.guiTyrePressureUnits == "Bar")
         #expect(info.reportedAt == Date(timeIntervalSince1970: 1_790_000_120))
 
         let now = Date(timeIntervalSince1970: 1_790_000_120 + 4 * 60)
-        let rows = info.rows(now: now)
+        // A US device still shows the car's own km, °C and bar.
+        let rows = info.rows(now: now, locale: Self.us, temperaturePreference: nil)
         #expect(rows.map(\.id) == ["range", "limit", "rate", "added", "temperature", "lock", "tyres", "odometer", "software", "updated"])
         let text = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.text) })
         #expect(text["range"] == "402 km range")
         #expect(text["limit"] == "Charge limit 90%")
         #expect(text["rate"] == "11 kW · +48 km/h")
         #expect(text["added"] == "18.4 kWh added")
-        #expect(text["temperature"] == "Inside 22° · Outside 17°")
+        #expect(text["temperature"] == "Inside 22°C · Outside 17°C")
         #expect(text["lock"] == "Locked")
         #expect(text["tyres"] == "Tyres 2.9 · 2.9 · 2.8 · 2.9 bar")
         #expect(text["odometer"] == "24,656 km")
@@ -70,7 +71,7 @@ struct VehicleInfoTests {
 
     @Test func missingFieldsHideTheirRows() throws {
         let info = try VehicleInfo.parse(Data(VehicleInfoFixtures.sparse.utf8))
-        let rows = info.rows(now: Date(timeIntervalSince1970: 1_790_000_000 + 3 * 3600))
+        let rows = info.rows(now: Date(timeIntervalSince1970: 1_790_000_000 + 3 * 3600), locale: Self.australia, temperaturePreference: nil)
         let ids = rows.map(\.id)
         #expect(ids == ["range", "lock", "sentry", "update", "updated"])
         let text = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.text) })
@@ -84,12 +85,58 @@ struct VehicleInfoTests {
         #expect(info.insideCelsius == nil)
     }
 
+    static let australia = Locale(identifier: "en_AU")
+    static let us = Locale(identifier: "en_US")
+
+    private func text(_ info: VehicleInfo, locale: Locale, preference: String? = nil) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: info.rows(locale: locale, temperaturePreference: preference).map { ($0.id, $0.text) })
+    }
+
     @Test func unitsFollowTheCarsDisplaySettings() {
-        let info = VehicleInfo(insideCelsius: 20, tyrePressuresBar: [2.9, 2.9, 2.9, 2.9], usesFahrenheit: true, usesPSI: true)
-        let text = Dictionary(uniqueKeysWithValues: info.rows().map { ($0.id, $0.text) })
-        #expect(text["temperature"] == "Inside 68°")
-        #expect(text["tyres"] == "Tyres 42 · 42 · 42 · 42 psi")
-        #expect(VehicleInfo().rows().isEmpty)
+        let tyres = [2.9, 2.9, 2.8, 2.9]
+        let fahrenheitPsi = VehicleInfo(
+            rangeMiles: 100, insideCelsius: 20, outsideCelsius: 10, tyrePressuresBar: tyres,
+            guiDistanceUnits: "mi/hr", guiTemperatureUnits: "F", guiTyrePressureUnits: "Psi"
+        )
+        let us = text(fahrenheitPsi, locale: Self.australia)
+        #expect(us["temperature"] == "Inside 68°F · Outside 50°F")
+        #expect(us["tyres"] == "Tyres 42 · 42 · 41 · 42 psi")
+        #expect(us["range"] == "100 mi range")
+
+        let kilopascals = VehicleInfo(tyrePressuresBar: tyres, guiTyrePressureUnits: "kPa")
+        #expect(text(kilopascals, locale: Self.us)["tyres"] == "Tyres 290 · 290 · 280 · 290 kPa")
+        #expect(VehicleInfo().rows(locale: Self.australia, temperaturePreference: nil).isEmpty)
+    }
+
+    @Test func missingCarUnitsFallBackToTheDeviceRegion() {
+        let info = VehicleInfo(rangeMiles: 100, insideCelsius: 20, tyrePressuresBar: [2.9, 2.9, 2.8, 2.9])
+        let australia = text(info, locale: Self.australia)
+        #expect(australia["temperature"] == "Inside 20°C")
+        #expect(australia["tyres"] == "Tyres 2.9 · 2.9 · 2.8 · 2.9 bar")
+        #expect(australia["range"] == "161 km range")
+
+        let us = text(info, locale: Self.us)
+        #expect(us["temperature"] == "Inside 68°F")
+        #expect(us["tyres"] == "Tyres 42 · 42 · 41 · 42 psi")
+        #expect(us["range"] == "100 mi range")
+
+        let uk = text(info, locale: Locale(identifier: "en_GB"))
+        #expect(uk["temperature"] == "Inside 20°C")
+        #expect(uk["tyres"]?.hasSuffix("psi") == true)
+        #expect(uk["range"] == "100 mi range")
+
+        #expect(text(info, locale: Locale(identifier: "en_CA"))["tyres"] == "Tyres 290 · 290 · 280 · 290 kPa")
+        #expect(text(info, locale: Locale(identifier: "de_DE"))["tyres"] == "Tyres 2,9 · 2,9 · 2,8 · 2,9 bar")
+
+        // The system temperature setting beats the region; the car's own setting beats both.
+        #expect(text(info, locale: Self.australia, preference: "Fahrenheit")["temperature"] == "Inside 68°F")
+        var carCelsius = info
+        carCelsius.guiTemperatureUnits = "C"
+        #expect(text(carCelsius, locale: Self.us, preference: "Fahrenheit")["temperature"] == "Inside 20°C")
+
+        // Blank or unknown car strings count as missing.
+        let blank = VehicleDisplayUnits.resolve(guiDistance: " ", guiTemperature: "", guiPressure: "atm", locale: Self.australia, temperaturePreference: nil)
+        #expect(blank == VehicleDisplayUnits(distance: .kilometers, temperature: .celsius, pressure: .bars))
     }
 
     @Test func statusCodesMapToOutcomes() {
@@ -188,8 +235,16 @@ struct VehicleInfoTests {
         let info = DemoHouseTour.exampleInfo(now: now)
         #expect(info.chargeSnapshot.batteryLevel == DemoHouseTour.exampleCharge.batteryLevel)
         #expect(info.chargingState == DemoHouseTour.exampleCharge.chargingState)
-        let rows = info.rows(now: now)
+        let rows = info.rows(now: now, locale: Self.australia, temperaturePreference: nil)
         #expect(rows.count >= 8)
+        let text = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.text) })
+        // Demo leaves units to the device region: an Australian device sees km, °C and bar.
+        #expect(text["temperature"] == "Inside 22°C · Outside 17°C")
+        #expect(text["tyres"] == "Tyres 2.9 · 2.9 · 2.8 · 2.9 bar")
+        #expect(text["range"] == "402 km range")
+        #expect(info.guiTemperatureUnits == nil && info.guiTyrePressureUnits == nil && info.guiDistanceUnits == nil)
+        let usDemo = Dictionary(uniqueKeysWithValues: info.rows(now: now, locale: Self.us, temperaturePreference: nil).map { ($0.id, $0.text) })
+        #expect(usDemo["temperature"] == "Inside 71°F · Outside 63°F")
         #expect(rows.last?.text == "Updated 4 min ago")
         #expect(CarShowroom.statLines(displayName: "Vehicle", exteriorColor: nil, snapshot: info.chargeSnapshot)
             .contains("80% battery · Charging"))
