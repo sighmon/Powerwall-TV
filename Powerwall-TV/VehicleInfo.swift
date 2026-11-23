@@ -237,26 +237,27 @@ struct VehicleDisplayUnits: Equatable {
     var temperature: UnitTemperature
     var pressure: UnitPressure
 
-    /// Regions where tyres are usually read in psi, and in kPa. Everywhere else uses bar, as Tesla
-    /// does in Australia and Europe.
-    static let psiRegions: Set<String> = ["US", "GB", "PR", "LR", "MM"]
+    /// Regions where tyres are usually read in psi, and in kPa. Everywhere else uses bar, as most of Europe does.
+    static let psiRegions: Set<String> = ["US", "GB", "AU", "NZ", "PR", "LR", "MM"]
     static let kilopascalRegions: Set<String> = ["CA", "JP"]
 
     /// `temperaturePreference` is the system's own `AppleTemperatureUnit` ("Celsius" or "Fahrenheit")
-    /// when the person has set one in Settings.
+    /// when the person has set one in Settings. `pressureSetting` is the app's own tyre unit setting,
+    /// which beats the car and the region unless it is Automatic.
     static func resolve(
         guiDistance: String?,
         guiTemperature: String?,
         guiPressure: String?,
         locale: Locale,
-        temperaturePreference: String? = UserDefaults.standard.string(forKey: "AppleTemperatureUnit")
+        temperaturePreference: String? = UserDefaults.standard.string(forKey: "AppleTemperatureUnit"),
+        pressureSetting: TyrePressureSetting = .automatic
     ) -> VehicleDisplayUnits {
         VehicleDisplayUnits(
             distance: distanceUnit(gui: guiDistance) ?? localeDistance(locale),
             temperature: temperatureUnit(gui: guiTemperature)
                 ?? temperatureUnit(gui: temperaturePreference)
                 ?? localeTemperature(locale),
-            pressure: pressureUnit(gui: guiPressure) ?? localePressure(locale)
+            pressure: pressureSetting.unit ?? pressureUnit(gui: guiPressure) ?? localePressure(locale)
         )
     }
 
@@ -318,15 +319,76 @@ struct VehicleDisplayUnits: Equatable {
     var pressureDecimals: Int { pressure == .bars ? 1 : 0 }
 }
 
+/// Settings → Display → Tyre pressure, and the showroom details tap. Stored in `UserDefaults` under `storageKey`.
+enum TyrePressureSetting: String, CaseIterable, Identifiable {
+    case automatic
+    case psi
+    case bar
+    case kilopascals = "kPa"
+
+    static let storageKey = "showroom_tyrePressureUnit"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .psi: return "psi"
+        case .bar: return "bar"
+        case .kilopascals: return "kPa"
+        }
+    }
+
+    /// Nil for Automatic: the car's unit, then the region's.
+    var unit: UnitPressure? {
+        switch self {
+        case .automatic: return nil
+        case .psi: return .poundsForcePerSquareInch
+        case .bar: return .bars
+        case .kilopascals: return .kilopascals
+        }
+    }
+
+    init(stored: String?) {
+        self = stored.flatMap(TyrePressureSetting.init(rawValue:)) ?? .automatic
+    }
+
+    /// The details tap: from whatever is on screen now, psi → bar → kPa → psi. Never back to Automatic;
+    /// Settings has that.
+    static func next(after shown: UnitPressure) -> TyrePressureSetting {
+        switch shown {
+        case .poundsForcePerSquareInch: return .bar
+        case .bars: return .kilopascals
+        default: return .psi
+        }
+    }
+}
+
 extension VehicleInfo {
-    func displayUnits(locale: Locale, temperaturePreference: String?) -> VehicleDisplayUnits {
+    func displayUnits(
+        locale: Locale,
+        temperaturePreference: String?,
+        pressureSetting: TyrePressureSetting = .automatic
+    ) -> VehicleDisplayUnits {
         VehicleDisplayUnits.resolve(
             guiDistance: guiDistanceUnits,
             guiTemperature: guiTemperatureUnits,
             guiPressure: guiTyrePressureUnits,
             locale: locale,
-            temperaturePreference: temperaturePreference
+            temperaturePreference: temperaturePreference,
+            pressureSetting: pressureSetting
         )
+    }
+
+    /// The setting the details tap should store next, or nil when there is no tyre row to change.
+    func nextPressureSetting(
+        locale: Locale = .current,
+        temperaturePreference: String? = UserDefaults.standard.string(forKey: "AppleTemperatureUnit"),
+        current: TyrePressureSetting
+    ) -> TyrePressureSetting? {
+        guard tyrePressuresBar?.count == 4 else { return nil }
+        let shown = displayUnits(locale: locale, temperaturePreference: temperaturePreference, pressureSetting: current).pressure
+        return TyrePressureSetting.next(after: shown)
     }
 
     /// Rows in reading order. A field Fleet did not send has no row. Battery, charging state and
@@ -334,9 +396,10 @@ extension VehicleInfo {
     func rows(
         now: Date = Date(),
         locale: Locale = .current,
-        temperaturePreference: String? = UserDefaults.standard.string(forKey: "AppleTemperatureUnit")
+        temperaturePreference: String? = UserDefaults.standard.string(forKey: "AppleTemperatureUnit"),
+        pressureSetting: TyrePressureSetting = .automatic
     ) -> [VehicleInfoRow] {
-        let units = displayUnits(locale: locale, temperaturePreference: temperaturePreference)
+        let units = displayUnits(locale: locale, temperaturePreference: temperaturePreference, pressureSetting: pressureSetting)
         var rows: [VehicleInfoRow] = []
         func add(_ id: String, _ symbol: String, _ text: String) {
             rows.append(VehicleInfoRow(id: id, symbol: symbol, text: text))

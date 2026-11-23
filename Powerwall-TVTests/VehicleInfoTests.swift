@@ -112,7 +112,9 @@ struct VehicleInfoTests {
         let info = VehicleInfo(rangeMiles: 100, insideCelsius: 20, tyrePressuresBar: [2.9, 2.9, 2.8, 2.9])
         let australia = text(info, locale: Self.australia)
         #expect(australia["temperature"] == "Inside 20°C")
-        #expect(australia["tyres"] == "Tyres 2.9 · 2.9 · 2.8 · 2.9 bar")
+        // Australians read tyres in psi, like the US and UK.
+        #expect(australia["tyres"] == "Tyres 42 · 42 · 41 · 42 psi")
+        #expect(text(info, locale: Locale(identifier: "en_NZ"))["tyres"] == "Tyres 42 · 42 · 41 · 42 psi")
         #expect(australia["range"] == "161 km range")
 
         let us = text(info, locale: Self.us)
@@ -136,7 +138,39 @@ struct VehicleInfoTests {
 
         // Blank or unknown car strings count as missing.
         let blank = VehicleDisplayUnits.resolve(guiDistance: " ", guiTemperature: "", guiPressure: "atm", locale: Self.australia, temperaturePreference: nil)
-        #expect(blank == VehicleDisplayUnits(distance: .kilometers, temperature: .celsius, pressure: .bars))
+        #expect(blank == VehicleDisplayUnits(distance: .kilometers, temperature: .celsius, pressure: .poundsForcePerSquareInch))
+    }
+
+    @Test func tyreSettingBeatsTheCarAndTheRegion() {
+        // The car says bar and the device is Australian, but the app setting wins unless it is Automatic.
+        let info = VehicleInfo(tyrePressuresBar: [2.9, 2.9, 2.8, 2.9], guiTyrePressureUnits: "Bar")
+        func tyres(_ setting: TyrePressureSetting) -> String? {
+            info.rows(locale: Self.australia, temperaturePreference: nil, pressureSetting: setting).first { $0.id == "tyres" }?.text
+        }
+        #expect(tyres(.automatic) == "Tyres 2.9 · 2.9 · 2.8 · 2.9 bar")
+        #expect(tyres(.psi) == "Tyres 42 · 42 · 41 · 42 psi")
+        #expect(tyres(.bar) == "Tyres 2.9 · 2.9 · 2.8 · 2.9 bar")
+        #expect(tyres(.kilopascals) == "Tyres 290 · 290 · 280 · 290 kPa")
+
+        #expect(TyrePressureSetting(stored: nil) == .automatic)
+        #expect(TyrePressureSetting(stored: "nonsense") == .automatic)
+        #expect(TyrePressureSetting(stored: "kPa") == .kilopascals)
+        #expect(TyrePressureSetting.allCases.map(\.title) == ["Automatic", "psi", "bar", "kPa"])
+    }
+
+    @Test func detailsTapStepsTheTyreUnitFromWhatIsShown() {
+        let info = VehicleInfo(tyrePressuresBar: [2.9, 2.9, 2.8, 2.9], guiTyrePressureUnits: "Bar")
+        // Automatic is showing the car's bar, so the first tap goes to kPa, then psi, then bar.
+        var setting = TyrePressureSetting.automatic
+        var seen: [TyrePressureSetting] = []
+        for _ in 0..<4 {
+            guard let next = info.nextPressureSetting(locale: Self.australia, temperaturePreference: nil, current: setting) else { break }
+            seen.append(next)
+            setting = next
+        }
+        #expect(seen == [.kilopascals, .psi, .bar, .kilopascals])
+        // No tyre row: nothing to switch, so the panel is not a button.
+        #expect(VehicleInfo(insideCelsius: 20).nextPressureSetting(locale: Self.australia, temperaturePreference: nil, current: .automatic) == nil)
     }
 
     @Test func statusCodesMapToOutcomes() {
@@ -238,9 +272,9 @@ struct VehicleInfoTests {
         let rows = info.rows(now: now, locale: Self.australia, temperaturePreference: nil)
         #expect(rows.count >= 8)
         let text = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.text) })
-        // Demo leaves units to the device region: an Australian device sees km, °C and bar.
+        // Demo leaves units to the device region: an Australian device sees km, °C and psi.
         #expect(text["temperature"] == "Inside 22°C · Outside 17°C")
-        #expect(text["tyres"] == "Tyres 2.9 · 2.9 · 2.8 · 2.9 bar")
+        #expect(text["tyres"] == "Tyres 42 · 42 · 41 · 42 psi")
         #expect(text["range"] == "402 km range")
         #expect(info.guiTemperatureUnits == nil && info.guiTyrePressureUnits == nil && info.guiDistanceUnits == nil)
         let usDemo = Dictionary(uniqueKeysWithValues: info.rows(now: now, locale: Self.us, temperaturePreference: nil).map { ($0.id, $0.text) })

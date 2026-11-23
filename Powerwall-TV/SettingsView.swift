@@ -49,6 +49,7 @@ struct SettingsView: View {
     @AppStorage("homeEnergyAdvisor_voiceID") private var advisorVoiceID = "luna"
     @AppStorage("homeEnergyAdvisor_modelID") private var advisorModelID = ""
     @AppStorage("houseHeadingDegrees") private var houseHeadingDegrees = 180.0
+    @AppStorage(TyrePressureSetting.storageKey) private var tyrePressureSetting = TyrePressureSetting.automatic.rawValue
     @State private var grokModels: [GrokAdvisorClient.Model] = []
     @State private var loadingModels = false
     @State private var modelError: String?
@@ -364,6 +365,18 @@ struct SettingsView: View {
                     step: 15
                 )
                 Text("Points the street side of the 3D house so the sun matches this site. South is 180°.")
+                    .font(.footnote)
+                    .foregroundColor(.gray)
+                Picker("Tyre pressure", selection: $tyrePressureSetting) {
+                    ForEach(TyrePressureSetting.allCases) { setting in
+                        Text(setting.title).tag(setting.rawValue)
+                    }
+                }
+                .accessibilityIdentifier("tyrePressurePicker")
+#if !os(tvOS)
+                .pickerStyle(.menu)
+#endif
+                Text("Automatic uses the car's own unit, then your region's. Selecting the car details in the showroom also switches between psi, bar and kPa.")
                     .font(.footnote)
                     .foregroundColor(.gray)
                 Toggle("Prevent screen saver from showing", isOn: $preventScreenSaver)

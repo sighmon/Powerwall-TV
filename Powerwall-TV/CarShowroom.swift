@@ -508,6 +508,8 @@ struct CarShowroomView: View {
     /// `vehicle_data_cached` rows for the owned car, or the demo sample. Nil hides the panel.
     var info: VehicleInfo? = nil
     var onDismiss: () -> Void
+    /// Same key as Settings → Display → Tyre pressure. The details tap only writes this; it never calls Fleet.
+    @AppStorage(TyrePressureSetting.storageKey) private var tyrePressureSetting = TyrePressureSetting.automatic.rawValue
     @State private var scene: SCNScene?
     @State private var browseIndex = 0
     /// Nil keeps the file or Fleet colour. Up and down walk `TeslaPaint.catalogue`.
@@ -518,6 +520,7 @@ struct CarShowroomView: View {
         case next
         case close
         case buy
+        case details
     }
     @FocusState private var showroomFocus: ShowroomFocus?
 
@@ -532,6 +535,10 @@ struct CarShowroomView: View {
         func body(content: Content) -> some View {
             content.onMoveCommand { direction in
                 switch direction {
+                case .left where !browses && item == .close:
+                    focus.wrappedValue = .details
+                case .right where item == .details:
+                    focus.wrappedValue = .close
                 case .left where browses:
                     focus.wrappedValue = .previous
                 case .right where browses:
@@ -674,12 +681,38 @@ struct CarShowroomView: View {
         .frame(width: width, alignment: .leading)
     }
 
+    private var pressureSetting: TyrePressureSetting {
+        TyrePressureSetting(stored: tyrePressureSetting)
+    }
+
     /// Left column under the charge lines: one SF Symbol per row, same bold label font and 60% white.
-    /// Rows Fleet did not send are not drawn.
+    /// Rows Fleet did not send are not drawn. With a tyre row, a tap, click or tvOS select steps the
+    /// tyre unit psi → bar → kPa. That only changes the stored setting and redraws from memory.
+    @ViewBuilder
     private func vehicleInfoPanel(_ info: VehicleInfo, labelFont: Font) -> some View {
+        if let next = info.nextPressureSetting(current: pressureSetting) {
+            Button {
+                tyrePressureSetting = next.rawValue
+            } label: {
+                vehicleInfoRows(info, labelFont: labelFont)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Vehicle details")
+            .accessibilityHint("Shows tyre pressure in \(next.title)")
+            #if os(tvOS)
+            .focused($showroomFocus, equals: .details)
+            .modifier(ShowroomRemote(item: .details, browses: false, focus: $showroomFocus, shift: { shiftColour($0) }))
+            #endif
+        } else {
+            vehicleInfoRows(info, labelFont: labelFont)
+        }
+    }
+
+    private func vehicleInfoRows(_ info: VehicleInfo, labelFont: Font) -> some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(info.rows(now: context.date)) { row in
+                ForEach(info.rows(now: context.date, pressureSetting: pressureSetting)) { row in
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Image(systemName: row.symbol)
                             .symbolRenderingMode(.hierarchical)

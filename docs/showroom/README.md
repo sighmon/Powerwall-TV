@@ -116,7 +116,7 @@ bold label font at 60% white, and is drawn only when Fleet sent that field:
 | Climate (only when on) | Climate on | `fan` | `climate_state.is_climate_on` |
 | Locks | Locked / Unlocked | `lock.fill` / `lock.open.fill` | `vehicle_state.locked` |
 | Sentry (only when on) | Sentry Mode on | `record.circle` | `vehicle_state.sentry_mode` |
-| Tyres (all four or none) | Tyres 2.9 · 2.9 · 2.8 · 2.9 bar | `tirepressure` | `tpms_pressure_fl/fr/rl/rr` |
+| Tyres (all four or none) | Tyres 42 · 42 · 41 · 42 psi | `tirepressure` | `tpms_pressure_fl/fr/rl/rr` |
 | Odometer | 24,656 km | `road.lanes` | `vehicle_state.odometer` |
 | Software | Software 2026.38.4 | `gearshape` | `vehicle_state.car_version` |
 | Update | Update available | `arrow.down.circle` | `vehicle_state.software_update.status` |
@@ -125,12 +125,21 @@ bold label font at 60% white, and is drawn only when Fleet sent that field:
 Distances, temperatures and tyre pressures always show their unit (km or mi, °C or °F, bar, psi or kPa).
 `VehicleDisplayUnits` picks each one in this order:
 
-1. The car's own `gui_settings` (`gui_distance_units`, `gui_temperature_units`, `gui_tirepressure_units`),
+1. For tyres only, Settings → Display → Tyre pressure, unless it is Automatic (the default).
+   Selecting the details panel in the showroom (tap on iOS, click on macOS, select on the Apple TV
+   remote) steps that setting from the unit on screen: psi → bar → kPa → psi. Only Settings can set it
+   back to Automatic. The tap only writes the setting (`showroom_tyrePressureUnit` in `UserDefaults`)
+   and redraws from the copy already in memory, so it never makes a Fleet call. The panel is only a
+   button when there is a tyre row.
+2. The car's own `gui_settings` (`gui_distance_units`, `gui_temperature_units`, `gui_tirepressure_units`),
    so the panel matches the car's screen.
-2. For temperature only, the system's own Celsius or Fahrenheit setting (`AppleTemperatureUnit`).
-3. The device region: `Locale.measurementSystem` gives miles for the US and UK and °F for the US.
-   Tyres use psi in the US, UK, Puerto Rico, Liberia and Myanmar, kPa in Canada and Japan, and bar
-   everywhere else, as Tesla does in Australia and Europe.
+3. For temperature only, the system's own Celsius or Fahrenheit setting (`AppleTemperatureUnit`).
+4. The device region: `Locale.measurementSystem` gives miles for the US and UK and °F for the US.
+   Tyres use psi in the US, UK, Australia, New Zealand, Puerto Rico, Liberia and Myanmar, kPa in Canada
+   and Japan, and bar everywhere else, as most of Europe does.
+
+The tap does not change temperature. °C and °F already follow the car and the system setting, and a
+tap that cycles two different things would be hard to predict.
 
 Fleet sends miles, Celsius and bar, and `Measurement` does the conversions. The unit symbol is written by
 the panel rather than `MeasurementFormatter`, because the formatter's spacing changes by locale
@@ -141,7 +150,7 @@ more and shows the location-sharing icon in the car.
 
 Demo mode shows the same panel from `DemoHouseTour.exampleInfo`, which uses made-up numbers with no VIN
 or location. It sends no `gui_settings`, so its units follow the device region: an Australian device shows
-km, °C and bar, and a US one mi, °F and psi. Demo makes no Fleet calls.
+km, °C and psi, and a US one mi, °F and psi. Demo makes no Fleet calls.
 
 ### Why `vehicle_data_cached`
 
