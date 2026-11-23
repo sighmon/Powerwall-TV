@@ -2341,20 +2341,31 @@ struct GarageSceneTests {
         #expect(housing.ambientOcclusion.contents == nil)
         #expect(housing.emission.contents != nil)
         #expect(abs(housing.emission.intensity - VehicleLamps.emissionFloor) < 0.001)
-        #expect(VehicleLamps.emissionFloor >= 0.25 && VehicleLamps.emissionFloor <= 0.35)
+        #expect(VehicleLamps.emissionFloor > 0 && VehicleLamps.emissionFloor <= 0.35)
         #expect(VehicleLamps.displayAlbedo >= 1)
         #expect(housing.transparency == 1)
         #expect(housing.writesToDepthBuffer)
         let lensGlow = rgb(lens.emission.contents)
         #expect(lensGlow.red + lensGlow.green + lensGlow.blue < 0.01)
         #expect(rgb(lens.multiply.contents).red > 0.99)
+        // The lens node draws after the car.
+        var lensOrder = Int.min
+        scene.rootNode.enumerateChildNodes { node, _ in
+            if node.geometry?.materials.contains(where: { $0 === lens }) == true,
+               !(node.parent?.name ?? "").contains(ShowroomStage.mirrorName) {
+                lensOrder = max(lensOrder, node.renderingOrder)
+            }
+        }
+        #expect(lensOrder >= VehicleLamps.lensRenderingOrder)
         #expect(rgb(lens.transparent.contents).red > 0.99)
         // Tesla's Glass_Lights smoke, drawn as one see-through layer.
         // Near-clear glossy glass, not Tesla's near-black smoke at 0.51.
         #expect(abs(lens.transparency - VehicleLamps.lensOpacity) < 0.001)
         #expect(lens.transparency <= 0.3)
-        #expect(rgb(lens.diffuse.contents).red > 0.5)
-        #expect(((lens.roughness.contents as? NSNumber)?.doubleValue ?? 1) <= Double(VehicleLamps.lensMaxRoughness))
+        // Opacity = transparent alpha (1) × transparency, so the lens is mostly see-through.
+        #expect(lens.lightingModel == .blinn)
+        #expect(abs(rgb(lens.diffuse.contents).red - Double(VehicleLamps.lensTint)) < 0.01)
+        #expect(lens.colorBufferWriteMask == .all)
         #expect(lens.blendMode == .alpha)
         #expect(lens.transparencyMode == .aOne)
         #expect(!lens.isDoubleSided)
@@ -2391,6 +2402,18 @@ struct GarageSceneTests {
         ))
         #expect(material(named: "Lights", in: generic) == nil)
         #expect(material(named: VehicleLamps.housingName, in: generic) == nil)
+    }
+
+    @Test func lampDebugSettingParsesHideLens() {
+        let key = "debugLamps"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer { UserDefaults.standard.set(saved, forKey: key) }
+        UserDefaults.standard.set("hideLens", forKey: key)
+        #expect(VehicleLamps.debugHideLens)
+        #expect(VehicleLamps.debugLogging)
+        UserDefaults.standard.set("YES", forKey: key)
+        #expect(!VehicleLamps.debugHideLens)
+        #expect(VehicleLamps.debugLogging)
     }
 
     @Test func lampMaterialsMatchTheNamesSceneKitMightGive() {

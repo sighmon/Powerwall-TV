@@ -146,7 +146,7 @@ example:
 ```
 [Lamps] ModelY: 2 lamp material(s) matched
 [Lamps] ModelY: housing node=Lamps material=Lamps texcoords=true atlas from bundle ModelY_Lamps_BC.png
-[Lamps] ModelY: lens node=LampGlass material=LampGlass transparency=0.2 tint=0.6 (Tesla 0.39)
+[Lamps] ModelY: lens node=LampGlass material=LampGlass hidden=false order=5 tint=0.0 (Tesla opacity 0.39) | model=blinn mode=0 blend=0 transparent=NSColor(alpha 1.0) transparency=0.12 doubleSided=false ...
 ```
 
 `texcoords=false` or `nothing named Lamps or LampGlass` points straight at the import.
@@ -173,14 +173,41 @@ Tuning knobs, all in `VehicleLamps` (`HouseLighting.swift`):
 | Knob | Value | Effect |
 | --- | --- | --- |
 | `displayAlbedo` | 1.0 | Housing atlas brightness. Chrome and LED strips are light grey to white; black stays black. |
-| `emissionFloor` | 0.3 | The atlas glows this much, so it reads under any lighting. Black areas stay black. |
+| `emissionFloor` | 0.2 | The atlas glows this much, so it reads under any lighting. Black areas stay black. Higher flattens the shading. |
 | `housingRoughness` | 0.35 | Housing gloss (lower is glossier) |
-| `lensTint` | 0.6 | Lens colour, from 0 (black) to 1 (white). Tesla's is 0.0118. |
-| `lensOpacity` | 0.2 | Lens opacity. Tesla's is 0.39 to 0.51. |
-| `lensMaxRoughness` | 0.1 | Cap on lens roughness, so it stays glossy |
+| `lensTint` | 0.0 | Lens colour, from 0 (black) to 1 (white), blended in at `lensOpacity`. Grey veils the housing. |
+| `lensOpacity` | 0.12 | Lens opacity. Tesla's is 0.39 to 0.51. |
+| `lensSpecular` / `lensShininess` | 1.0 / 1.0 | Lens glints from the lights (Blinn) |
+| `lensRenderingOrder` | 5 | Lens nodes draw after the car (0 in the showroom, 2 at home) and before rain and snow (7) |
 | `fallbackGrey` | 0.35 | Housing colour if the atlas or the UVs are missing |
 
 `-debugLamps YES` now also prints the albedo, emission, lens tint and opacity in use.
+
+### Grey, not see-through (b1075b1)
+
+With `lensTint` 0.6 the lamps read as flat grey. The SceneKit docs confirm the blending:
+
+- a pixel's opacity is the colour of `transparent` (under `.aOne`, its alpha) multiplied by
+  `transparency`;
+- the lens's white `transparent` with `transparency` 0.2 was therefore already 80% see-through.
+
+Three things made it look grey anyway:
+
+- **The tint.** A light grey lens blends a grey veil over everything.
+- **Fresnel.** Physically based shading adds a reflection of the grey studio on top. It grows
+  toward 100% at glancing angles, which is how the curved lenses are seen.
+- **The glow.** The housing's 0.3 emission flattened its shading.
+
+The changes:
+
+- The lens is now Blinn, which has no environment reflection: a black body at 12% opacity plus
+  specular glints from the lights. It draws after the car (`lensRenderingOrder`).
+- The housing glow is down to 0.2.
+
+`-debugLamps hideLens` (or `POWERWALL_DEBUG_LAMPS=hideLens`) hides every lens, so the housing alone
+shows. The log prints each lamp material's lighting model, transparency mode, blend mode,
+`transparent` contents and alpha, `transparency`, whether it's double-sided, whether it writes
+depth, the type of its diffuse contents, and its emission.
 
 `build_vehicles_v2.py` now writes the lens single-sided for future exports. The shipped usdz files
 are unchanged, because the app sets this on the material.

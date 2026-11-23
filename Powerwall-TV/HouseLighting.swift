@@ -651,18 +651,19 @@ enum VehicleLamps {
     static let displayAlbedo: CGFloat = 1.0
     /// The housing atlas also glows this much, so it reads under any lighting. Black atlas areas
     /// (trim, bezels) stay black because the glow is the atlas itself. This is not "lamps on".
-    static let emissionFloor: CGFloat = 0.3
+    static let emissionFloor: CGFloat = 0.2
     /// Housing roughness. Lower is glossier.
     static let housingRoughness: CGFloat = 0.35
     /// Used when the atlas or the texture coordinates are missing.
     static let fallbackGrey: CGFloat = 0.35
-    /// Lens tint (0 black … 1 white). Tesla's Glass_Lights is 0.0118 (near black); light grey reads
-    /// as clear glass over the housing.
-    static let lensTint: CGFloat = 0.6
+    /// Lens colour (0 black … 1 white), blended in at `lensOpacity`. Black keeps the housing's
+    /// colours true; grey veils them (0.6 made the lamps read flat grey).
+    static let lensTint: CGFloat = 0.0
     /// Lens opacity (0 invisible … 1 solid). Tesla's is 0.39 to 0.51, which smoked the lamps dark.
-    static let lensOpacity: CGFloat = 0.2
-    /// Lens roughness ceiling. Tesla's are 0.01 to 0.1; capped so the lens stays glossy.
-    static let lensMaxRoughness: CGFloat = 0.1
+    static let lensOpacity: CGFloat = 0.12
+    /// Strength and tightness of the lens's specular glints from the lights (Blinn).
+    static let lensSpecular: CGFloat = 1.0
+    static let lensShininess: CGFloat = 1.0
 
     /// The lamp housing material. `texture` is the asset prefix for `<texture>_Lamps_BC.png`
     /// and `<texture>_Lamps_MRA.png`. `albedo`, `metallic`, and `roughness` multiply the maps,
@@ -710,14 +711,14 @@ enum VehicleLamps {
         var lines: [String] = []
         node.enumerateHierarchy { child, _ in
             guard let geometry = child.geometry else { return }
-            lines += dress(geometry, nodeName: child.name, model: model)
+            lines += dress(geometry, node: child, nodeName: child.name, model: model)
         }
         log(model: model, lines: lines)
     }
 
     /// Dresses the lamp materials on one geometry. Returns one debug line per material it matched.
     @discardableResult
-    static func dress(_ geometry: SCNGeometry, nodeName: String?, model: VehicleModel) -> [String] {
+    static func dress(_ geometry: SCNGeometry, node: SCNNode? = nil, nodeName: String?, model: VehicleModel) -> [String] {
         let hasTexcoords = !geometry.sources(for: .texcoord).isEmpty
         var lines: [String] = []
         for material in geometry.materials {
@@ -725,11 +726,13 @@ enum VehicleLamps {
             case .housing?:
                 guard let housing = housing(for: model) else { continue }
                 let how = apply(housing, to: material, hasTexcoords: hasTexcoords)
-                lines.append("housing node=\(nodeName ?? "-") material=\(material.name ?? "-") texcoords=\(hasTexcoords) \(how) albedo=\(displayAlbedo) emission=\(emissionFloor)")
+                lines.append("housing node=\(nodeName ?? "-") material=\(material.name ?? "-") texcoords=\(hasTexcoords) \(how) albedo=\(displayAlbedo) | \(describe(material))")
             case .lens?:
                 guard let lens = lens(for: model) else { continue }
                 apply(lens, to: material)
-                lines.append("lens node=\(nodeName ?? "-") material=\(material.name ?? "-") transparency=\(lensOpacity) tint=\(lensTint) (Tesla \(lens.opacity))")
+                if let node { node.renderingOrder = max(node.renderingOrder, lensRenderingOrder) }
+                lines.append("lens node=\(nodeName ?? "-") material=\(material.name ?? "-") hidden=\(debugHideLens) "
+                    + "order=\(node?.renderingOrder ?? -1) tint=\(lensTint) (Tesla opacity \(lens.opacity)) | \(describe(material))")
             case nil:
                 continue
             }
@@ -823,19 +826,28 @@ enum VehicleLamps {
     }
 
     private static func apply(_ lens: Lens, to material: SCNMaterial) {
-        material.lightingModel = .physicallyBased
-        // One layer of smoke, like Glass_Lights (Godot culls back faces). The lens faces outward.
+        // Blinn, not physically based: SceneKit's PBR adds Fresnel reflection of the studio
+        // environment on top of the blended colour, so a curved lens seen at a glancing angle washed
+        // over as opaque grey. Blinn has no environment term: a black body that only lets through
+        // the housing (at 1 - lensOpacity) plus small specular glints from the lights.
+        material.lightingModel = .blinn
+        // One layer, like Glass_Lights (Godot culls back faces). The lens faces outward.
         material.isDoubleSided = false
         material.cullMode = .back
+        material.diffuse.contents = HouseColor(white: lensTint, alpha: 1)
+        material.diffuse.intensity = 1
+        material.ambient.contents = HouseColor.black
+        material.specular.contents = HouseColor.white
+        material.specular.intensity = lensSpecular
+        material.shininess = lensShininess
         material.emission.contents = HouseColor.black
         material.multiply.contents = HouseColor.white
         material.ambientOcclusion.contents = nil
-        // Near-clear light grey instead of Tesla's near-black tint; glossy so it still reads as glass.
-        material.diffuse.contents = HouseColor(white: lensTint, alpha: 1)
-        material.diffuse.intensity = 1
-        material.metalness.contents = NSNumber(value: 0)
-        material.roughness.contents = NSNumber(value: Double(min(lens.roughness, lensMaxRoughness)))
-        // USD import puts the opacity on `transparent`; replace it so only `transparency` counts.
+        material.metalness.contents = nil
+        material.roughness.contents = nil
+        // Opacity = alpha of `transparent` (white, alpha 1) × `transparency`, per the SceneKit docs
+        // for SCNMaterial.transparency and SCNTransparencyMode.aOne. The USD import's own opacity
+        // on `transparent` is replaced so only `transparency` counts.
         material.transparent.contents = HouseColor.white
         material.transparent.intensity = 1
         material.transparency = lensOpacity
@@ -843,14 +855,41 @@ enum VehicleLamps {
         material.blendMode = .alpha
         material.writesToDepthBuffer = false
         material.readsFromDepthBuffer = true
+        if debugHideLens {
+            // -debugLamps hideLens: draw nothing, so the housing alone shows.
+            material.transparency = 0
+            material.colorBufferWriteMask = []
+        }
+    }
+
+    /// Lens nodes draw after the housing and the rest of the car (0 in the showroom, 2 at home),
+    /// and below the rain and snow (7).
+    static let lensRenderingOrder = 5
+
+    static func describe(_ material: SCNMaterial) -> String {
+        func kind(_ contents: Any?) -> String { contents.map { String(describing: type(of: $0)) } ?? "nil" }
+        var alpha: CGFloat = -1
+        if let colour = material.transparent.contents as? HouseColor { alpha = colour.cgColor.alpha }
+        return "model=\(material.lightingModel.rawValue) mode=\(material.transparencyMode.rawValue) "
+            + "blend=\(material.blendMode.rawValue) transparent=\(kind(material.transparent.contents))(alpha \(alpha)) "
+            + "transparency=\(material.transparency) doubleSided=\(material.isDoubleSided) "
+            + "depthWrite=\(material.writesToDepthBuffer) diffuse=\(kind(material.diffuse.contents)) "
+            + "emission=\(kind(material.emission.contents))@\(material.emission.intensity)"
     }
 
     /// Lists the matched lamp nodes in the console. Turn on with the launch argument
     /// `-debugLamps YES` (or `defaults write <bundle id> debugLamps -bool YES`).
-    static var debugLogging: Bool {
-        UserDefaults.standard.bool(forKey: "debugLamps")
-            || ProcessInfo.processInfo.environment["POWERWALL_DEBUG_LAMPS"] == "1"
+    /// `-debugLamps YES` (or POWERWALL_DEBUG_LAMPS=1) logs; `-debugLamps hideLens`
+    /// (or POWERWALL_DEBUG_LAMPS=hideLens) also hides every lamp lens.
+    static var debugSetting: String {
+        let raw = UserDefaults.standard.string(forKey: "debugLamps")
+            ?? ProcessInfo.processInfo.environment["POWERWALL_DEBUG_LAMPS"] ?? ""
+        return raw.lowercased()
     }
+    static var debugLogging: Bool {
+        ["yes", "1", "true", "hidelens"].contains(debugSetting)
+    }
+    static var debugHideLens: Bool { debugSetting == "hidelens" }
 
     static func log(model: VehicleModel, lines: [String]) {
         guard debugLogging else { return }
@@ -1234,7 +1273,7 @@ final class HouseLighting {
                 }
             }
             if let model {
-                lampLines += VehicleLamps.dress(geometry, nodeName: node.name, model: model)
+                lampLines += VehicleLamps.dress(geometry, node: node, nodeName: node.name, model: model)
             }
             let name = geometry.materials.first?.name ?? ""
             guard name == "Paint" || name == "Glass" || name == "vehicle",
