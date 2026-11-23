@@ -99,3 +99,76 @@ them to opaque Trim. They now map to Glass, like the windscreen and front window
 has unnamed exterior surfaces. The B pillars sit on the `Interior` mesh, which is dropped: the
 outer cover is on its Trim surface and the inner trim on its `Pillar` surface. The converter keeps
 the triangles of those two surfaces between the door windows, as a gloss black `Pillar` material.
+
+## Vehicle info panel and its Fleet call budget
+
+The showroom's left column puts battery and charging on one line (`80% battery · Charging`), then
+minutes to full, then a panel of `vehicle_data_cached` rows. Each row has an SF Symbol, uses the same
+bold label font at 60% white, and is drawn only when Fleet sent that field:
+
+| Row | Example | SF Symbol | Fleet field |
+| --- | --- | --- | --- |
+| Range | 402 km range | `gauge.with.dots.needle.67percent` | `charge_state.battery_range` |
+| Charge limit | Charge limit 90% | `flag.checkered` | `charge_state.charge_limit_soc` |
+| Charge rate (only while charging) | 11 kW · +48 km/h | `ev.charger` | `charger_power`, `charge_rate` |
+| Energy added (charging or complete) | 18.4 kWh added | `bolt.fill` | `charge_energy_added` |
+| Temperatures | Inside 22° · Outside 17° | `thermometer.medium` | `climate_state.inside_temp`, `outside_temp` |
+| Climate (only when on) | Climate on | `fan` | `climate_state.is_climate_on` |
+| Locks | Locked / Unlocked | `lock.fill` / `lock.open.fill` | `vehicle_state.locked` |
+| Sentry (only when on) | Sentry Mode on | `record.circle` | `vehicle_state.sentry_mode` |
+| Tyres (all four or none) | Tyres 2.9 · 2.9 · 2.8 · 2.9 bar | `tirepressure` | `tpms_pressure_fl/fr/rl/rr` |
+| Odometer | 24,656 km | `road.lanes` | `vehicle_state.odometer` |
+| Software | Software 2026.38.4 | `gearshape` | `vehicle_state.car_version` |
+| Update | Update available | `arrow.down.circle` | `vehicle_state.software_update.status` |
+| Age | Updated 4 min ago | `clock` | newest block `timestamp` |
+
+Distances, temperatures and tyre pressures follow the car's own `gui_settings` units.
+Location and "parked at" are left out on purpose. `vehicle_data_cached` never returns `drive_state` or
+location, and getting them would need a live `vehicle_data` call with `location_data`, which costs
+more and shows the location-sharing icon in the car.
+
+Demo mode shows the same panel from `DemoHouseTour.exampleInfo`, which uses made-up numbers with no VIN
+or location. Demo makes no Fleet calls.
+
+### Why `vehicle_data_cached`
+
+Tesla's docs say `vehicle_data` "makes a live call to the vehicle" and regular polling "will be expensive".
+`vehicle_data_cached` returns the last data the car reported "without a call to the vehicle", works while it
+is asleep or offline, and never wakes it. Its body only has `charge_state`, `climate_state`, `gui_settings`
+and `vehicle_state`, which is every field above. The docs do not list an `endpoints` filter for it, so the
+panel sends none. The existing live charge call keeps its `endpoints=charge_state;vehicle_config;vehicle_state`
+filter and is unchanged. Nothing calls `wake_up`.
+
+The data can be hours old, so the panel's last row says how old it is.
+
+### Throttling (`VehicleInfoRefreshPolicy`)
+
+- Calls only happen while the showroom is open. Its SwiftUI `.task` checks the policy once a minute and is
+  cancelled when the showroom closes. Nothing polls in the background, and the catalogue cars never call.
+- One call per car at a time. A second check while one is in flight does nothing.
+- Results are kept in memory and in `UserDefaults` (`fleetVehicleInfoCache`), together with the throttle
+  state, so reopening the showroom or relaunching the app does not reset the clock. Cached info older than a
+  day is not shown.
+- Parked: at most one call every 10 minutes. While charging: every 5 minutes, because range and kWh added
+  move. When the car has not reported anything new since the last call, the wait doubles (20, 40, then 60
+  minutes at most).
+- 408 asleep/offline: wait 30 minutes. 429: wait for `Retry-After`, and never less than 15 minutes.
+  404 (no cached data) or 412 (car does not support it): wait 6 hours. 403: wait a day and show the
+  existing re-login message. 401 runs the existing token refresh. Network errors and 5xx back off from
+  5 minutes up to an hour.
+- A hard cap of 100 calls per car per rolling 24 hours.
+
+### Call budget
+
+Tesla bills Data requests at 500 per $1, so $0.002 per call. Any response under 500 is billed. Each account
+gets a $10 monthly discount. The cached-data rate limit is 60 requests per minute, far above anything here.
+
+| Use | Calls per car per day | Cost per day |
+| --- | --- | --- |
+| Showroom never opened | 0 | $0 |
+| Opened about 5 times, briefly | up to 5 | up to $0.01 |
+| Left open all day, parked (backs off to hourly) | about 26 | about $0.05 |
+| Left open while charging (5 minutes, then the cap) | at most 100 | at most $0.20 |
+
+The worst case, a showroom left open on a charging car every day, is about $6 a month per car, which is
+inside the $10 discount. These calls are on top of the app's existing live charge calls, which are unchanged.

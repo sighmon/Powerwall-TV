@@ -44,6 +44,30 @@ enum DemoHouseTour {
         minutesToFullCharge: 45
     )
 
+    /// Sample `vehicle_data_cached` panel for every demo car. Made-up numbers, no VIN or location,
+    /// and the demo never calls Fleet. It matches `exampleCharge`.
+    static func exampleInfo(now: Date = Date()) -> VehicleInfo {
+        VehicleInfo(
+            batteryLevel: exampleCharge.batteryLevel,
+            chargingState: exampleCharge.chargingState,
+            minutesToFullCharge: exampleCharge.minutesToFullCharge,
+            rangeMiles: 249.8,
+            chargeLimitPercent: 90,
+            chargerPowerKilowatts: 11,
+            chargeRateMilesPerHour: 29.8,
+            energyAddedKilowattHours: 18.4,
+            insideCelsius: 21.5,
+            outsideCelsius: 17,
+            climateOn: false,
+            locked: true,
+            sentryMode: false,
+            odometerMiles: 15_320,
+            softwareVersion: "2026.38.4 0a1b2c3d4e5f",
+            tyrePressuresBar: [2.9, 2.9, 2.8, 2.9],
+            reportedAt: now.addingTimeInterval(-4 * 60)
+        )
+    }
+
     static let weather: [DemoWeatherScene] = [
         DemoWeatherScene(title: "Clear", sunAltitude: 52, sunAzimuth: 180, isDaylight: true, cloudCover: 0.05, condition: .clear, precipitationMillimetresPerHour: 0),
         DemoWeatherScene(title: "Partly cloudy", sunAltitude: 46, sunAzimuth: 120, isDaylight: true, cloudCover: 0.15, condition: .partlyCloudy, precipitationMillimetresPerHour: 0),

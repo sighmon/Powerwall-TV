@@ -203,6 +203,12 @@ class PowerwallViewModel: ObservableObject {
     private var hasShownVehicleScopeWarning = false
     private static let vehicleChargeCacheKey = "fleetVehicleChargeCache"
     private static let vehicleAppearanceCacheKey = "fleetVehicleAppearanceCache"
+    /// Showroom panel data from `vehicle_data_cached`, keyed by VIN. Only fetched while the showroom is open.
+    @Published var vehicleInfo: [String: VehicleInfo] = [:]
+    private var vehicleInfoCache: [String: CachedVehicleInfo] = [:]
+    private var vehicleInfoFetchesInFlight = Set<String>()
+    let vehicleInfoPolicy = VehicleInfoRefreshPolicy()
+    private static let vehicleInfoCacheKey = "fleetVehicleInfoCache"
 
     var garagePresentation: GaragePresentation {
         GaragePresentation.make(
@@ -316,6 +322,16 @@ class PowerwallViewModel: ObservableObject {
             self.vehicleChargeStates = currentCache.compactMapValues { $0.snapshot }
             self.lastVehicleDataFetchAt = currentCache.mapValues(\.fetchedAt)
         }
+        if !Self.isRunningTests,
+           let infoData = UserDefaults.standard.data(forKey: Self.vehicleInfoCacheKey),
+           let cache = try? JSONDecoder().decode([String: CachedVehicleInfo].self, from: infoData) {
+            self.vehicleInfoCache = cache
+            let cutoff = Date().addingTimeInterval(-vehicleInfoPolicy.displayLifetime)
+            self.vehicleInfo = cache.compactMapValues { entry in
+                guard let fetchedAt = entry.fetchedAt, fetchedAt >= cutoff else { return nil }
+                return entry.info
+            }
+        }
     }
 
     convenience init(localURLSession: URLSession) {
@@ -353,6 +369,9 @@ class PowerwallViewModel: ObservableObject {
         vehicleDataHandledForCurrentConnection.removeAll()
         vehicleDataForbiddenForCurrentConnection.removeAll()
         UserDefaults.standard.removeObject(forKey: Self.vehicleChargeCacheKey)
+        vehicleInfo.removeAll()
+        vehicleInfoCache.removeAll()
+        UserDefaults.standard.removeObject(forKey: Self.vehicleInfoCacheKey)
     }
 
     private func removeExpiredVehicleChargeCache(at now: Date) {
@@ -1544,6 +1563,75 @@ class PowerwallViewModel: ObservableObject {
             return false
         default:
             return false
+        }
+    }
+
+    // MARK: Showroom vehicle info
+
+    /// Memory copy first, then the disk copy loaded at launch. Nil after a day, or for an unknown VIN.
+    func vehicleInfo(for vin: String?) -> VehicleInfo? {
+        guard let vin = vin?.trimmingCharacters(in: .whitespacesAndNewlines), !vin.isEmpty else { return nil }
+        if let exact = vehicleInfo[vin] { return exact }
+        return vehicleInfo.first { $0.key.caseInsensitiveCompare(vin) == .orderedSame }?.value
+    }
+
+    /// Called by the open showroom about once a minute. Makes at most one `vehicle_data_cached` call,
+    /// and only when `vehicleInfoPolicy` says this car is due. Never wakes the car. Demo makes no calls.
+    func refreshVehicleInfoIfDue(vin: String?, now: Date = Date()) {
+        guard !isDemoMode, loginMode == .fleetAPI, !accessToken.isEmpty,
+              let vin = vin?.trimmingCharacters(in: .whitespacesAndNewlines), !vin.isEmpty,
+              !vehicleInfoFetchesInFlight.contains(vin) else { return }
+        let state = vehicleInfoCache[vin]?.refresh ?? VehicleInfoRefreshState()
+        guard vehicleInfoPolicy.shouldFetch(state, now: now),
+              let url = URL(string: "\(fleetBaseURL)/api/1/vehicles/\(vin)/vehicle_data_cached") else { return }
+
+        vehicleInfoFetchesInFlight.insert(vin)
+        let requestCacheGeneration = vehicleChargeCacheGeneration
+        logVehicleDebug("GET /vehicles/\(redactedVIN(vin))/vehicle_data_cached start")
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTask(with: request) { [weak self] data, response, error in
+            guard let self else { return }
+            let http = response as? HTTPURLResponse
+            let outcome: VehicleInfoFetchOutcome
+            if error == nil, let http, let data {
+                outcome = VehicleInfoFetchOutcome.classify(
+                    statusCode: http.statusCode,
+                    data: data,
+                    retryAfterHeader: http.value(forHTTPHeaderField: "Retry-After")
+                )
+            } else {
+                outcome = .failed
+            }
+            self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data_cached status=\(http?.statusCode.description ?? "nil") outcome=\(outcome.debugName)")
+            if let status = http?.statusCode, status == 401 || status == 403 {
+                _ = self.handleVehicleEndpointStatus(status, cacheGeneration: requestCacheGeneration)
+            }
+            DispatchQueue.main.async {
+                self.vehicleInfoFetchesInFlight.remove(vin)
+                guard requestCacheGeneration == self.vehicleChargeCacheGeneration else { return }
+                let finishedAt = Date()
+                var entry = self.vehicleInfoCache[vin] ?? CachedVehicleInfo(info: nil, fetchedAt: nil, refresh: VehicleInfoRefreshState())
+                entry.refresh = self.vehicleInfoPolicy.record(outcome, into: entry.refresh, at: finishedAt)
+                if case .fresh(let info) = outcome {
+                    entry.info = info
+                    entry.fetchedAt = finishedAt
+                    self.vehicleInfo[vin] = info
+                    // Same numbers the live charge call stores, so the title lines agree with the panel.
+                    if info.batteryLevel != nil || info.chargingState != nil {
+                        self.vehicleChargeStates[vin] = info.chargeSnapshot
+                    }
+                }
+                self.vehicleInfoCache[vin] = entry
+                self.persistVehicleInfoCache()
+            }
+        }.resume()
+    }
+
+    private func persistVehicleInfoCache() {
+        if let data = try? JSONEncoder().encode(vehicleInfoCache) {
+            UserDefaults.standard.set(data, forKey: Self.vehicleInfoCacheKey)
         }
     }
 

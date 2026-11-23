@@ -172,15 +172,20 @@ enum CarShowroom {
         )
     }
 
-    /// Name, then battery, charging state, and minutes to full. A nil or blank field is left out.
+    /// Name, then "80% battery · Charging" on one line, then minutes to full. A nil or blank field is left out,
+    /// and the dot only appears when both halves are there.
     /// Colour is the same suffix the demo chips use, and only when this car has an exterior colour.
     static func statLines(displayName: String, exteriorColor: String?, snapshot: VehicleChargeSnapshot?) -> [String] {
         var lines = [DemoHouseTour.vehicleLabel(displayName: displayName, exteriorColor: exteriorColor)]
+        var battery: [String] = []
         if let batteryLevel = snapshot?.batteryLevel {
-            lines.append("\(Int(batteryLevel.rounded()))% battery")
+            battery.append("\(Int(batteryLevel.rounded()))% battery")
         }
         if let chargingState = snapshot?.chargingState?.trimmingCharacters(in: .whitespacesAndNewlines), !chargingState.isEmpty {
-            lines.append(chargingState)
+            battery.append(chargingState)
+        }
+        if !battery.isEmpty {
+            lines.append(battery.joined(separator: " · "))
         }
         if let minutesToFullCharge = snapshot?.minutesToFullCharge {
             lines.append("\(Int(minutesToFullCharge.rounded())) minutes to full charge")
@@ -500,6 +505,8 @@ struct CarShowroomOrbit: Equatable {
 
 struct CarShowroomView: View {
     let request: CarShowroomRequest
+    /// `vehicle_data_cached` rows for the owned car, or the demo sample. Nil hides the panel.
+    var info: VehicleInfo? = nil
     var onDismiss: () -> Void
     @State private var scene: SCNScene?
     @State private var browseIndex = 0
@@ -645,6 +652,10 @@ struct CarShowroomView: View {
                     .font(labelFont)
                     .opacity(0.6)
             }
+            if !request.browsesCatalogue, let info {
+                vehicleInfoPanel(info, labelFont: labelFont)
+                    .padding(.top, 12)
+            }
             if request.browsesCatalogue {
                 Link("Buy a Tesla", destination: CarShowroom.orderURL(for: displayed.model))
                     .fontWeight(.bold)
@@ -661,6 +672,36 @@ struct CarShowroomView: View {
         .foregroundColor(.white)
         .multilineTextAlignment(.leading)
         .frame(width: width, alignment: .leading)
+    }
+
+    /// Left column under the charge lines: one SF Symbol per row, same bold label font and 60% white.
+    /// Rows Fleet did not send are not drawn.
+    private func vehicleInfoPanel(_ info: VehicleInfo, labelFont: Font) -> some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(info.rows(now: context.date)) { row in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Image(systemName: row.symbol)
+                            .symbolRenderingMode(.hierarchical)
+                            .frame(width: infoIconWidth, alignment: .center)
+                            .accessibilityHidden(true)
+                        Text(row.text)
+                    }
+                    .fontWeight(.bold)
+                    .font(labelFont)
+                    .opacity(row.id == "updated" ? 0.4 : 0.6)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+
+    private var infoIconWidth: CGFloat {
+        #if os(tvOS)
+        32
+        #else
+        20
+        #endif
     }
 
     /// Clears the window edge, and any safe area the full-bleed scene draws under.

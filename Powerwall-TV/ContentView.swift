@@ -419,10 +419,11 @@ struct ContentView: View {
 #endif
         .overlay {
             if let request = carShowroom {
-                CarShowroomView(request: request, onDismiss: closeCarShowroom)
+                CarShowroomView(request: request, info: showroomInfo(for: request), onDismiss: closeCarShowroom)
                     .ignoresSafeArea()
                     .transition(.identity)
                     .opacity(showroomTransition.showroomOpacity)
+                    .task(id: request.id) { await refreshShowroomInfoWhileOpen(request) }
             }
         }
         .task(id: weatherPrefetchIdentity) {
@@ -1230,6 +1231,23 @@ struct ContentView: View {
             withAnimation(.easeOut(duration: CarShowroomTransition.showroomDuration)) {
                 showroomTransition = .showroom
             }
+        }
+    }
+
+    /// Demo shows the sample panel. An owned car shows its last `vehicle_data_cached` copy. Catalogue cars have none.
+    private func showroomInfo(for request: CarShowroomRequest) -> VehicleInfo? {
+        guard !request.browsesCatalogue else { return nil }
+        if viewModel.isDemoMode { return DemoHouseTour.exampleInfo() }
+        return viewModel.vehicleInfo(for: request.vin)
+    }
+
+    /// Runs only while the showroom is mounted: SwiftUI cancels it on close, so nothing polls in the background.
+    /// Each tick only asks the refresh policy; a Fleet call happens when this car is due. Demo never calls.
+    private func refreshShowroomInfoWhileOpen(_ request: CarShowroomRequest) async {
+        guard !viewModel.isDemoMode, !request.browsesCatalogue, request.vin != nil else { return }
+        while !Task.isCancelled {
+            viewModel.refreshVehicleInfoIfDue(vin: request.vin)
+            try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
         }
     }
 

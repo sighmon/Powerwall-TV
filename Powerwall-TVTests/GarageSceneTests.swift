@@ -1818,7 +1818,19 @@ struct GarageSceneTests {
             exteriorColor: generic.appearance.exteriorColor,
             snapshot: full
         )
-        #expect(!genericLines.contains { $0.contains("·") })
+        // Generic has no colour suffix on its title. The battery line still uses the dot.
+        #expect(genericLines.first?.contains("·") == false)
+        #expect(genericLines == [generic.vehicle.displayName, "80% battery · Charging", "45 minutes to full charge"])
+        #expect(CarShowroom.statLines(
+            displayName: "Daydream",
+            exteriorColor: nil,
+            snapshot: VehicleChargeSnapshot(batteryLevel: 64, chargingState: nil, minutesToFullCharge: nil)
+        ) == ["Daydream", "64% battery"])
+        #expect(CarShowroom.statLines(
+            displayName: "Daydream",
+            exteriorColor: nil,
+            snapshot: VehicleChargeSnapshot(batteryLevel: nil, chargingState: " Stopped ", minutesToFullCharge: nil)
+        ) == ["Daydream", "Stopped"])
         let withoutMinutes = CarShowroom.statLines(
             displayName: "Daydream",
             exteriorColor: paint.appearance.exteriorColor,
@@ -2421,8 +2433,7 @@ struct GarageSceneTests {
             isDemoMode: true
         )
         let demoLines = demoShowroom?.lines.joined(separator: "\n") ?? ""
-        #expect(demoLines.contains("80% battery"))
-        #expect(demoLines.contains("Charging"))
+        #expect(demoShowroom?.lines.contains("80% battery · Charging") == true)
         #expect(demoLines.contains("45 minutes to full charge"))
         #expect(demoLines.contains(parkedDemo.vehicle.displayName))
 
