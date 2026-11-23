@@ -33,6 +33,90 @@ import AppKit
 
 /// Black plate under the house. SceneKit mirrors the house into it and fades
 /// that mirror out, the way the flat home image does.
+/// Tesla's house Shadow card. CompactShadow.shader draws it black with
+/// alpha = (1 − green) × 2 (ResidentialClassic.tscn: strength 2, exponent 1). The same
+/// black-plus-alpha form as the showroom's Ground_AO contact shadow, baked into
+/// Home_GroundShadow.png by docs/showroom/tools/bake_house_shadow.py.
+enum HouseGroundShadow {
+    static let nodeName = "Shadow"
+    static let texture = "Home_GroundShadow"
+    /// Above the plate and the sky wash (0), below the house (2).
+    static let renderingOrder = 1
+    /// Lifts the card off the plate so it does not z-fight. Metres.
+    static let lift: Float = 0.003
+
+    /// Shows the card with the baked texture. Leaves it hidden if the texture is missing,
+    /// which is how it drew before (solid black wedges otherwise).
+    static func dress(_ root: SCNNode) {
+        guard let card = root.childNode(withName: nodeName, recursively: true) else { return }
+        guard let url = HouseLighting.resourceURL(name: texture, ext: "png") else {
+            card.isHidden = true
+            return
+        }
+        card.isHidden = false
+        card.simdPosition.y += lift
+        card.castsShadow = false
+        card.enumerateHierarchy { node, _ in
+            guard let geometry = node.geometry else { return }
+            node.castsShadow = false
+            geometry.materials = [material(contents: url)]
+        }
+    }
+
+    static func material(contents: Any) -> SCNMaterial {
+        let material = SCNMaterial()
+        material.name = "HouseGroundShadow"
+        material.lightingModel = .constant
+        material.diffuse.contents = contents
+        material.blendMode = .alpha
+        material.transparencyMode = .aOne
+        material.writesToDepthBuffer = false
+        material.readsFromDepthBuffer = true
+        material.isDoubleSided = true
+        return material
+    }
+}
+
+/// The parked car is lit like the showroom: the studio panorama at a lower strength, dimmed with
+/// the house theme at night, plus a weak sun. Light category bits keep this off the house, and the
+/// house's ambient and sun off the car.
+enum HouseCarLighting {
+    /// Light category for the car. Bit 3 is the floor-reflection bit; bit 0 is SceneKit's default.
+    static let lightBit = 1 << 4
+    /// The house fill and sun: every category except the car's.
+    static let houseLightMask = ~lightBit
+    static let probeName = "HouseCarStudio"
+    static let sunName = "HouseCarSun"
+    /// Big enough to hold the garage and driveway. Parallax correction is off, so this only bounds it.
+    static let probeExtent: Float = 30
+
+    /// Studio strength by day, as a share of the showroom's `ShowroomStage.environmentIntensity` (2.2).
+    static let dayStrength: CGFloat = 1.2
+    /// Share of `dayStrength` left at night (theme 0).
+    static let nightFraction: CGFloat = 0.25
+    /// The car's sun as a share of the house sun (350 + 650 × theme lumens).
+    static let sunFraction: CGFloat = 0.35
+
+    /// SCNLight lumens: 1000 is an environment intensity of 1.
+    static func environmentIntensity(theme: Float, ambientScale: Float) -> CGFloat {
+        let t = CGFloat(min(max(theme, 0), 1))
+        let dim = nightFraction + (1 - nightFraction) * t
+        return 1000 * dayStrength * dim * CGFloat(max(ambientScale, 0))
+    }
+
+    static func sunIntensity(theme: Float, ambientScale: Float) -> CGFloat {
+        (350 + 650 * CGFloat(min(max(theme, 0), 1) * max(ambientScale, 0))) * sunFraction
+    }
+
+    /// Puts every node under the car in the car's light category only. Clearing bit 0 takes it out
+    /// of the house lights; the floor-reflection bit is already off for cars.
+    static func mark(_ node: SCNNode) {
+        node.enumerateHierarchy { child, _ in
+            child.categoryBitMask = lightBit
+        }
+    }
+}
+
 enum HouseGroundPlate {
     static let name = "HouseGroundPlate"
     /// Nodes that keep this bit are drawn in the reflection.
@@ -628,6 +712,9 @@ final class HouseLighting {
     private let rainNode = SCNNode()
     private let snowNode = SCNNode()
     private let sunLight = SCNNode()
+    /// Studio panorama and a dim sun that only reach the parked car (`HouseCarLighting`).
+    private let carStudio = SCNNode()
+    private let carSun = SCNNode()
     private let skyRig = SCNNode()
     private let sunDisc = SCNNode()
     private let sunHalo = SCNNode()
@@ -682,7 +769,9 @@ final class HouseLighting {
 
         // These cards are torn alpha planes. SceneKit draws their black RGB as solid
         // wedges, which reads as damage, so they stay out of the view.
-        root.childNode(withName: "Shadow", recursively: true)?.isHidden = true
+        // The house's own Shadow card comes back with Tesla's CompactShadow look (see HouseGroundShadow).
+        // The car's garage shadow stays hidden: its texture does not match the one Tesla draws.
+        HouseGroundShadow.dress(root)
         root.childNode(withName: "GarageVehicleShadow", recursively: true)?.isHidden = true
         root.childNode(withName: "GroundReflection", recursively: true)?.isHidden = true
 
@@ -698,10 +787,12 @@ final class HouseLighting {
         // so only the gateway drops out of the floor mirror.
         dropFromReflection(named: "Meter")
         installFillLights()
+        installCarLighting()
         setSolar(.panels)
         if let vehicle = root.childNode(withName: "Vehicle", recursively: true) {
             repairVehicleShell(vehicle)
             centreVehicleInTheGarageDoor(vehicle)
+            HouseCarLighting.mark(vehicle)
         }
         // Stay closed until live wall-connector state says a car is home.
         showVehicle(false)
@@ -719,6 +810,10 @@ final class HouseLighting {
         installSky()
         HouseGroundPlate.install(on: root)
         showAboveTheSkyWash(root)
+        // After the plate and the sky wash, before the house.
+        root.childNode(withName: HouseGroundShadow.nodeName, recursively: true)?.enumerateHierarchy { node, _ in
+            node.renderingOrder = HouseGroundShadow.renderingOrder
+        }
 
         apply(HouseLightingParameters())
     }
@@ -741,6 +836,10 @@ final class HouseLighting {
         sunLight.simdPosition = sun
         sunLight.look(at: SCNVector3(0, 0.4, 0))
         sunLight.light?.intensity = 350 + 650 * CGFloat(p.theme * p.ambientScale)
+        carStudio.light?.intensity = HouseCarLighting.environmentIntensity(theme: p.theme, ambientScale: p.ambientScale)
+        carSun.simdPosition = sun
+        carSun.look(at: SCNVector3(0, 0.4, 0))
+        carSun.light?.intensity = HouseCarLighting.sunIntensity(theme: p.theme, ambientScale: p.ambientScale)
         SCNTransaction.commit()
 
         layoutSky(animated: animated)
@@ -909,6 +1008,7 @@ final class HouseLighting {
         repairVehicleShell(car, model: model)
         showAboveTheSkyWash(car)
         HouseGroundPlate.omitFromReflection(car)
+        HouseCarLighting.mark(car)
         if let paint { setVehiclePaint(paint) }
     }
 
@@ -1217,6 +1317,8 @@ final class HouseLighting {
         ambient.light?.type = .ambient
         ambient.light?.intensity = 320
         ambient.light?.color = HouseColor(white: 0.9, alpha: 1)
+        // The parked car has its own studio lights. These keep lighting everything else as before.
+        ambient.light?.categoryBitMask = HouseCarLighting.houseLightMask
         root.addChildNode(ambient)
 
         sunLight.name = "HouseSun"
@@ -1224,7 +1326,39 @@ final class HouseLighting {
         sunLight.light?.type = .directional
         sunLight.light?.intensity = 700
         sunLight.light?.castsShadow = false
+        sunLight.light?.categoryBitMask = HouseCarLighting.houseLightMask
         root.addChildNode(sunLight)
+    }
+
+    /// The showroom's studio panorama as a radiance probe, plus a dim directional sun that follows
+    /// the house sun. Both use `HouseCarLighting.lightBit`, so only the car sees them. The house
+    /// shell is `.constant`, and the windows, solar and gateway keep the fill lights above.
+    private func installCarLighting() {
+        carStudio.name = HouseCarLighting.probeName
+        let probe = SCNLight()
+        probe.type = .probe
+        probe.probeType = .radiance
+        probe.probeUpdateType = .never
+        probe.parallaxCorrectionEnabled = false
+        probe.probeExtents = simd_float3(repeating: HouseCarLighting.probeExtent)
+        // Typed as optional so this reads the same whichever nullability the SDK declares.
+        let environment: SCNMaterialProperty? = probe.probeEnvironment
+        if let url = HouseLighting.resourceURL(name: ShowroomStage.environmentName, ext: "png") {
+            environment?.contents = url
+        }
+        probe.categoryBitMask = HouseCarLighting.lightBit
+        probe.intensity = HouseCarLighting.environmentIntensity(theme: 1, ambientScale: 1)
+        carStudio.light = probe
+        root.addChildNode(carStudio)
+
+        carSun.name = HouseCarLighting.sunName
+        let sun = SCNLight()
+        sun.type = .directional
+        sun.castsShadow = false
+        sun.categoryBitMask = HouseCarLighting.lightBit
+        sun.intensity = HouseCarLighting.sunIntensity(theme: 1, ambientScale: 1)
+        carSun.light = sun
+        root.addChildNode(carSun)
     }
 
     /// Adds a warm interior glow to the imported window glass. `interiorLight` is 0 or 1.

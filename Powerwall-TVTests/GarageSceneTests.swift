@@ -599,6 +599,110 @@ struct GarageSceneTests {
         #expect(house.childNode(withName: "GroundReflection", recursively: true)?.isHidden == true)
     }
 
+    @Test func houseShadowCardIsBackWithTeslasBlackAndAlpha() throws {
+        guard let scene = ResidentialClassicScene.load() else { return }
+        let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+        _ = HouseLighting(root: house)
+        let card = try #require(house.childNode(withName: HouseGroundShadow.nodeName, recursively: true))
+        #expect(card.isHidden == false)
+        var meshes = 0
+        card.enumerateHierarchy { node, _ in
+            #expect(node.renderingOrder == HouseGroundShadow.renderingOrder)
+            #expect(node.categoryBitMask & HouseGroundPlate.reflectionBit == 0)
+            guard let material = node.geometry?.materials.first else { return }
+            meshes += 1
+            #expect(material.name == "HouseGroundShadow")
+            #expect(material.lightingModel == .constant)
+            #expect(material.blendMode == .alpha)
+            #expect(material.writesToDepthBuffer == false)
+        }
+        #expect(meshes > 0)
+        // Drawn over the plate and the sky wash, under the house shell.
+        let shell = try #require(house.childNode(withName: "Home", recursively: true))
+        #expect(shell.renderingOrder > HouseGroundShadow.renderingOrder)
+        // The car's garage shadow stays hidden: its texture does not match Tesla's.
+        #expect(house.childNode(withName: "GarageVehicleShadow", recursively: true)?.isHidden == true)
+    }
+
+    @Test func bakedHouseShadowIsBlackWithASoftAlpha() throws {
+        let url = try #require(HouseLighting.resourceURL(name: HouseGroundShadow.texture, ext: "png"))
+        #if canImport(AppKit)
+        let image = try #require(NSImage(contentsOf: url))
+        let rep = try #require(image.representations.first as? NSBitmapImageRep)
+        var maxAlpha: CGFloat = 0
+        var clear = 0
+        var samples = 0
+        for y in stride(from: 0, to: rep.pixelsHigh, by: 16) {
+            for x in stride(from: 0, to: rep.pixelsWide, by: 16) {
+                guard let colour = rep.colorAt(x: x, y: y) else { continue }
+                samples += 1
+                maxAlpha = max(maxAlpha, colour.alphaComponent)
+                if colour.alphaComponent < 0.03 { clear += 1 }
+                if colour.alphaComponent > 0.5 {
+                    #expect(colour.redComponent < 0.02 && colour.greenComponent < 0.02 && colour.blueComponent < 0.02)
+                }
+            }
+        }
+        #expect(maxAlpha > 0.95)
+        // Most of the 8 m card is clear; the shade is around the footprint.
+        #expect(Double(clear) / Double(max(samples, 1)) > 0.3)
+        #else
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        #endif
+    }
+
+    @Test func parkedCarGetsTheStudioLightsAndTheHouseKeepsItsOwn() throws {
+        guard let scene = ResidentialClassicScene.load() else { return }
+        let house = scene.rootNode.childNode(withName: "ResidentialClassic", recursively: true) ?? scene.rootNode
+        let lighting = HouseLighting(root: house)
+        lighting.setVehicleModel(.modelY)
+        lighting.showVehicle(true)
+
+        let probe = try #require(house.childNode(withName: HouseCarLighting.probeName, recursively: true)?.light)
+        #expect(probe.type == .probe)
+        #expect(probe.probeType == .radiance)
+        #expect(probe.probeUpdateType == .never)
+        #expect(probe.categoryBitMask == HouseCarLighting.lightBit)
+        let environment: SCNMaterialProperty? = probe.probeEnvironment
+        #expect(environment?.contents != nil)
+        let carSun = try #require(house.childNode(withName: HouseCarLighting.sunName, recursively: true)?.light)
+        #expect(carSun.categoryBitMask == HouseCarLighting.lightBit)
+        for name in ["HouseFill", "HouseSun"] {
+            let light = try #require(house.childNode(withName: name, recursively: true)?.light)
+            #expect(light.categoryBitMask & HouseCarLighting.lightBit == 0)
+        }
+        // No scene-wide environment: the windows, solar and gateway would change with it.
+        #expect(scene.lightingEnvironment.contents == nil)
+
+        let vehicle = try #require(house.childNode(withName: "Vehicle", recursively: true))
+        var carMeshes = 0
+        vehicle.enumerateHierarchy { node, _ in
+            #expect(node.categoryBitMask == HouseCarLighting.lightBit)
+            if node.geometry != nil { carMeshes += 1 }
+        }
+        #expect(carMeshes > 0)
+        for name in ["Home", "Windows", "SolarPanels", "Powerwall"] {
+            guard let node = house.childNode(withName: name, recursively: true) else { continue }
+            node.enumerateHierarchy { child, _ in
+                #expect(child.categoryBitMask & HouseCarLighting.lightBit == 0)
+                #expect(child.categoryBitMask & 1 == 1)
+            }
+        }
+    }
+
+    @Test func carStudioDimsAtNightAndUnderCloud() {
+        let day = HouseCarLighting.environmentIntensity(theme: 1, ambientScale: 1)
+        let night = HouseCarLighting.environmentIntensity(theme: 0, ambientScale: 1)
+        #expect(abs(day - 1000 * HouseCarLighting.dayStrength) < 0.001)
+        #expect(abs(night - day * HouseCarLighting.nightFraction) < 0.001)
+        #expect(HouseCarLighting.environmentIntensity(theme: 1, ambientScale: 0.75) < day)
+        #expect(HouseCarLighting.environmentIntensity(theme: 2, ambientScale: 1) == day)
+        // Weaker than the showroom, which runs the same panorama at 2.2.
+        #expect(HouseCarLighting.dayStrength < ShowroomStage.environmentIntensity)
+        #expect(abs(HouseCarLighting.sunIntensity(theme: 1, ambientScale: 1) - 1000 * HouseCarLighting.sunFraction) < 0.001)
+        #expect(abs(HouseCarLighting.sunIntensity(theme: 0, ambientScale: 1) - 350 * HouseCarLighting.sunFraction) < 0.001)
+    }
+
     @Test func powerwallKeepsASingleRibbon() {
         let bothWays = PowerFlowSnapshot(solarW: 1000, batteryW: -3000, gridW: 2500, homeW: 500)
         let charging = PowerFlowRemapper.remap(PowerFlowSolver.wires(for: bothWays))

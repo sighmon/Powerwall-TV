@@ -88,6 +88,49 @@ it at 90% (`reflection_strength` 0.1). The floor's alpha comes from a generated 
 on SCNFloor reflections, reflection bit masks, or shader modifiers. The draw order is glow (−20),
 mirror (−15), floor (−10), contact shadow (−5), then the car.
 
+## Home view: house ground shadow and garage car lighting
+
+**House ground shadow.** The house scene ships a `Shadow` card. Tesla draws it with
+`CompactShadow.shader` (Classic: `strength` 2, `exponent` 1), so the alpha is `pow(1 − G, 1) × 2`
+and the colour is black. The card used to be hidden. It is now back, with the same black-plus-alpha
+approach the showroom floor shadow uses (`HouseGroundShadow` in `HouseLighting.swift`).
+`docs/showroom/tools/bake_house_shadow.py` bakes `TeslaAssets/Home_GroundShadow.png` (512², black,
+alpha × 2) from the usdz `0/Shadow.png`. The card uses constant lighting and alpha blending and
+doesn't write depth. It sits 3 mm above the ground plate, with draw order 1. That puts it after the
+sky wash (0) and before the house (2). If the PNG is missing, the card stays hidden.
+`GarageVehicleShadow` stays hidden: its texture doesn't match Tesla's `VehicleGarage.png`.
+To make the shadow stronger or weaker, change `STRENGTH` in the bake script and rebake.
+
+**Garage car lighting.** The house shell is unlit (`.constant` plus the Building shader port), but
+the car is PBR. Under the house's ambient and sun lights alone, it looked flat. The car is now lit
+by a radiance probe light that uses the showroom's `ShowroomStudio.png`, plus a weak directional
+light that follows the house sun (`HouseCarLighting`). Both lights, and every node of the car, use
+category bit `1 << 4`. `HouseFill` and `HouseSun` exclude that bit. The result:
+
+- the car gets only the studio lighting;
+- the windows, solar panels and Powerwall keep exactly the lighting they had;
+- the house shell is unchanged.
+
+No scene-wide `lightingEnvironment` is set. `setVehicleModel` marks a swapped-in car the same way.
+
+Tuning knobs (all in `HouseCarLighting`):
+
+| Knob | Value | Meaning |
+| --- | --- | --- |
+| `dayStrength` | 1.2 | Probe intensity in full daylight (× 1000 SceneKit units). The showroom uses 2.2. |
+| `nightFraction` | 0.25 | Share of the probe that remains at night (theme 0). |
+| `sunFraction` | 0.35 | Car sun as a share of the house sun (`350 + 650 · theme · ambientScale`). |
+| `probeExtent` | 30 m | Probe box size, which covers the garage. |
+
+Cloud cover (`ambientScale`) dims both lights, the same way it dims the house.
+The 4× display boost on paint (`paintDisplayBoost`) stays. The live Fleet paint albedos are dark,
+and the showroom needs the same boost even under its stronger studio light.
+The live ground-plate mirror (`HouseGroundPlate`) is unchanged.
+
+Not checked on a device: whether SceneKit accepts an equirectangular PNG as `probeEnvironment`
+contents. If the car comes out unlit, try a cube map, or set a temporary `lightingEnvironment` on
+the car's materials instead.
+
 ## Model Y Juniper glass and B pillars
 
 ![Model Y Juniper before and after](juniper.jpg)
