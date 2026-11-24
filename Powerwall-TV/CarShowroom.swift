@@ -9,6 +9,9 @@
 
 import SceneKit
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// Which car a garage-door or charging-car select opens, and the Fleet lines already stored for it.
 struct CarShowroomRequest: Equatable, Identifiable {
@@ -20,7 +23,7 @@ struct CarShowroomRequest: Equatable, Identifiable {
     /// 1 in demo, where the paint hex is already a display colour. Live Fleet albedos use 4.
     var displayBoost: CGFloat
     var lines: [String]
-    /// A model Tesla sells, with no Fleet stats. It shows a Buy a Tesla link and no info panel.
+    /// A model Tesla sells, with no Fleet stats. iPhone, iPad and Mac show a Buy a Tesla button. tvOS hides it. No info panel.
     var browsesCatalogue: Bool = false
     /// The garage lineup this request opens on: the account's own cars first, then every
     /// catalogue model. Empty for a single car. The arrows step through it.
@@ -731,18 +734,15 @@ struct CarShowroomView: View {
         case previous
         case next
         case close
-        case buy
         case details
     }
     @FocusState private var showroomFocus: ShowroomFocus?
 
-    /// Left and right move between the lineup arrows. Up walks to Buy a Tesla on a catalogue car,
-    /// or the details panel on an owned car, then Close. Down from those returns to the next-car arrow.
-    /// Elsewhere, up and down change colour.
+    /// Left and right move between the lineup arrows. Up walks to the details panel on an owned car,
+    /// then Close. Down from those returns to the next-car arrow. Elsewhere, up and down change colour.
     private struct ShowroomRemote: ViewModifier {
         let item: ShowroomFocus
         let browses: Bool
-        var hasBuy = false
         var hasDetails = false
         var focus: FocusState<ShowroomFocus?>.Binding
         let shift: (Int) -> Void
@@ -759,10 +759,10 @@ struct CarShowroomView: View {
                 case .right where browses:
                     focus.wrappedValue = .next
                 case .up where browses && (item == .previous || item == .next):
-                    focus.wrappedValue = hasBuy ? .buy : (hasDetails ? .details : .close)
-                case .up where browses && (item == .buy || item == .details):
+                    focus.wrappedValue = hasDetails ? .details : .close
+                case .up where browses && item == .details:
                     focus.wrappedValue = .close
-                case .down where browses && (item == .buy || item == .details || item == .close):
+                case .down where browses && (item == .details || item == .close):
                     focus.wrappedValue = .next
                 case .up:
                     shift(1)
@@ -882,23 +882,43 @@ struct CarShowroomView: View {
                 vehicleInfoPanel(info, labelFont: labelFont)
                     .padding(.top, 12)
             }
+            #if !os(tvOS)
             if current.browsesCatalogue {
-                Link("Buy a Tesla", destination: CarShowroom.orderURL(for: displayed.model))
-                    .fontWeight(.bold)
-                    .font(labelFont)
-                    .opacity(0.6)
-                    .padding(.top, 8)
-                    .accessibilityLabel("Buy a Tesla")
-                    #if os(tvOS)
-                    .focused($showroomFocus, equals: .buy)
-                    .modifier(ShowroomRemote(item: .buy, browses: browses, hasBuy: true, focus: $showroomFocus, shift: { shiftColour($0) }))
-                    #endif
+                buyButton(labelFont: labelFont)
             }
+            #endif
         }
         .foregroundColor(.white)
         .multilineTextAlignment(.leading)
         .frame(width: width, alignment: .leading)
     }
+
+    #if !os(tvOS)
+    /// Opens Tesla's order page in the system browser. A SwiftUI `Link` in this overlay presents
+    /// from the hosting view, and on iPad that presentation is dropped.
+    private func buyButton(labelFont: Font) -> some View {
+        Button {
+            openOrderPage(displayed.model)
+        } label: {
+            Text("Buy a Tesla")
+                .fontWeight(.bold)
+                .font(labelFont)
+                .opacity(0.6)
+                .padding(.top, 8)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Buy a Tesla")
+    }
+
+    private func openOrderPage(_ model: VehicleModel) {
+        let url = CarShowroom.orderURL(for: model)
+        #if os(iOS)
+        UIApplication.shared.open(url)
+        #elseif os(macOS)
+        NSWorkspace.shared.open(url)
+        #endif
+    }
+    #endif
 
     /// The owned car's panel is a button only when it has a tyre row to step.
     private var detailsFocusable: Bool {
@@ -1039,7 +1059,6 @@ struct CarShowroomView: View {
         .modifier(ShowroomRemote(
             item: delta > 0 ? .next : .previous,
             browses: true,
-            hasBuy: current.browsesCatalogue,
             hasDetails: detailsFocusable,
             focus: $showroomFocus,
             shift: { shiftColour($0) }
