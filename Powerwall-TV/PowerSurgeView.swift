@@ -108,6 +108,162 @@ struct PowerwallToGateway: Shape {
     }
 }
 
+/// Samples a SwiftUI path so paused surges can sit chevrons along it.
+enum PathPolyline {
+    static func flatten(_ path: CGPath, steps: Int = 8) -> [CGPoint] {
+        var points: [CGPoint] = []
+        var current = CGPoint.zero
+        path.applyWithBlock { element in
+            let element = element.pointee
+            switch element.type {
+            case .moveToPoint:
+                current = element.points[0]
+                points.append(current)
+            case .addLineToPoint:
+                current = element.points[0]
+                points.append(current)
+            case .addQuadCurveToPoint:
+                let control = element.points[0]
+                let end = element.points[1]
+                for step in 1...steps {
+                    let t = CGFloat(step) / CGFloat(steps)
+                    points.append(quad(current, control, end, t))
+                }
+                current = end
+            case .addCurveToPoint:
+                let control1 = element.points[0]
+                let control2 = element.points[1]
+                let end = element.points[2]
+                for step in 1...steps {
+                    let t = CGFloat(step) / CGFloat(steps)
+                    points.append(cubic(current, control1, control2, end, t))
+                }
+                current = end
+            case .closeSubpath:
+                break
+            default:
+                break
+            }
+        }
+        return points
+    }
+
+    private static func quad(_ a: CGPoint, _ b: CGPoint, _ c: CGPoint, _ t: CGFloat) -> CGPoint {
+        let u = 1 - t
+        return CGPoint(
+            x: a.x * u * u + 2 * b.x * u * t + c.x * t * t,
+            y: a.y * u * u + 2 * b.y * u * t + c.y * t * t
+        )
+    }
+
+    private static func cubic(_ a: CGPoint, _ b: CGPoint, _ c: CGPoint, _ d: CGPoint, _ t: CGFloat) -> CGPoint {
+        let u = 1 - t
+        let uu = u * u
+        let tt = t * t
+        return CGPoint(
+            x: a.x * uu * u + 3 * b.x * uu * t + 3 * c.x * u * tt + d.x * tt * t,
+            y: a.y * uu * u + 3 * b.y * uu * t + 3 * c.y * u * tt + d.y * tt * t
+        )
+    }
+}
+
+/// One paused chevron. `tip` points along the energy flow.
+struct FlowChevronMark: Equatable {
+    var tip: CGPoint
+    var tail: CGPoint
+}
+
+enum FlowChevron {
+    static func marks(along polyline: [CGPoint], spacing: CGFloat, length: CGFloat, pointingForward: Bool) -> [FlowChevronMark] {
+        guard polyline.count >= 2, spacing > 0, length > 0 else { return [] }
+        var cumulative: [CGFloat] = [0]
+        for index in 1..<polyline.count {
+            let previous = polyline[index - 1]
+            let point = polyline[index]
+            cumulative.append(cumulative[index - 1] + hypot(point.x - previous.x, point.y - previous.y))
+        }
+        let total = cumulative[cumulative.count - 1]
+        guard total > length * 0.8 else { return [] }
+        var stations: [CGFloat] = []
+        if total < spacing * 1.4 {
+            stations = [total * 0.5]
+        } else {
+            var distance = spacing * 0.5
+            while distance <= total - length * 0.45 {
+                stations.append(distance)
+                distance += spacing
+            }
+        }
+        return stations.compactMap { station in
+            guard let sample = sample(polyline, cumulative: cumulative, at: station) else { return nil }
+            let tangent = pointingForward ? sample.tangent : CGVector(dx: -sample.tangent.dx, dy: -sample.tangent.dy)
+            return FlowChevronMark(
+                tip: CGPoint(x: sample.point.x + tangent.dx * length * 0.62, y: sample.point.y + tangent.dy * length * 0.62),
+                tail: CGPoint(x: sample.point.x - tangent.dx * length * 0.38, y: sample.point.y - tangent.dy * length * 0.38)
+            )
+        }
+    }
+
+    static func path(marks: [FlowChevronMark], spread: CGFloat) -> Path {
+        var path = Path()
+        for mark in marks {
+            let delta = CGVector(dx: mark.tip.x - mark.tail.x, dy: mark.tip.y - mark.tail.y)
+            let span = hypot(delta.dx, delta.dy)
+            guard span > 0.5 else { continue }
+            let forward = CGVector(dx: delta.dx / span, dy: delta.dy / span)
+            let lateral = CGVector(dx: -forward.dy, dy: forward.dx)
+            let left = CGPoint(x: mark.tail.x + lateral.dx * spread, y: mark.tail.y + lateral.dy * spread)
+            let right = CGPoint(x: mark.tail.x - lateral.dx * spread, y: mark.tail.y - lateral.dy * spread)
+            let soften = span * 0.28
+            let leftControl = CGPoint(
+                x: mark.tip.x - forward.dx * soften + lateral.dx * spread * 0.72,
+                y: mark.tip.y - forward.dy * soften + lateral.dy * spread * 0.72
+            )
+            let rightControl = CGPoint(
+                x: mark.tip.x - forward.dx * soften - lateral.dx * spread * 0.72,
+                y: mark.tip.y - forward.dy * soften - lateral.dy * spread * 0.72
+            )
+            path.move(to: left)
+            path.addQuadCurve(to: mark.tip, control: leftControl)
+            path.addQuadCurve(to: right, control: rightControl)
+        }
+        return path
+    }
+
+    private static func sample(_ polyline: [CGPoint], cumulative: [CGFloat], at station: CGFloat) -> (point: CGPoint, tangent: CGVector)? {
+        for index in 1..<polyline.count {
+            let end = cumulative[index]
+            guard end + 0.001 >= station || index == polyline.count - 1 else { continue }
+            let start = cumulative[index - 1]
+            let span = end - start
+            guard span > 0.001 else { continue }
+            let t = min(max((station - start) / span, 0), 1)
+            let from = polyline[index - 1]
+            let to = polyline[index]
+            let point = CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
+            let tangent = CGVector(dx: (to.x - from.x) / span, dy: (to.y - from.y) / span)
+            return (point, tangent)
+        }
+        return nil
+    }
+}
+
+/// Chevrons following `curve`. `pointingForward` aims them from the path start toward its end.
+struct FlowChevronShape<Curve: Shape>: Shape {
+    var curve: Curve
+    var pointingForward: Bool
+    var lineWidth: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let polyline = PathPolyline.flatten(curve.path(in: rect).cgPath)
+        let spacing = max(lineWidth * 2.2, 8)
+        let length = max(lineWidth * 1.7, 6)
+        let spread = max(lineWidth * 1.5, 5)
+        let marks = FlowChevron.marks(along: polyline, spacing: spacing, length: length, pointingForward: pointingForward)
+        return FlowChevron.path(marks: marks, spread: spread)
+    }
+}
+
 /// One frame of the flat-home pulse while it is animating.
 private struct FlatHomePulse: Equatable {
     var trimStart: CGFloat
@@ -123,7 +279,7 @@ struct PowerSurgeView<Curve: Shape>: View {
     var lineWidth: CGFloat
     let curve: Curve
     var shouldStart: Bool
-    /// Stopped. Draws the whole cable in `color` and does not schedule another pulse.
+    /// Stopped. Draws chevrons in `color` along the cable and does not schedule another pulse.
     var paused: Bool = false
 
     @State private var startFraction: CGFloat
@@ -170,8 +326,8 @@ struct PowerSurgeView<Curve: Shape>: View {
     var body: some View {
         Group {
             if paused {
-                curve
-                    .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                FlowChevronShape(curve: curve, pointingForward: isForward, lineWidth: lineWidth)
+                    .stroke(color, style: StrokeStyle(lineWidth: max(lineWidth * 0.32, 1.5), lineCap: .round, lineJoin: .round))
             } else {
                 surgeShape(FlatHomePulse(trimStart: startFraction, opacity: opacity))
                     .onAppear {

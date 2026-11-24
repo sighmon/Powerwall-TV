@@ -807,6 +807,16 @@ struct GarageSceneTests {
             $0.shaderModifiers?[.fragment]?.contains("discard_fragment") == true
         } == true)
         #expect(solar?.geometry?.materials.allSatisfy { $0.shaderModifiers?[.fragment] == nil } == true)
+        let solarChevron = house.childNode(withName: "PowerFlowChevron_Solar_1A_out", recursively: true)
+        let gridChevron = house.childNode(withName: "PowerFlowChevron_Grid_1A_out", recursively: true)
+        #expect(solarChevron?.renderingOrder == 15)
+        #expect(solarChevron?.geometry?.materials.first?.readsFromDepthBuffer == false)
+        #expect(solarChevron?.geometry?.materials.first?.shaderModifiers?[.fragment] == nil)
+        #expect(gridChevron?.renderingOrder == 10)
+        #expect(gridChevron?.geometry?.materials.first?.readsFromDepthBuffer == true)
+        #expect(gridChevron?.geometry?.materials.allSatisfy {
+            $0.shaderModifiers?[.fragment]?.contains("discard_fragment") == true
+        } == true)
         let bit = HouseGroundPlate.reflectionBit
         #expect((solar?.categoryBitMask ?? bit) & bit == 0)
         #expect((grid?.categoryBitMask ?? bit) & bit == 0)
@@ -1743,6 +1753,83 @@ struct GarageSceneTests {
         #expect(state.direction == .flowIn || state.direction == .flowOut)
         let pulse = animator.colors(for: ribbon, at: 0, solid: false)
         #expect(pulse != solidEarly)
+        let track = solidEarly?.first
+        let flow = animator.chevronColor(for: ribbon)
+        #expect(track != nil)
+        #expect(flow != nil)
+        if let track, let flow {
+            let trackStrength = track.r + track.g + track.b
+            let flowStrength = flow.r + flow.g + flow.b
+            #expect(flowStrength > trackStrength + 0.2)
+        }
+        let pointingOut = state.direction == .flowOut
+        let marks = ribbon.chevronMarks(pointingAlongIncreasingU: pointingOut)
+        let opposite = ribbon.chevronMarks(pointingAlongIncreasingU: !pointingOut)
+        #expect(marks.count >= 1)
+        #expect(marks.count == opposite.count)
+        if let mark = marks.first, let other = opposite.first {
+            #expect(simd_length(mark.center - other.center) < 0.001)
+            let forward = mark.tip - mark.tail
+            let backward = other.tip - other.tail
+            #expect(simd_dot(simd_normalize(forward), simd_normalize(backward)) < -0.8)
+            let along = simd_length(forward)
+            #expect(along > 0.006)
+            #expect(along < mark.gauge)
+            let stroke = max(mark.gauge * PowerFlowChevron.strokeScale, PowerFlowRibbon.thickness * 0.85)
+            #expect(stroke < mark.gauge * PowerFlowChevron.spreadScale)
+            #expect(abs(mark.gauge - other.gauge) < 0.001)
+        }
+        let metre = PowerFlowRibbonSpan(
+            start: .zero,
+            end: SIMD3(1, 0, 0),
+            lateral: SIMD3(0, 1, 0),
+            facing: SIMD3(0, 0, 1),
+            halfWidth: 0.01
+        )
+        let packed = PowerFlowChevron.marks(spans: [metre], pointingAlongIncreasingU: true)
+        #expect(packed.count >= 20)
+    }
+
+    @Test func pausedFlatSurgePointsChevronsAlongTheLine() {
+        let line = [CGPoint(x: 0, y: 0), CGPoint(x: 120, y: 0)]
+        let forward = FlowChevron.marks(along: line, spacing: 30, length: 12, pointingForward: true)
+        let backward = FlowChevron.marks(along: line, spacing: 30, length: 12, pointingForward: false)
+        #expect(forward.count >= 2)
+        #expect(forward.allSatisfy { $0.tip.x > $0.tail.x + 4 })
+        #expect(backward.count == forward.count)
+        #expect(backward.allSatisfy { $0.tip.x < $0.tail.x - 4 })
+
+        let solar = PathPolyline.flatten(SolarToGateway().path(in: CGRect(x: 0, y: 0, width: 40, height: 190)).cgPath)
+        let alongSolar = FlowChevron.marks(along: solar, spacing: 22, length: 12, pointingForward: true)
+        #expect(solar.count > 4)
+        #expect(alongSolar.count >= 2)
+    }
+
+    @Test func pausedRibbonShowsChevronsAndHidesThemWhilePlaying() {
+        let house = SCNNode()
+        let renderer = PowerFlowSceneKitRenderer(house: house)
+        let flowing = PowerFlowSnapshot(solarW: 1500, homeW: 1500)
+        renderer.update(flowing)
+        renderer.tick(at: 0, solid: true)
+        guard let solar = renderer.animator.ribbons.first(where: { $0.name == "Solar_1A" }),
+              let state = renderer.animator.states["Solar_1A"],
+              let wire = house.childNode(withName: "PowerFlowWire_Solar_1A", recursively: true),
+              let material = wire.geometry?.materials.first else {
+            #expect(Bool(false))
+            return
+        }
+        let track = renderer.animator.colors(for: solar, at: 1.3, solid: true)?.first
+        #expect(ribbonColor(material, matches: track))
+        let shownName = state.direction == .flowOut ? "PowerFlowChevron_Solar_1A_out" : "PowerFlowChevron_Solar_1A_in"
+        let hiddenName = state.direction == .flowOut ? "PowerFlowChevron_Solar_1A_in" : "PowerFlowChevron_Solar_1A_out"
+        let shown = house.childNode(withName: shownName, recursively: true)
+        let hidden = house.childNode(withName: hiddenName, recursively: true)
+        #expect(shown?.isHidden == false)
+        #expect(hidden?.isHidden == true)
+        #expect(ribbonColor(shown?.geometry?.materials.first ?? SCNMaterial(), matches: renderer.animator.chevronColor(for: solar)))
+        renderer.tick(at: 0.4, solid: false)
+        #expect(shown?.isHidden == true)
+        #expect(hidden?.isHidden == true)
     }
 
     @Test func widgetSnapshotShowsTheFixtureWatts() {
@@ -2663,7 +2750,7 @@ struct GarageSceneTests {
         #expect(shopper.model == models.first)
         #expect(shopper.lines == [CarShowroom.catalogueName(models[0])])
         #expect(shopper.lineup.map(\.model) == models)
-        #expect(shopper.lineup.allSatisfy(\.browsesCatalogue))
+        #expect(shopper.lineup.allSatisfy { $0.browsesCatalogue })
 
         let owner = CarShowroom.select(
             data: idle,
@@ -2825,7 +2912,7 @@ struct GarageSceneTests {
         )
         #expect(request == CarShowroom.lineup(owned: []))
         #expect(request.lineup.map(\.model) == CarShowroom.catalogueModels)
-        #expect(request.lineup.allSatisfy(\.browsesCatalogue))
+        #expect(request.lineup.allSatisfy { $0.browsesCatalogue })
         let blank = CarShowroom.select(
             data: Self.idleGarage,
             fallbackVIN: "",

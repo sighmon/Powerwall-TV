@@ -7,7 +7,13 @@ import simd
 
 final class PowerFlowSceneKitRenderer {
     let animator: PowerFlowAnimator
-    private var nodes: [String: (node: SCNNode, materials: [SCNMaterial])] = [:]
+    private struct DrawnRibbon {
+        var wire: SCNNode
+        var materials: [SCNMaterial]
+        var chevronOut: SCNNode
+        var chevronIn: SCNNode
+    }
+    private var nodes: [String: DrawnRibbon] = [:]
 
     /// `house` is the ResidentialClassic node. Ribbons hang under a PowerFlow child when the
     /// USD has one, otherwise under the house. Geometry is in that node's local space.
@@ -49,13 +55,48 @@ final class PowerFlowSceneKitRenderer {
             node.isHidden = true
             parent.addChildNode(node)
             HouseGroundPlate.omitFromReflection(node)
-            nodes[ribbon.name] = (node, materials)
+            let chevronOut = chevronNode(ribbon: ribbon, pointingAlongIncreasingU: true, overRoof: overRoof, order: node.renderingOrder, parent: parent)
+            let chevronIn = chevronNode(ribbon: ribbon, pointingAlongIncreasingU: false, overRoof: overRoof, order: node.renderingOrder, parent: parent)
+            nodes[ribbon.name] = DrawnRibbon(wire: node, materials: materials, chevronOut: chevronOut, chevronIn: chevronIn)
         }
+    }
+
+    /// `flowOut` travels toward increasing u. `flowIn` travels the other way.
+    private func chevronNode(ribbon: PowerFlowRibbon, pointingAlongIncreasingU: Bool, overRoof: Bool, order: Int, parent: SCNNode) -> SCNNode {
+        let node = SCNNode()
+        node.name = "PowerFlowChevron_\(ribbon.name)_\(pointingAlongIncreasingU ? "out" : "in")"
+        node.renderingOrder = order
+        node.castsShadow = false
+        node.isHidden = true
+        let marks = ribbon.chevronMarks(pointingAlongIncreasingU: pointingAlongIncreasingU)
+        if let built = PowerFlowChevron.geometry(marks: marks) {
+            let vertices = built.vertices.map { SCNVector3($0.x, $0.y, $0.z) }
+            let source = SCNGeometrySource(vertices: vertices)
+            let element = SCNGeometryElement(indices: built.indices, primitiveType: .triangles)
+            let material = SCNMaterial()
+            material.lightingModel = .constant
+            material.isDoubleSided = true
+            material.writesToDepthBuffer = false
+            material.readsFromDepthBuffer = !overRoof
+            material.blendMode = .alpha
+            material.diffuse.contents = HouseColor.clear
+            if ribbon.name.hasPrefix("Grid") {
+                material.shaderModifiers = [.fragment: HouseGroundPlate.reflectedFragment]
+            }
+            let geometry = SCNGeometry(sources: [source], elements: [element])
+            geometry.materials = [material]
+            node.geometry = geometry
+        }
+        parent.addChildNode(node)
+        HouseGroundPlate.omitFromReflection(node)
+        return node
     }
 
     func removeFromScene() {
         for entry in nodes.values {
-            entry.node.removeFromParentNode()
+            entry.wire.removeFromParentNode()
+            entry.chevronOut.removeFromParentNode()
+            entry.chevronIn.removeFromParentNode()
         }
         nodes.removeAll()
     }
@@ -63,15 +104,17 @@ final class PowerFlowSceneKitRenderer {
     func update(_ snapshot: PowerFlowSnapshot) { animator.update(snapshot) }
 
     /// Once per frame, with the renderer's time in seconds.
-    /// `solid` paints the flow colour along the whole cable and ignores `time`.
+    /// `solid` keeps the grey track and shows chevrons that point along the flow.
     func tick(at time: TimeInterval, solid: Bool = false) {
         for ribbon in animator.ribbons {
             guard let entry = nodes[ribbon.name] else { continue }
             guard let colors = animator.colors(for: ribbon, at: time, solid: solid) else {
-                entry.node.isHidden = true
+                entry.wire.isHidden = true
+                entry.chevronOut.isHidden = true
+                entry.chevronIn.isHidden = true
                 continue
             }
-            entry.node.isHidden = false
+            entry.wire.isHidden = false
             for (material, color) in zip(entry.materials, colors) {
                 material.diffuse.contents = HouseColor(
                     red: CGFloat(color.r),
@@ -79,6 +122,22 @@ final class PowerFlowSceneKitRenderer {
                     blue: CGFloat(color.b),
                     alpha: CGFloat(color.a)
                 )
+            }
+            let direction = animator.states[ribbon.name]?.direction
+            let showOut = solid && direction == .flowOut && entry.chevronOut.geometry != nil
+            let showIn = solid && direction == .flowIn && entry.chevronIn.geometry != nil
+            entry.chevronOut.isHidden = !showOut
+            entry.chevronIn.isHidden = !showIn
+            if solid, let flow = animator.chevronColor(for: ribbon) {
+                let painted = showOut ? entry.chevronOut : entry.chevronIn
+                painted.geometry?.materials.forEach {
+                    $0.diffuse.contents = HouseColor(
+                        red: CGFloat(flow.r),
+                        green: CGFloat(flow.g),
+                        blue: CGFloat(flow.b),
+                        alpha: CGFloat(flow.a)
+                    )
+                }
             }
         }
     }
@@ -95,7 +154,7 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
     /// snapshot updates paint immediately while this stays false, because a paused
     /// view never calls `renderer(_:updateAtTime:)`.
     private var playbackContinuous = false
-    /// Frozen playback paints each flowing cable in one colour.
+    /// Frozen playback draws chevrons on the grey track.
     private var solidFlows = false
     /// Set when playback stops so the next snapshot paints even if the watts match.
     private var needsPaint = false
@@ -131,7 +190,8 @@ final class HousePowerFlowDriver: NSObject, SCNSceneRendererDelegate {
     }
 
     /// The house view sets this before pushing a snapshot. While `playing` is false,
-    /// `update` paints the ribbons itself. `solidFlows` replaces the pulse with one colour.
+    /// `update` paints the ribbons itself. `solidFlows` keeps the grey track and
+    /// draws chevrons that point along each flowing cable.
     func setPresentation(playing: Bool, solidFlows: Bool) {
         lock.lock()
         if self.solidFlows != solidFlows || playbackContinuous != playing {

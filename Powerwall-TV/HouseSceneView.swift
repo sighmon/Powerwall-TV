@@ -1026,7 +1026,7 @@ enum PresentationRefresh {
         /// Zero lets SceneKit use the display refresh.
         var preferredFramesPerSecond: Int
         /// Off screen, or unfocused when the macOS checkbox is on.
-        /// SceneKit is paused and power flows are solid lines.
+        /// SceneKit is paused and power flows are chevrons on the grey track.
         var animationsPaused: Bool = false
 
         var usesDisplayRefresh: Bool {
@@ -1144,7 +1144,7 @@ final class HouseCameraControlView: SCNView {
         )
         // The SwiftUI binding reaches this before `onChange` pushes the snapshot.
         // Give the driver that snapshot and, when the view is about to pause,
-        // paint solid lines. A paused view never ticks.
+        // paint chevrons on the track. A paused view never ticks.
         if let driver = delegate as? HousePowerFlowDriver {
             // Record the pause before the snapshot. Attach and later solar-roof
             // rebuilds paint from this flag, because they run after the view has

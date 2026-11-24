@@ -324,10 +324,10 @@ enum PowerFlowShader {
         let s = Float(state.direction.rawValue)
         let k: Float
         if solid {
-            // A frozen window shows the flow colour along the whole cable.
-            // Idle stays the grey track. Time is ignored, so a later data
-            // update is the only thing that repaints the line.
-            k = (state.direction == .flowIn || state.direction == .flowOut) ? 1 : 0
+            // A frozen window keeps the grey track. Chevrons carry the flow
+            // colour, so the direction stays readable without the pulse.
+            // Time is ignored. A later data update is the only repaint.
+            k = 0
         } else {
             let phase = fract(time / params.pulseFrequency + s * (u / params.pulseLength + state.phaseOffset))
             let amount = pow(max(1 - phase / params.snakeFraction, 0), params.snakeExponent) * abs(s)
@@ -425,6 +425,212 @@ struct PowerFlowClearance: Sendable {
     }
 }
 
+/// One straight piece of a ribbon, after clearance clipping.
+struct PowerFlowRibbonSpan: Sendable {
+    var start: SIMD3<Float>
+    var end: SIMD3<Float>
+    /// Unit axis across the pipe, in the wall.
+    var lateral: SIMD3<Float>
+    /// Unit axis toward the camera used when the pipe was built.
+    var facing: SIMD3<Float>
+    /// Half of the pipe's visible width. Chevrons use twice this as their gauge.
+    var halfWidth: Float
+}
+
+/// A chevron sitting on a ribbon. `tip` is the point, `tail` is the wing centre.
+struct PowerFlowChevronMark: Sendable, Equatable {
+    var center: SIMD3<Float>
+    var tip: SIMD3<Float>
+    var tail: SIMD3<Float>
+    var lateral: SIMD3<Float>
+    var facing: SIMD3<Float>
+    /// Pipe width this mark matches.
+    var gauge: Float
+}
+
+/// Paused flow marks. The pulse moves toward decreasing u for `flowIn` and
+/// toward increasing u for `flowOut`, so the point follows that same way.
+/// Each mark is a shallow rounded bend. The stroke stays near the cable's thin
+/// edge so the notch, and the direction, stay visible.
+enum PowerFlowChevron {
+    /// Centre-to-centre distance, in pipe widths. Just over one mark, so the row is dense.
+    static let spacingScale: Float = 1.2
+    /// Tip-to-tail distance, in pipe widths. Short, so the bend is shallow.
+    static let alongScale: Float = 0.42
+    /// Wing offset of the centreline, in pipe widths.
+    static let spreadScale: Float = 0.62
+    /// Stroke thickness as a fraction of the pipe's wide face.
+    static let strokeScale: Float = 0.2
+
+    static func marks(spans: [PowerFlowRibbonSpan], pointingAlongIncreasingU: Bool) -> [PowerFlowChevronMark] {
+        let lengths = spans.map { simd_length($0.end - $0.start) }
+        let gauges = spans.map { max($0.halfWidth * 2, PowerFlowRibbon.thickness) }
+        let usable = gauges.enumerated().filter { lengths[$0.offset] > 1e-4 }.map(\.element)
+        guard !usable.isEmpty else { return [] }
+        let gauge = usable.reduce(0, +) / Float(usable.count)
+        let along = gauge * alongScale
+        let spacing = gauge * spacingScale
+        let total = lengths.reduce(0, +)
+        guard total > along * 0.8 else { return [] }
+        var stations: [Float] = []
+        if total < spacing * 1.35 {
+            stations = [total * 0.5]
+        } else {
+            var distance = spacing * 0.5
+            while distance <= total - along * 0.45 {
+                stations.append(distance)
+                distance += spacing
+            }
+        }
+        var marks: [PowerFlowChevronMark] = []
+        marks.reserveCapacity(stations.count)
+        let lift = PowerFlowRibbon.thickness * 0.55
+        for station in stations {
+            guard let sample = sample(spans, lengths: lengths, at: station) else { continue }
+            var tangent = sample.tangent
+            if !pointingAlongIncreasingU { tangent = -tangent }
+            let local = max(sample.halfWidth * 2, PowerFlowRibbon.thickness)
+            let markAlong = local * alongScale
+            let center = sample.center + sample.facing * lift
+            marks.append(PowerFlowChevronMark(
+                center: center,
+                tip: center + tangent * (markAlong * 0.45),
+                tail: center - tangent * (markAlong * 0.55),
+                lateral: sample.lateral,
+                facing: sample.facing,
+                gauge: local
+            ))
+        }
+        return marks
+    }
+
+    static func geometry(marks: [PowerFlowChevronMark]) -> (vertices: [SIMD3<Float>], indices: [UInt32])? {
+        guard !marks.isEmpty else { return nil }
+        var vertices: [SIMD3<Float>] = []
+        var indices: [UInt32] = []
+        for mark in marks {
+            let tangent = mark.tip - mark.tail
+            let span = simd_length(tangent)
+            guard span > 1e-4 else { continue }
+            let forward = tangent / span
+            let lateral = mark.lateral
+            let halfSpread = mark.gauge * spreadScale
+            let leftWing = mark.tail + lateral * halfSpread
+            let rightWing = mark.tail - lateral * halfSpread
+            let soften = span * 0.28
+            let leftControl = mark.tip - forward * soften + lateral * halfSpread * 0.72
+            let rightControl = mark.tip - forward * soften - lateral * halfSpread * 0.72
+            var samples = quadratic(leftWing, leftControl, mark.tip, steps: 6)
+            samples.append(contentsOf: quadratic(mark.tip, rightControl, rightWing, steps: 6).dropFirst())
+            let stroke = max(mark.gauge * strokeScale, PowerFlowRibbon.thickness * 0.85)
+            sweep(
+                samples,
+                facing: mark.facing,
+                stroke: stroke,
+                depth: stroke,
+                vertices: &vertices,
+                indices: &indices
+            )
+        }
+        guard !vertices.isEmpty else { return nil }
+        return (vertices, indices)
+    }
+
+    private static func quadratic(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, steps: Int) -> [SIMD3<Float>] {
+        (0...steps).map { step in
+            let t = Float(step) / Float(steps)
+            let u = 1 - t
+            return a * (u * u) + b * (2 * u * t) + c * (t * t)
+        }
+    }
+
+    /// Round tube along the bend. Both axes use the thin stroke so the arms do not merge.
+    private static func sweep(
+        _ samples: [SIMD3<Float>],
+        facing: SIMD3<Float>,
+        stroke: Float,
+        depth: Float,
+        vertices: inout [SIMD3<Float>],
+        indices: inout [UInt32]
+    ) {
+        let sides = 8
+        var rings: [[SIMD3<Float>]] = []
+        rings.reserveCapacity(samples.count)
+        for index in samples.indices {
+            let previous = samples[max(index - 1, 0)]
+            let next = samples[min(index + 1, samples.count - 1)]
+            var forward = next - previous
+            let length = simd_length(forward)
+            guard length > 1e-5 else { continue }
+            forward /= length
+            var side = cross(facing, forward)
+            let sideLength = simd_length(side)
+            guard sideLength > 1e-5 else { continue }
+            side /= sideLength
+            var ring: [SIMD3<Float>] = []
+            ring.reserveCapacity(sides)
+            let center = samples[index]
+            for step in 0..<sides {
+                let angle = Float(step) / Float(sides) * (2 * Float.pi)
+                ring.append(center + side * (cos(angle) * stroke * 0.5) + facing * (sin(angle) * depth * 0.5))
+            }
+            rings.append(ring)
+        }
+        guard rings.count >= 2 else { return }
+        func tri(_ p: SIMD3<Float>, _ q: SIMD3<Float>, _ r: SIMD3<Float>) {
+            let base = UInt32(vertices.count)
+            vertices.append(contentsOf: [p, q, r])
+            indices.append(contentsOf: [base, base + 1, base + 2])
+        }
+        func quad(_ p: SIMD3<Float>, _ q: SIMD3<Float>, _ r: SIMD3<Float>, _ s: SIMD3<Float>) {
+            tri(p, q, r)
+            tri(p, r, s)
+        }
+        for index in 0..<(rings.count - 1) {
+            let here = rings[index]
+            let next = rings[index + 1]
+            for side in 0..<sides {
+                let following = (side + 1) % sides
+                quad(here[side], next[side], next[following], here[following])
+            }
+        }
+        func cap(_ ring: [SIMD3<Float>], outward: Bool) {
+            let center = ring.reduce(SIMD3<Float>.zero, +) / Float(ring.count)
+            for side in 0..<sides {
+                let following = (side + 1) % sides
+                if outward {
+                    tri(center, ring[following], ring[side])
+                } else {
+                    tri(center, ring[side], ring[following])
+                }
+            }
+        }
+        cap(rings[0], outward: true)
+        cap(rings[rings.count - 1], outward: false)
+    }
+
+    private static func sample(_ spans: [PowerFlowRibbonSpan], lengths: [Float], at station: Float) -> (center: SIMD3<Float>, tangent: SIMD3<Float>, lateral: SIMD3<Float>, facing: SIMD3<Float>, halfWidth: Float)? {
+        var walked: Float = 0
+        var lastUsable: Int?
+        for index in spans.indices where lengths[index] > 1e-4 {
+            lastUsable = index
+        }
+        for index in spans.indices {
+            let length = lengths[index]
+            guard length > 1e-4 else { continue }
+            if station <= walked + length || index == lastUsable {
+                let t = min(max((station - walked) / length, 0), 1)
+                let span = spans[index]
+                let tangent = (span.end - span.start) / length
+                let center = span.start + (span.end - span.start) * t
+                return (center, tangent, span.lateral, span.facing, span.halfWidth)
+            }
+            walked += length
+        }
+        return nil
+    }
+}
+
 /// A path resampled into short rectangular pipes. Each segment gets one colour per frame.
 struct PowerFlowRibbon: Sendable {
     let name: String
@@ -433,7 +639,12 @@ struct PowerFlowRibbon: Sendable {
     let midU: [Float]
     let shade: [Float]
     let alpha: [Float]
+    let spans: [PowerFlowRibbonSpan]
     var quadCount: Int { midU.count }
+
+    func chevronMarks(pointingAlongIncreasingU: Bool) -> [PowerFlowChevronMark] {
+        PowerFlowChevron.marks(spans: spans, pointingAlongIncreasingU: pointingAlongIncreasingU)
+    }
 
     /// How far the pipe stands off the baked centreline, toward the camera.
     static let thickness: Float = 0.008
@@ -547,6 +758,7 @@ struct PowerFlowRibbon: Sendable {
             frames.append((width, normal * Self.thickness))
         }
         var corners: [SIMD3<Float>] = [], mid: [Float] = [], sh: [Float] = [], al: [Float] = []
+        var spans: [PowerFlowRibbonSpan] = []
         corners.reserveCapacity((samples.count - 1) * 8)
         for i in 0..<(samples.count - 1) {
             guard let clipped = Self.clip(samples[i], samples[i + 1], clearances, camera: camera) else { continue }
@@ -555,9 +767,25 @@ struct PowerFlowRibbon: Sendable {
             mid.append((us[i] + us[i + 1]) / 2)
             sh.append((shades[i] + shades[i + 1]) / 2)
             al.append((alphas[i] + alphas[i + 1]) / 2)
+            let lateralLength = simd_length(start.0)
+            let facingLength = simd_length(start.1)
+            if lateralLength > 1e-5, facingLength > 1e-5 {
+                spans.append(PowerFlowRibbonSpan(
+                    start: clipped.0,
+                    end: clipped.1,
+                    lateral: start.0 / lateralLength,
+                    facing: start.1 / facingLength,
+                    halfWidth: lateralLength
+                ))
+            }
         }
         guard !corners.isEmpty else { return nil }
-        self.name = name; self.corners = corners; self.midU = mid; self.shade = sh; self.alpha = al
+        self.name = name
+        self.corners = corners
+        self.midU = mid
+        self.shade = sh
+        self.alpha = al
+        self.spans = spans
     }
 
     /// The baked charger run sits in front of the garage door, about 16 cm ahead of
@@ -823,8 +1051,23 @@ final class PowerFlowAnimator {
         states = PowerFlowRemapper.remap(wires)
     }
 
+    /// Flow colour for the paused chevrons. Nil when the cable is idle or hidden.
+    func chevronColor(for ribbon: PowerFlowRibbon) -> PowerFlowColor? {
+        guard let state = states[ribbon.name], state.direction == .flowIn || state.direction == .flowOut else { return nil }
+        guard !ribbon.shade.isEmpty else { return nil }
+        let shade = (ribbon.shade.reduce(0, +) / Float(ribbon.shade.count)) * brightness
+        let flow = state.flowColor
+        let base = PowerFlowStyle.baseColor
+        return PowerFlowColor(
+            r: min((base.r + (flow.r - base.r)) * shade, 1),
+            g: min((base.g + (flow.g - base.g)) * shade, 1),
+            b: min((base.b + (flow.b - base.b)) * shade, 1),
+            a: 1
+        )
+    }
+
     /// Per-quad RGBA for `ribbon` at absolute time `seconds`, or nil if the path is hidden.
-    /// `solid` paints the flow colour along the whole cable and ignores `seconds`.
+    /// `solid` paints the grey track and ignores `seconds`. Chevrons carry the flow colour.
     func colors(for ribbon: PowerFlowRibbon, at seconds: TimeInterval, solid: Bool = false) -> [PowerFlowColor]? {
         guard let state = states[ribbon.name], state.direction != .hidden else { return nil }
         let speed = speedPerKW > 0 ? 1 + speedPerKW * Float(state.watts / 1000) : 1

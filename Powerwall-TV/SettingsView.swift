@@ -349,7 +349,7 @@ struct SettingsView: View {
                 Toggle("Auto-hide buttons", isOn: $autoHideButtonsOnOverlap)
 #if os(macOS)
                 Toggle("Stop animation when the app isn't in focus", isOn: $viewModel.pauseAnimationWhenUnfocused)
-                Text("Power flows stay solid lines and update when new data arrives. Clouds, rain, and snow stop too. The window also stops animating when it is off screen.")
+                Text("Power flows stay as chevrons that show their direction, and update when new data arrives. Clouds, rain, and snow stop too. The window also stops animating when it is off screen.")
                     .font(.footnote)
                     .foregroundColor(.gray)
 #endif

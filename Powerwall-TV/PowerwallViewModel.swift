@@ -80,7 +80,7 @@ class PowerwallViewModel: ObservableObject {
     @Published var autoHideSummaryOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideSummaryOnOverlap") as? Bool ?? false
     @Published var autoHideButtonsOnOverlap: Bool = UserDefaults.standard.object(forKey: "autoHideButtonsOnOverlap") as? Bool ?? false
     /// macOS Display checkbox. A visible window whose app is not active stops
-    /// animations and draws solid power-flow lines. Off screen always stops.
+    /// animations and draws chevrons along each power flow. Off screen always stops.
     /// Missing preference stays off, so a visible unfocused window keeps animating.
     @Published var pauseAnimationWhenUnfocused: Bool = PauseAnimationWhenUnfocused.stored() {
         didSet {
