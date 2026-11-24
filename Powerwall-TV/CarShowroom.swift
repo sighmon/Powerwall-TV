@@ -25,8 +25,71 @@ struct CarShowroomRequest: Equatable, Identifiable {
     /// The garage lineup this request opens on: the account's own cars first, then every
     /// catalogue model. Empty for a single car. The arrows step through it.
     var lineup: [CarShowroomRequest] = []
+    /// Lineup entry the showroom opens on: the last car shown, when it is still in the lineup.
+    var startIndex: Int = 0
 
     var id: String { vin ?? model.rawValue }
+}
+
+/// How the showroom paints one car.
+enum ShowroomPaint: Equatable {
+    /// The colour exported in the file. Catalogue cars, Generic, a stainless Cybertruck, and an owned
+    /// car whose paint is not known yet.
+    case file
+    /// A table paint, drawn with its readable display colour at boost 1 (`TeslaPaint.display`).
+    case named(TeslaPaint)
+    /// A `paint_color_override` with no paint name the table knows, at the request's boost.
+    case custom(TeslaPaint)
+
+    /// Name first, so a known paint always reads as itself, live or demo. The override is only used
+    /// when the name is missing or unknown.
+    static func resolve(for request: CarShowroomRequest) -> ShowroomPaint {
+        let wrap = request.paintColorOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if request.model == .generic { return .file }
+        if request.model == .cybertruck && wrap.isEmpty { return .file }
+        if let name = request.exteriorColor, let paint = TeslaPaint(exteriorColor: name) {
+            return .named(paint.display)
+        }
+        if !wrap.isEmpty, let paint = TeslaPaint(paintColorOverride: wrap, colorizerRemap: request.colorizerRemap) {
+            return .custom(paint)
+        }
+        return .file
+    }
+}
+
+/// The last car shown in the showroom, saved so the next open starts there. A VIN for an owned car,
+/// the model for a catalogue car, never an index. Demo neither reads nor writes it.
+enum ShowroomLastCar {
+    static let storageKey = "showroom_lastCar"
+
+    static func key(for car: CarShowroomRequest) -> String {
+        if !car.browsesCatalogue, let vin = car.vin?.trimmingCharacters(in: .whitespacesAndNewlines), !vin.isEmpty {
+            return "vin:" + vin.uppercased()
+        }
+        return "model:" + car.model.rawValue
+    }
+
+    /// Where the saved car sits in this lineup, or nil when it is gone.
+    static func index(of key: String?, in request: CarShowroomRequest) -> Int? {
+        guard let key, !key.isEmpty else { return nil }
+        let entries = request.lineup.isEmpty ? [request] : request.lineup
+        return entries.firstIndex { Self.key(for: $0) == key }
+    }
+
+    static func load(from defaults: UserDefaults = .standard, isDemoMode: Bool) -> String? {
+        isDemoMode ? nil : defaults.string(forKey: storageKey)
+    }
+
+    static func save(_ car: CarShowroomRequest, to defaults: UserDefaults = .standard, isDemoMode: Bool) {
+        guard !isDemoMode else { return }
+        let key = key(for: car)
+        guard defaults.string(forKey: storageKey) != key else { return }
+        defaults.set(key, forKey: storageKey)
+    }
+
+    static func clear(_ defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: storageKey)
+    }
 }
 
 /// Garage open zooms the home in and fades it out, then fades the showroom in.
@@ -85,7 +148,8 @@ enum CarShowroom {
         vehicles: [FleetVehicle],
         charges: [String: VehicleChargeSnapshot],
         displayBoost: CGFloat,
-        isDemoMode: Bool
+        isDemoMode: Bool,
+        lastCar: String? = nil
     ) -> CarShowroomRequest {
         var owned: [CarShowroomRequest] = []
         if let parked = request(
@@ -104,10 +168,50 @@ enum CarShowroom {
             guard !vin.isEmpty, !owned.contains(where: { $0.vin?.caseInsensitiveCompare(vin) == .orderedSame }) else { continue }
             owned.append(ownedRequest(vin: vin, appearances: appearances, vehicles: vehicles, charges: charges, displayBoost: displayBoost))
         }
+        owned = owned.map { repainted($0, appearances: appearances, vehicles: vehicles) }
         if isDemoMode {
             owned = owned.map(DemoHouseTour.applyingExampleFleetData)
         }
-        return lineup(owned: owned)
+        var opened = lineup(owned: owned)
+        opened.startIndex = ShowroomLastCar.index(of: lastCar, in: opened) ?? 0
+        return opened
+    }
+
+    /// The paint this owned car should wear: `vehicle_config` (live `vehicle_data` or
+    /// `vehicle_data_cached`, saved per VIN), then products `color` or `option_codes`. Nil leaves the
+    /// file colour. Catalogue cars are never touched.
+    static func paintSource(vin: String?, appearances: [String: VehicleAppearance], vehicles: [FleetVehicle]) -> VehicleAppearance? {
+        guard let vin = vin?.trimmingCharacters(in: .whitespacesAndNewlines), !vin.isEmpty else { return nil }
+        let stored = appearances[vin] ?? appearances.first { $0.key.caseInsensitiveCompare(vin) == .orderedSame }?.value
+        if let stored, stored.hasPaint { return stored }
+        let vehicle = vehicles.first { $0.vin.caseInsensitiveCompare(vin) == .orderedSame }
+        guard let name = vehicle?.paintName else { return nil }
+        return VehicleAppearance(exteriorColor: name, paintColorOverride: nil, colorizerRemap: false, carType: stored?.carType)
+    }
+
+    /// Re-reads an owned car's paint, so a `vehicle_data_cached` reply that arrives while the showroom is
+    /// open repaints it. The title's colour suffix follows. Catalogue cars come back unchanged.
+    static func repainted(_ car: CarShowroomRequest, appearances: [String: VehicleAppearance], vehicles: [FleetVehicle]) -> CarShowroomRequest {
+        guard !car.browsesCatalogue,
+              let source = paintSource(vin: car.vin, appearances: appearances, vehicles: vehicles) else { return car }
+        func clean(_ value: String?) -> String? {
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        var copy = car
+        copy.exteriorColor = clean(source.exteriorColor)
+        copy.paintColorOverride = clean(source.paintColorOverride)
+        copy.colorizerRemap = source.colorizerRemap
+        if let title = copy.lines.first {
+            copy.lines[0] = DemoHouseTour.vehicleLabel(displayName: bareTitle(title), exteriorColor: copy.exteriorColor)
+        }
+        return copy
+    }
+
+    /// Drops a " · Colour" suffix so a new colour does not stack.
+    static func bareTitle(_ line: String) -> String {
+        guard let dot = line.range(of: " · ") else { return line }
+        return String(line[..<dot.lowerBound])
     }
 
     /// Owned cars, then every catalogue model. The first entry carries the whole list.
@@ -280,18 +384,14 @@ enum CarShowroom {
 
         let vehicle = loadVehicle(model: request.model)
         vehicle.simdPosition = carPosition
-        // Catalogue cars keep the colour exported in the file until a colour step sets a wrap.
-        // An owned car still uses Fleet paint.
-        let wrap = request.paintColorOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !request.browsesCatalogue || !wrap.isEmpty {
-            paint(
-                vehicle,
-                model: request.model,
-                exteriorColor: request.exteriorColor,
-                paintColorOverride: request.paintColorOverride,
-                colorizerRemap: request.colorizerRemap,
-                displayBoost: request.displayBoost
-            )
+        // Catalogue cars, and owned cars with no known paint, keep the colour exported in the file.
+        switch ShowroomPaint.resolve(for: request) {
+        case .file:
+            break
+        case .named(let named):
+            applyPaint(named, to: vehicle, displayBoost: 1)
+        case .custom(let custom):
+            applyPaint(custom, to: vehicle, displayBoost: request.displayBoost)
         }
         scene.rootNode.addChildNode(vehicle)
         scene.rootNode.addChildNode(ShowroomStage.makeMirror(of: vehicle))
@@ -353,26 +453,10 @@ enum CarShowroom {
         return wrapped(base + delta, count: count)
     }
 
-    /// Generic keeps its file colour. Cybertruck stays stainless unless a wrap or a demo colour is set.
-    private static func paint(
-        _ vehicle: SCNNode,
-        model: VehicleModel,
-        exteriorColor: String?,
-        paintColorOverride: String?,
-        colorizerRemap: Bool,
-        displayBoost: CGFloat
-    ) {
-        guard model != .generic else { return }
-        let wrap = paintColorOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if model == .cybertruck && wrap.isEmpty { return }
-        let resolved = TeslaPaint.resolve(
-            exteriorColor: exteriorColor,
-            paintColorOverride: paintColorOverride,
-            colorizerRemap: colorizerRemap
-        )
+    private static func applyPaint(_ paint: TeslaPaint, to vehicle: SCNNode, displayBoost: CGFloat) {
         vehicle.enumerateHierarchy { node, _ in
             node.geometry?.materials.filter { $0.name == "Paint" }.forEach {
-                resolved.apply(to: $0, displayBoost: displayBoost, clearCoat: 0)
+                paint.apply(to: $0, displayBoost: displayBoost, clearCoat: 0)
             }
         }
     }
@@ -568,10 +652,14 @@ struct CarShowroomView: View {
     var info: (CarShowroomRequest) -> VehicleInfo? = { _ in nil }
     /// Runs while one car is on stage and is cancelled when the arrows move on or the showroom closes.
     var whileShowing: (CarShowroomRequest) async -> Void = { _ in }
+    /// Re-reads an owned car's paint from the latest stored copy (`CarShowroom.repainted`).
+    var refreshed: (CarShowroomRequest) -> CarShowroomRequest = { $0 }
     var onDismiss: () -> Void
     /// Same key as Settings → Display → Tyre pressure. The details tap only writes this; it never calls Fleet.
     @AppStorage(TyrePressureSetting.storageKey) private var tyrePressureSetting = TyrePressureSetting.automatic.rawValue
     @State private var scene: SCNScene?
+    /// The car the current scene was built for, so one change builds one scene.
+    @State private var builtFor: CarShowroomRequest?
     @State private var browseIndex = 0
     /// Nil keeps the file or Fleet colour. Up and down walk `TeslaPaint.catalogue`.
     @State private var colourIndex: Int?
@@ -629,7 +717,7 @@ struct CarShowroomView: View {
     private var browses: Bool { request.lineup.count > 1 }
 
     /// The lineup car the arrows have reached, before any colour step.
-    private var current: CarShowroomRequest { CarShowroom.entry(in: request, at: browseIndex) }
+    private var current: CarShowroomRequest { refreshed(CarShowroom.entry(in: request, at: browseIndex)) }
 
     private var displayed: CarShowroomRequest {
         var shown = current
@@ -639,19 +727,13 @@ struct CarShowroomView: View {
         shown.paintColorOverride = paint.demoOverride
         shown.colorizerRemap = false
         shown.displayBoost = 1
-        let bareName = shown.lines.first.map(Self.bareTitle) ?? CarShowroom.catalogueName(shown.model)
+        let bareName = shown.lines.first.map(CarShowroom.bareTitle) ?? CarShowroom.catalogueName(shown.model)
         if shown.lines.isEmpty {
             shown.lines = [DemoHouseTour.vehicleLabel(displayName: bareName, exteriorColor: paint.name)]
         } else {
             shown.lines[0] = DemoHouseTour.vehicleLabel(displayName: bareName, exteriorColor: paint.name)
         }
         return shown
-    }
-
-    /// Drops a previous " · Colour" suffix so the next colour does not stack.
-    private static func bareTitle(_ line: String) -> String {
-        guard let dot = line.range(of: " · ") else { return line }
-        return String(line[..<dot.lowerBound])
     }
 
     var body: some View {
@@ -692,9 +774,12 @@ struct CarShowroomView: View {
         }
         .onAppear {
             if scene == nil {
-                scene = CarShowroom.scene(for: displayed)
+                browseIndex = request.startIndex
+                rebuildScene()
             }
         }
+        // A step, a colour, or a paint that arrives from Fleet while open: one new scene, new glow.
+        .onChange(of: displayed) { rebuildScene() }
         .task(id: current.id) { await whileShowing(current) }
         #if os(tvOS)
         .focusSection()
@@ -939,18 +1024,23 @@ struct CarShowroomView: View {
         #endif
     }
 
+    /// Every car arrives in its own paint: a colour tried on one car never carries to the next.
     private func step(_ delta: Int) {
         guard browses else { return }
         browseIndex += delta
-        // An owned car always comes back in its own paint. Catalogue cars keep the colour being tried.
-        if !current.browsesCatalogue { colourIndex = nil }
-        scene = CarShowroom.scene(for: displayed)
+        colourIndex = nil
     }
 
     private func shiftColour(_ delta: Int) {
         guard displayed.model != .generic, !TeslaPaint.catalogue.isEmpty else { return }
         colourIndex = CarShowroom.colourIndex(after: colourIndex, delta: delta)
-        scene = CarShowroom.scene(for: displayed)
+    }
+
+    private func rebuildScene() {
+        let car = displayed
+        guard car != builtFor || scene == nil else { return }
+        builtFor = car
+        scene = CarShowroom.scene(for: car)
     }
 }
 

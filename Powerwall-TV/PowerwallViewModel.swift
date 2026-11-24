@@ -223,10 +223,14 @@ class PowerwallViewModel: ObservableObject {
         )
     }
 
+    /// Saves the car's paint per VIN (`fleetVehicleAppearanceCache`). A field the new copy lacks keeps
+    /// the stored value, so a reply without `car_type` does not forget it.
     func rememberVehicleAppearance(_ appearance: VehicleAppearance, for vin: String) {
         guard appearance.hasUsefulData else { return }
         var updated = vehicleAppearances
-        updated[vin] = appearance
+        let merged = updated[vin].map { $0.merging(appearance) } ?? appearance
+        guard updated[vin] != merged else { return }
+        updated[vin] = merged
         vehicleAppearances = updated
         if let data = try? JSONEncoder().encode(updated) {
             UserDefaults.standard.set(data, forKey: Self.vehicleAppearanceCacheKey)
@@ -1680,6 +1684,11 @@ class PowerwallViewModel: ObservableObject {
                     entry.info = info
                     entry.fetchedAt = finishedAt
                     self.vehicleInfo[vin] = info
+                    // vehicle_config paint, when the cached body has it, repaints the showroom car
+                    // and is saved per VIN so the next open draws the right colour at once.
+                    if let appearance = info.appearance {
+                        self.rememberVehicleAppearance(appearance, for: vin)
+                    }
                     // Same numbers the live charge call stores, so the title lines agree with the panel.
                     if info.batteryLevel != nil || info.chargingState != nil {
                         self.vehicleChargeStates[vin] = info.chargeSnapshot
@@ -2273,18 +2282,31 @@ struct FleetVehicle: Codable {
     let vin: String
     let displayName: String?
     let state: String?
+    /// Products and `/vehicles` `color`. Often null.
+    var color: String? = nil
+    /// Products and `/vehicles` `option_codes`, comma separated. Often missing.
+    var optionCodes: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case vin
         case displayName = "display_name"
         case state
+        case color
+        case optionCodes = "option_codes"
+    }
+
+    /// Table paint name from `color`, then the paint code in `option_codes`.
+    var paintName: String? {
+        TeslaPaint.exteriorColor(productColor: color, optionCodes: optionCodes)
     }
 
     func merging(_ other: FleetVehicle) -> FleetVehicle {
         FleetVehicle(
             vin: vin,
             displayName: other.displayName ?? displayName,
-            state: other.state ?? state
+            state: other.state ?? state,
+            color: other.color ?? color,
+            optionCodes: other.optionCodes ?? optionCodes
         )
     }
 }
@@ -2299,8 +2321,12 @@ struct Product: Codable {
     let displayName: String?
     let siteDisplayName: String?
     let state: String?
+    var color: String? = nil
+    var optionCodes: String? = nil
 
     enum CodingKeys: String, CodingKey {
+        case color
+        case optionCodes = "option_codes"
         case deviceType = "device_type"
         case energySiteId = "energy_site_id"
         case siteName = "site_name"
@@ -2338,7 +2364,9 @@ struct Product: Codable {
         return FleetVehicle(
             vin: normalizedVIN,
             displayName: displayName,
-            state: state
+            state: state,
+            color: color,
+            optionCodes: optionCodes
         )
     }
 }

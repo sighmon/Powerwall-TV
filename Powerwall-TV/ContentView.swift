@@ -433,7 +433,13 @@ struct ContentView: View {
                 CarShowroomView(
                     request: request,
                     info: { showroomInfo(for: $0) },
-                    whileShowing: { await refreshShowroomInfoWhileOpen($0) },
+                    whileShowing: { car in
+                        ShowroomLastCar.save(car, isDemoMode: viewModel.isDemoMode)
+                        await refreshShowroomInfoWhileOpen(car)
+                    },
+                    refreshed: {
+                        CarShowroom.repainted($0, appearances: viewModel.vehicleAppearances, vehicles: viewModel.vehicles)
+                    },
                     onDismiss: closeCarShowroom
                 )
                     .ignoresSafeArea()
@@ -1243,7 +1249,8 @@ struct ContentView: View {
             vehicles: viewModel.vehicles,
             charges: viewModel.vehicleChargeStates,
             displayBoost: viewModel.isDemoMode ? 1 : 4,
-            isDemoMode: viewModel.isDemoMode
+            isDemoMode: viewModel.isDemoMode,
+            lastCar: ShowroomLastCar.load(isDemoMode: viewModel.isDemoMode)
         )
         showroomTransitionSettled = false
         showroomTransitionID += 1

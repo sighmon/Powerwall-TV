@@ -118,7 +118,87 @@ struct TeslaPaint: Equatable {
         "MarineBlue": 0x163A5F,
         "GarnetRed": 0x8A2A32,
         "CoastalBlue": 0x4E78A8,
+        // Older aliases in the Fleet table, so a live car with one of these names still reads right.
+        "Red": 0x8E1B1B,
+        "Black": 0x1A1A1A,
+        "MetallicBlack": 0x15151A,
+        "Silver": 0xC5C8CE,
+        "Grey": 0x6E7176,
+        "SteelGrey": 0x6E7176,
+        "Titanium": 0xB08D6A,
     ]
+
+    /// The paint in display space: the readable colour above with the app's metal and roughness.
+    /// Apply it with `displayBoost` 1. The showroom uses this for every named paint, live or demo.
+    var display: TeslaPaint {
+        TeslaPaint(name: name, hex: TeslaPaint.demoDisplayHex[name] ?? hex, metallic: metallic, roughness: roughness)
+    }
+
+    /// Paint option codes (`option_codes` on products and `/vehicles`, and the B-pillar label), from
+    /// Tesla's service manual paint tables. Codes with no paint in the app's table are left out.
+    static let optionCodes: [String: String] = [
+        "PPSW": "PearlWhite",        // Pearl White Multi-Coat
+        "PM00": "PearlWhite",        // Pearl White Pro Multi-Coat
+        "PBCW": "White",             // Solid / Base White
+        "PMNG": "MidnightSilver",    // Midnight Silver Metallic
+        "PMSS": "SilverMetallic",    // Silver Metallic
+        "PBSB": "SolidBlack",        // Solid Black
+        "PMBL": "MetallicBlack",     // Obsidian Black Metallic
+        "PPSB": "DeepBlue",          // Deep Blue Metallic
+        "PPMR": "RedMulticoat",      // Red Multi-Coat
+        "PPSR": "SigRed",            // Signature Red
+        "PPTI": "Titanium",          // Titanium Metallic
+        "PMTG": "SteelGrey",         // Dolphin Grey
+        "PMSG": "Green",             // Green Metallic
+        "PMAB": "Brown",             // Anza Brown
+        "PMMB": "Blue",              // Blue Metallic
+        "PN00": "Quicksilver",
+        "PN01": "StealthGrey",
+        "PN02": "LunarSilver",
+        "PR00": "MidnightCherryRed",
+        "PR01": "UltraRed",
+        "PX02": "DiamondBlack",
+        "PB00": "FrostBlue",
+        "PB01": "GlacierBlue",
+        "PB02": "MarineBlue",
+        "PB03": "CoastalBlue",
+    ]
+
+    /// Marketing names and spellings Fleet or the order site use for a table paint.
+    private static let aliases: [String: String] = [
+        "stealthgray": "StealthGrey",
+        "obsidianblack": "MetallicBlack",
+        "solidwhite": "White",
+        "basewhite": "White",
+        "signaturered": "SigRed",
+        "dolphingrey": "SteelGrey",
+        "dolphingray": "SteelGrey",
+        "midnightsilvergray": "MidnightSilver",
+        "eclipseblack": "SolidBlack",
+        "oceanblue": "DeepBlue",
+        "redmulticoat": "RedMulticoat",
+        "pearlwhitepro": "PearlWhite",
+        "anzabrown": "Brown",
+    ]
+
+    /// Table name for a paint option code list such as "AD15,MDL3,PPSW,W40B". Nil when no code is a paint.
+    static func exteriorColor(optionCodes: String?) -> String? {
+        guard let optionCodes else { return nil }
+        for code in optionCodes.split(whereSeparator: { $0 == "," || $0 == " " || $0 == ";" }) {
+            let key = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if let name = Self.optionCodes[key] { return name }
+        }
+        return nil
+    }
+
+    /// Products' `color` (often null) can be a paint name or a paint code. Then `option_codes`.
+    static func exteriorColor(productColor: String?, optionCodes: String?) -> String? {
+        if let color = productColor?.trimmingCharacters(in: .whitespacesAndNewlines), !color.isEmpty {
+            if let paint = TeslaPaint(exteriorColor: color) { return paint.name }
+            if let name = exteriorColor(optionCodes: color) { return name }
+        }
+        return exteriorColor(optionCodes: optionCodes)
+    }
 
     /// Demo paint in display space. Apply it with `displayBoost` 1, not the live lift of 4.
     var demoOverride: String {
@@ -157,9 +237,25 @@ struct TeslaPaint: Equatable {
     /// Accepts "PearlWhite", "pearl white", "PEARL_WHITE", and so on. Returns nil if the colour is
     /// not in the app's table. The app itself would then use `TeslaPaint.fallback`:
     /// `TeslaPaint(exteriorColor: c) ?? .fallback`.
+    /// Marketing spellings ("Stealth Gray", "Pearl White Multi-Coat", "Deep Blue Metallic") resolve too.
     init?(exteriorColor: String) {
-        guard let p = TeslaPaint.normalisedTable[TeslaPaint.normalise(exteriorColor)] else { return nil }
-        self = p
+        let key = TeslaPaint.normalise(exteriorColor)
+        guard !key.isEmpty else { return nil }
+        var candidates = [key]
+        for suffix in ["multicoat", "metallic", "paint"] where key.hasSuffix(suffix) && key.count > suffix.count {
+            candidates.append(String(key.dropLast(suffix.count)))
+        }
+        for candidate in candidates {
+            if let p = TeslaPaint.normalisedTable[candidate] {
+                self = p
+                return
+            }
+            if let name = TeslaPaint.aliases[candidate], let p = TeslaPaint.table[name] {
+                self = p
+                return
+            }
+        }
+        return nil
     }
 
     /// `vehicle_config.paint_color_override`: "r,g,b,metallic,roughness" with rgb in 0–255.

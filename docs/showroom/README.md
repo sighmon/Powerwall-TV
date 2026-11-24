@@ -313,8 +313,63 @@ asks Fleet `GET /api/1/products` which cars are on the account, then opens one l
 3. Every catalogue model, each with its Buy a Tesla link and no info panel.
 
 The arrows step through the whole lineup and wrap. An account with no cars gets the catalogue alone,
-so it looks the same as before. Owned cars always come back in their own paint. A colour being tried on
-the catalogue carries from one model to the next.
+so it looks the same as before. Every car arrives in its own paint and glow: a colour tried with up and
+down is dropped when the arrows move on, so it never carries to the next car.
+
+### Paint for each car (`ShowroomPaint`, `CarShowroom.paintSource`)
+
+An owned car's paint comes from the first of these that knows it:
+
+1. `vehicle_config` (`exterior_color`, `paint_color_override`, `car_type`) from the live `vehicle_data`
+   charge call, or from `vehicle_data_cached` when its body includes `vehicle_config`. It is saved per VIN
+   in `UserDefaults` (`fleetVehicleAppearanceCache`), so the next open draws the right colour before any
+   call. A field missing from a newer reply keeps the saved value.
+2. Products (or `/vehicles`) `color`, which is often null, then the paint code in `option_codes`.
+3. Nothing known: the colour exported in the car's file, the same as a catalogue car. It used to be the
+   Tesla app's dark fallback grey.
+
+A reply that arrives while the showroom is open repaints the car on stage and its glow at once
+(`CarShowroom.repainted`, then one scene rebuild). The home garage uses the same per-VIN store, so a
+`vehicle_data_cached` reply also fixes the parked car's paint there.
+
+How a known paint is drawn:
+
+| Case | Showroom paint | Glow |
+| --- | --- | --- |
+| Paint name the table knows | `TeslaPaint.display`: the readable colour the demo uses, at boost 1 | The floor's table colour for that paint |
+| Override with no known name | The override at the live boost (4) | The app's formula on the override |
+| Generic, stainless Cybertruck, catalogue car, unknown paint | The file colour | The file colour's table entry |
+
+A known name wins over `paint_color_override` in the showroom. The Tesla app's albedos are meant for its
+reflection-heavy renderer: Pearl White is `0x181818`, which reads as mid grey once lifted, so the display
+colour is what makes a white car look white. The home garage still uses the app's order (override, name,
+fallback) and is unchanged.
+
+Names match without regard to case, spaces or punctuation, and accept marketing spellings: "Stealth
+Gray", "Pearl White Multi-Coat", "Deep Blue Metallic", "Obsidian Black" and so on. Paint codes come from
+Tesla's service manual tables:
+
+| Code | Paint | Code | Paint | Code | Paint |
+| --- | --- | --- | --- | --- | --- |
+| PPSW, PM00 | Pearl White | PN00 | Quicksilver | PB00 | Frost Blue |
+| PBCW | White | PN01 | Stealth Grey | PB01 | Glacier Blue |
+| PMNG | Midnight Silver | PN02 | Lunar Silver | PB02 | Marine Blue |
+| PMSS | Silver Metallic | PR00 | Midnight Cherry Red | PB03 | Coastal Blue |
+| PBSB | Solid Black | PR01 | Ultra Red | PX02 | Diamond Black |
+| PMBL | Obsidian Black | PPSB | Deep Blue | PPMR | Red Multi-Coat |
+| PPSR | Signature Red | PPTI | Titanium | PMTG, PMSG, PMAB, PMMB | Older greys, green, brown, blue |
+
+Cybertruck stays stainless steel (the file finish) unless a colour step or a wrap override is set. Codes
+with no paint in the app's table, such as Cosmic Silver (PN03), fall through to the file colour.
+
+### Last car shown (`ShowroomLastCar`)
+
+The car on stage is saved as `showroom_lastCar` in `UserDefaults`: `vin:<VIN>` for an owned car or
+`model:<model>` for a catalogue car, never a lineup index. It is written when the showroom opens and each
+time the arrows move. The next open starts on that car if it is still in the lineup. Otherwise it starts
+on the usual first car: parked, then the first account car, then the first catalogue model. Demo neither
+reads nor writes it, so the tour never replaces a real saved car. Settings → Reset clears it, along with
+the per-VIN paint store.
 
 | Case | What opens |
 | --- | --- |

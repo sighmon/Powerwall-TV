@@ -87,6 +87,30 @@ struct VehicleAppearance: Codable, Equatable {
         !trimmed(exteriorColor).isEmpty || !trimmed(paintColorOverride).isEmpty || !trimmed(carType).isEmpty
     }
 
+    /// True when this copy says which paint the car has.
+    var hasPaint: Bool {
+        !trimmed(exteriorColor).isEmpty || !trimmed(paintColorOverride).isEmpty
+    }
+
+    /// Newer fields win. A blank newer field keeps this one.
+    func merging(_ newer: VehicleAppearance) -> VehicleAppearance {
+        func pick(_ new: String?, _ old: String?) -> String? {
+            let value = new?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return value.isEmpty ? old : new
+        }
+        // A new exterior colour with no override means the override no longer applies.
+        let newExterior = trimmed(newer.exteriorColor)
+        let newOverride = trimmed(newer.paintColorOverride)
+        let override = !newOverride.isEmpty ? newer.paintColorOverride
+            : (!newExterior.isEmpty ? nil : paintColorOverride)
+        return VehicleAppearance(
+            exteriorColor: pick(newer.exteriorColor, exteriorColor),
+            paintColorOverride: override,
+            colorizerRemap: newer.hasPaint ? newer.colorizerRemap : colorizerRemap,
+            carType: pick(newer.carType, carType)
+        )
+    }
+
     private func trimmed(_ value: String?) -> String {
         value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }

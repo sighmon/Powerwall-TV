@@ -140,23 +140,16 @@ enum ShowroomStage {
     /// Glow colour for this car, as sRGB 0…1. Same order as ReflectiveFloor.get_paint_highlight_color:
     /// the table by paint name, then `calculate_highlight_for_paint_color` on the paint itself.
     static func highlight(for request: CarShowroomRequest) -> SIMD3<Float> {
-        let wrap = request.paintColorOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let keepsFileColour = request.model == .generic
-            || (request.model == .cybertruck && wrap.isEmpty)
-            || (request.browsesCatalogue && wrap.isEmpty)
-        if keepsFileColour {
+        switch ShowroomPaint.resolve(for: request) {
+        case .file:
             return rgb(highlightTable[fileHighlightName(for: request.model)] ?? 0xc1c1c1)
+        case .named(let paint):
+            if let hex = highlightTable[paint.name] { return rgb(hex) }
+            // Not in the floor's table: the app's formula on the app's own albedo.
+            return highlight(forPaint: rgb(TeslaPaint.table[paint.name]?.hex ?? paint.hex))
+        case .custom(let paint):
+            return highlight(forPaint: rgb(paint.hex))
         }
-        if let name = request.exteriorColor, let paint = TeslaPaint(exteriorColor: name),
-           let hex = highlightTable[paint.name] {
-            return rgb(hex)
-        }
-        let paint = TeslaPaint.resolve(
-            exteriorColor: request.exteriorColor,
-            paintColorOverride: request.paintColorOverride,
-            colorizerRemap: request.colorizerRemap
-        )
-        return highlight(forPaint: rgb(paint.hex))
     }
 
     /// Terrain.calculate_highlight_for_paint_color after Vehicle.remap_color (value × 0.325).

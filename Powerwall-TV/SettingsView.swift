@@ -545,6 +545,7 @@ struct SettingsView: View {
         HouseScenePose.removeStored()
         viewModel.clearVehicleChargeCache()
         viewModel.clearVehicleAppearanceCache()
+        ShowroomLastCar.clear()
         keepWindowInFront = false
         autoHideSummaryOnOverlap = true
         autoHideButtonsOnOverlap = true

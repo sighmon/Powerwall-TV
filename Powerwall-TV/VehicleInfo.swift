@@ -74,6 +74,7 @@ struct VehicleInfoPayload: Decodable {
         let tpmsPressureFR: Double?
         let tpmsPressureRL: Double?
         let tpmsPressureRR: Double?
+        let colorizerPaintRemapEnabled: Bool?
         let timestamp: Double?
 
         enum CodingKeys: String, CodingKey {
@@ -86,7 +87,21 @@ struct VehicleInfoPayload: Decodable {
             case tpmsPressureFR = "tpms_pressure_fr"
             case tpmsPressureRL = "tpms_pressure_rl"
             case tpmsPressureRR = "tpms_pressure_rr"
+            case colorizerPaintRemapEnabled = "colorizer_paint_remap_enabled"
             case timestamp
+        }
+    }
+
+    /// Paint and body, when the cached body includes `vehicle_config`.
+    struct Config: Decodable {
+        let exteriorColor: String?
+        let paintColorOverride: String?
+        let carType: String?
+
+        enum CodingKeys: String, CodingKey {
+            case exteriorColor = "exterior_color"
+            case paintColorOverride = "paint_color_override"
+            case carType = "car_type"
         }
     }
 
@@ -95,6 +110,7 @@ struct VehicleInfoPayload: Decodable {
     let climateState: Climate?
     let guiSettings: GUI?
     let vehicleState: State?
+    let vehicleConfig: Config?
 
     enum CodingKeys: String, CodingKey {
         case state
@@ -102,6 +118,7 @@ struct VehicleInfoPayload: Decodable {
         case climateState = "climate_state"
         case guiSettings = "gui_settings"
         case vehicleState = "vehicle_state"
+        case vehicleConfig = "vehicle_config"
     }
 }
 
@@ -132,6 +149,8 @@ struct VehicleInfo: Codable, Equatable {
     var guiTyrePressureUnits: String?
     /// Newest block `timestamp`: when the car last reported, not when we asked.
     var reportedAt: Date?
+    /// `vehicle_config` paint and body. Nil when the cached body had no `vehicle_config`.
+    var appearance: VehicleAppearance?
 
     var isCharging: Bool {
         chargingState?.caseInsensitiveCompare("Charging") == .orderedSame
@@ -145,7 +164,8 @@ struct VehicleInfo: Codable, Equatable {
         locked: Bool? = nil, sentryMode: Bool? = nil, odometerMiles: Double? = nil,
         softwareVersion: String? = nil, softwareUpdateStatus: String? = nil, tyrePressuresBar: [Double]? = nil,
         guiDistanceUnits: String? = nil, guiTemperatureUnits: String? = nil, guiTyrePressureUnits: String? = nil,
-        reportedAt: Date? = nil
+        reportedAt: Date? = nil,
+        appearance: VehicleAppearance? = nil
     ) {
         self.batteryLevel = batteryLevel
         self.chargingState = chargingState
@@ -168,6 +188,7 @@ struct VehicleInfo: Codable, Equatable {
         self.guiTemperatureUnits = guiTemperatureUnits
         self.guiTyrePressureUnits = guiTyrePressureUnits
         self.reportedAt = reportedAt
+        self.appearance = appearance
     }
 
     init(payload: VehicleInfoPayload) {
@@ -199,7 +220,16 @@ struct VehicleInfo: Codable, Equatable {
             reportedAt: [charge?.timestamp, climate?.timestamp, state?.timestamp]
                 .compactMap { $0 }
                 .max()
-                .map { Date(timeIntervalSince1970: $0 / 1000) }
+                .map { Date(timeIntervalSince1970: $0 / 1000) },
+            appearance: payload.vehicleConfig.flatMap { config in
+                let appearance = VehicleAppearance(
+                    exteriorColor: config.exteriorColor,
+                    paintColorOverride: config.paintColorOverride,
+                    colorizerRemap: state?.colorizerPaintRemapEnabled ?? false,
+                    carType: config.carType
+                )
+                return appearance.hasUsefulData ? appearance : nil
+            }
         )
     }
 
