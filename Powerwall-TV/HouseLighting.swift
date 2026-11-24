@@ -648,10 +648,10 @@ enum VehicleLamps {
 
     /// Colour multiplier for the housing atlas (the app uses ~0.1 and relies on reflections).
     /// 1 shows the atlas as authored: chrome and LED strips light grey to white, black stays black.
-    static let displayAlbedo: CGFloat = 1.0
+    static let displayAlbedo: CGFloat = 0.8
     /// The housing atlas also glows this much, so it reads under any lighting. Black atlas areas
     /// (trim, bezels) stay black because the glow is the atlas itself. This is not "lamps on".
-    static let emissionFloor: CGFloat = 0.2
+    static let emissionFloor: CGFloat = 0.1
     /// Housing roughness. Lower is glossier.
     static let housingRoughness: CGFloat = 0.35
     /// Used when the atlas or the texture coordinates are missing.

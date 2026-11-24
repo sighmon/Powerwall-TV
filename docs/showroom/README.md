@@ -172,8 +172,8 @@ Tuning knobs, all in `VehicleLamps` (`HouseLighting.swift`):
 
 | Knob | Value | Effect |
 | --- | --- | --- |
-| `displayAlbedo` | 1.0 | Housing atlas brightness. Chrome and LED strips are light grey to white; black stays black. |
-| `emissionFloor` | 0.2 | The atlas glows this much, so it reads under any lighting. Black areas stay black. Higher flattens the shading. |
+| `displayAlbedo` | 0.8 | Housing atlas brightness (1.0 was a touch bright). Chrome and LED strips are light grey; black stays black. |
+| `emissionFloor` | 0.1 | The atlas glows this much, so it reads under any lighting. Black areas stay black. Higher flattens the shading. |
 | `housingRoughness` | 0.35 | Housing gloss (lower is glossier) |
 | `lensTint` | 0.0 | Lens colour, from 0 (black) to 1 (white), blended in at `lensOpacity`. Grey veils the housing. |
 | `lensOpacity` | 0.12 | Lens opacity. Tesla's is 0.39 to 0.51. |

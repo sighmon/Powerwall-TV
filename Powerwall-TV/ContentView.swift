@@ -259,6 +259,13 @@ struct ContentView: View {
                     .padding()
                     .opacity(showMetrics ? 1 : 0)
 
+                if showsLoadingLabel {
+                    loadingLabel(sceneSize: sceneSize)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                        .padding()
+                        .opacity(showMetrics ? 1 : 0)
+                }
+
                 #if os(tvOS)
                 if hideControlsOverlay {
                     overlayRevealCatcher
@@ -1474,13 +1481,6 @@ struct ContentView: View {
             .reportFrame(.controlsOverlay)
             .overlayDarkChrome()
 
-            if showsLoadingLabel {
-                LoadingEllipsis()
-                    .fontWeight(.bold)
-                    .font(labelFont(for: sceneSize))
-                    .foregroundColor(.white)
-                    .opacity(0.6)
-            }
             }
 
             Spacer()
@@ -1757,7 +1757,29 @@ struct ContentView: View {
         startAnimations = false
     }
 
-    /// Shown beside the settings buttons, on their vertical centre, until the first sample arrives.
+    /// Centred horizontally at the bottom of the screen until the first sample arrives. It sits on
+    /// the same padding as the bottom-left buttons and is centred on their row height, so it lines
+    /// up with them. It doesn't take touches, so the buttons and the scene behind stay usable.
+    private func loadingLabel(sceneSize: CGSize) -> some View {
+        LoadingEllipsis()
+            .fontWeight(.bold)
+            .font(labelFont(for: sceneSize))
+            .foregroundColor(.white)
+            .opacity(0.6)
+            .frame(minHeight: loadingRowHeight)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("loadingLabel")
+    }
+
+    /// The bottom-left buttons' height, so the label shares their vertical centre.
+    private var loadingRowHeight: CGFloat {
+        #if os(tvOS)
+        80
+        #else
+        40
+        #endif
+    }
+
     private var showsLoadingLabel: Bool {
         if viewModel.ipAddress.isEmpty && viewModel.loginMode == .local { return false }
         if viewModel.data != nil { return false }

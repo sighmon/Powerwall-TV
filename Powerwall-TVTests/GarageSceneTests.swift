@@ -2342,7 +2342,8 @@ struct GarageSceneTests {
         #expect(housing.emission.contents != nil)
         #expect(abs(housing.emission.intensity - VehicleLamps.emissionFloor) < 0.001)
         #expect(VehicleLamps.emissionFloor > 0 && VehicleLamps.emissionFloor <= 0.35)
-        #expect(VehicleLamps.displayAlbedo >= 1)
+        // Turned down a little from 1.0 / 0.2 (b1075b1, 990b0d9), still well above the app's ~0.1.
+        #expect(VehicleLamps.displayAlbedo >= 0.5 && VehicleLamps.displayAlbedo < 1)
         #expect(housing.transparency == 1)
         #expect(housing.writesToDepthBuffer)
         let lensGlow = rgb(lens.emission.contents)
