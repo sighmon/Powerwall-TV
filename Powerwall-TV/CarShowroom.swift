@@ -2,8 +2,9 @@
 //  CarShowroom.swift
 //  Powerwall-TV
 //
-//  Fullscreen view of the car already parked in the garage, staged the way the
-//  Tesla app shows it (see ShowroomStage.swift). The house shell stays out of this scene.
+//  Fullscreen garage lineup, staged the way the Tesla app shows it (see ShowroomStage.swift):
+//  the account's own cars first, then every model Tesla sells with a buy link.
+//  The house shell stays out of this scene.
 //
 
 import SceneKit
@@ -19,8 +20,11 @@ struct CarShowroomRequest: Equatable, Identifiable {
     /// 1 in demo, where the paint hex is already a display colour. Live Fleet albedos use 4.
     var displayBoost: CGFloat
     var lines: [String]
-    /// No Fleet vehicle on the account. The cover can step through the exported models.
+    /// A model Tesla sells, with no Fleet stats. It shows a Buy a Tesla link and no info panel.
     var browsesCatalogue: Bool = false
+    /// The garage lineup this request opens on: the account's own cars first, then every
+    /// catalogue model. Empty for a single car. The arrows step through it.
+    var lineup: [CarShowroomRequest] = []
 
     var id: String { vin ?? model.rawValue }
 }
@@ -69,8 +73,10 @@ enum CarShowroom {
         VehicleModel.allCases.filter { $0 != .generic }
     }
 
-    /// The parked car when the house is showing one. Otherwise, when the account has no cars
-    /// and this is not the demo tour, the first catalogue model. An owner with nothing plugged in stays closed.
+    /// The garage lineup. The parked car comes first when the house is showing one, then the
+    /// other cars on the account (from `/api/1/products`), then every catalogue model with its buy link.
+    /// With no cars, or when products could not be read, it is the catalogue alone. Demo cars carry
+    /// the sample charge lines.
     static func select(
         data: PowerwallData?,
         fallbackVIN: String,
@@ -80,8 +86,9 @@ enum CarShowroom {
         charges: [String: VehicleChargeSnapshot],
         displayBoost: CGFloat,
         isDemoMode: Bool
-    ) -> CarShowroomRequest? {
-        if let owned = request(
+    ) -> CarShowroomRequest {
+        var owned: [CarShowroomRequest] = []
+        if let parked = request(
             data: data,
             fallbackVIN: fallbackVIN,
             appearances: appearances,
@@ -90,10 +97,62 @@ enum CarShowroom {
             charges: charges,
             displayBoost: displayBoost
         ) {
-            return isDemoMode ? DemoHouseTour.applyingExampleFleetData(to: owned) : owned
+            owned.append(parked)
         }
-        guard !isDemoMode, vehicles.isEmpty else { return nil }
-        return catalogueRequest(index: 0)
+        for vehicle in vehicles {
+            let vin = vehicle.vin.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !vin.isEmpty, !owned.contains(where: { $0.vin?.caseInsensitiveCompare(vin) == .orderedSame }) else { continue }
+            owned.append(ownedRequest(vin: vin, appearances: appearances, vehicles: vehicles, charges: charges, displayBoost: displayBoost))
+        }
+        if isDemoMode {
+            owned = owned.map(DemoHouseTour.applyingExampleFleetData)
+        }
+        return lineup(owned: owned)
+    }
+
+    /// Owned cars, then every catalogue model. The first entry carries the whole list.
+    static func lineup(owned: [CarShowroomRequest]) -> CarShowroomRequest {
+        let entries = owned.map { car -> CarShowroomRequest in
+            var car = car
+            car.browsesCatalogue = false
+            car.lineup = []
+            return car
+        } + catalogueModels.indices.map(catalogueRequest(index:))
+        var first = entries[0]
+        first.lineup = entries
+        return first
+    }
+
+    /// The car the arrows have reached. The index wraps. A single car is itself.
+    static func entry(in request: CarShowroomRequest, at index: Int) -> CarShowroomRequest {
+        guard !request.lineup.isEmpty else { return request }
+        return request.lineup[wrapped(index, count: request.lineup.count)]
+    }
+
+    /// A car on the account that is not parked: mesh from `car_type` or the VIN, paint from the last
+    /// `vehicle_data` the app already made, and any charge lines already stored. No Fleet call.
+    static func ownedRequest(
+        vin: String,
+        appearances: [String: VehicleAppearance],
+        vehicles: [FleetVehicle],
+        charges: [String: VehicleChargeSnapshot],
+        displayBoost: CGFloat
+    ) -> CarShowroomRequest {
+        let appearance = appearances[vin] ?? appearances.first { $0.key.caseInsensitiveCompare(vin) == .orderedSame }?.value
+        let model = GarageVehicleModel.resolve(vin: vin, carType: appearance?.carType)
+        let exterior = appearance?.exteriorColor?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let wrap = appearance?.paintColorOverride?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var name = displayName(vin: vin, vehicles: vehicles)
+        if name == "Vehicle", model != .generic { name = catalogueName(model) }
+        return CarShowroomRequest(
+            vin: vin,
+            model: model,
+            exteriorColor: exterior?.isEmpty == false ? exterior : nil,
+            paintColorOverride: wrap?.isEmpty == false ? wrap : nil,
+            colorizerRemap: appearance?.colorizerRemap ?? false,
+            displayBoost: displayBoost,
+            lines: statLines(displayName: name, exteriorColor: exterior?.isEmpty == false ? exterior : nil, snapshot: charge(for: vin, in: charges))
+        )
     }
 
     /// One exported model, with no Fleet stats. The index wraps.
@@ -505,8 +564,10 @@ struct CarShowroomOrbit: Equatable {
 
 struct CarShowroomView: View {
     let request: CarShowroomRequest
-    /// `vehicle_data_cached` rows for the owned car, or the demo sample. Nil hides the panel.
-    var info: VehicleInfo? = nil
+    /// `vehicle_data_cached` rows for an owned car, or the demo sample. Nil hides the panel.
+    var info: (CarShowroomRequest) -> VehicleInfo? = { _ in nil }
+    /// Runs while one car is on stage and is cancelled when the arrows move on or the showroom closes.
+    var whileShowing: (CarShowroomRequest) async -> Void = { _ in }
     var onDismiss: () -> Void
     /// Same key as Settings → Display → Tyre pressure. The details tap only writes this; it never calls Fleet.
     @AppStorage(TyrePressureSetting.storageKey) private var tyrePressureSetting = TyrePressureSetting.automatic.rawValue
@@ -524,11 +585,14 @@ struct CarShowroomView: View {
     }
     @FocusState private var showroomFocus: ShowroomFocus?
 
-    /// Left and right move between the catalogue arrows. Up walks to Buy a Tesla, then Close.
-    /// Down from those returns to the next-car arrow. Elsewhere, up and down change colour.
+    /// Left and right move between the lineup arrows. Up walks to Buy a Tesla on a catalogue car,
+    /// or the details panel on an owned car, then Close. Down from those returns to the next-car arrow.
+    /// Elsewhere, up and down change colour.
     private struct ShowroomRemote: ViewModifier {
         let item: ShowroomFocus
         let browses: Bool
+        var hasBuy = false
+        var hasDetails = false
         var focus: FocusState<ShowroomFocus?>.Binding
         let shift: (Int) -> Void
 
@@ -544,10 +608,10 @@ struct CarShowroomView: View {
                 case .right where browses:
                     focus.wrappedValue = .next
                 case .up where browses && (item == .previous || item == .next):
-                    focus.wrappedValue = .buy
-                case .up where browses && item == .buy:
+                    focus.wrappedValue = hasBuy ? .buy : (hasDetails ? .details : .close)
+                case .up where browses && (item == .buy || item == .details):
                     focus.wrappedValue = .close
-                case .down where browses && (item == .buy || item == .close):
+                case .down where browses && (item == .buy || item == .details || item == .close):
                     focus.wrappedValue = .next
                 case .up:
                     shift(1)
@@ -561,8 +625,14 @@ struct CarShowroomView: View {
     }
     #endif
 
+    /// More than one car: the arrows show.
+    private var browses: Bool { request.lineup.count > 1 }
+
+    /// The lineup car the arrows have reached, before any colour step.
+    private var current: CarShowroomRequest { CarShowroom.entry(in: request, at: browseIndex) }
+
     private var displayed: CarShowroomRequest {
-        var shown = request.browsesCatalogue ? CarShowroom.catalogueRequest(index: browseIndex) : request
+        var shown = current
         guard let colourIndex, shown.model != .generic else { return shown }
         let paint = TeslaPaint.catalogue[colourIndex % TeslaPaint.catalogue.count]
         shown.exteriorColor = paint.name
@@ -607,7 +677,7 @@ struct CarShowroomView: View {
                     .padding(.trailing, chromeInset(proxy.safeAreaInsets.trailing))
             }
             .overlay(alignment: .bottomLeading) {
-                if request.browsesCatalogue {
+                if browses {
                     catalogueArrows
                         .padding(.leading, chromeInset(proxy.safeAreaInsets.leading))
                         .padding(.bottom, chromeInset(proxy.safeAreaInsets.bottom))
@@ -625,9 +695,10 @@ struct CarShowroomView: View {
                 scene = CarShowroom.scene(for: displayed)
             }
         }
+        .task(id: current.id) { await whileShowing(current) }
         #if os(tvOS)
         .focusSection()
-        .defaultFocus($showroomFocus, request.browsesCatalogue ? .next : .close, priority: .userInitiated)
+        .defaultFocus($showroomFocus, browses ? .next : .close, priority: .userInitiated)
         #endif
         #if !os(iOS)
         .onExitCommand(perform: onDismiss)
@@ -659,11 +730,11 @@ struct CarShowroomView: View {
                     .font(labelFont)
                     .opacity(0.6)
             }
-            if !request.browsesCatalogue, let info {
+            if !current.browsesCatalogue, let info = info(current) {
                 vehicleInfoPanel(info, labelFont: labelFont)
                     .padding(.top, 12)
             }
-            if request.browsesCatalogue {
+            if current.browsesCatalogue {
                 Link("Buy a Tesla", destination: CarShowroom.orderURL(for: displayed.model))
                     .fontWeight(.bold)
                     .font(labelFont)
@@ -672,13 +743,19 @@ struct CarShowroomView: View {
                     .accessibilityLabel("Buy a Tesla")
                     #if os(tvOS)
                     .focused($showroomFocus, equals: .buy)
-                    .modifier(ShowroomRemote(item: .buy, browses: true, focus: $showroomFocus, shift: { shiftColour($0) }))
+                    .modifier(ShowroomRemote(item: .buy, browses: browses, hasBuy: true, focus: $showroomFocus, shift: { shiftColour($0) }))
                     #endif
             }
         }
         .foregroundColor(.white)
         .multilineTextAlignment(.leading)
         .frame(width: width, alignment: .leading)
+    }
+
+    /// The owned car's panel is a button only when it has a tyre row to step.
+    private var detailsFocusable: Bool {
+        guard !current.browsesCatalogue, let info = info(current) else { return false }
+        return info.nextPressureSetting(current: pressureSetting) != nil
     }
 
     private var pressureSetting: TyrePressureSetting {
@@ -702,7 +779,7 @@ struct CarShowroomView: View {
             .accessibilityHint("Shows tyre pressure in \(next.title)")
             #if os(tvOS)
             .focused($showroomFocus, equals: .details)
-            .modifier(ShowroomRemote(item: .details, browses: false, focus: $showroomFocus, shift: { shiftColour($0) }))
+            .modifier(ShowroomRemote(item: .details, browses: browses, hasDetails: true, focus: $showroomFocus, shift: { shiftColour($0) }))
             #endif
         } else {
             vehicleInfoRows(info, labelFont: labelFont)
@@ -765,7 +842,7 @@ struct CarShowroomView: View {
         .accessibilityLabel("Close")
         #if os(tvOS)
         .focused($showroomFocus, equals: .close)
-        .modifier(ShowroomRemote(item: .close, browses: request.browsesCatalogue, focus: $showroomFocus, shift: { shiftColour($0) }))
+        .modifier(ShowroomRemote(item: .close, browses: browses, focus: $showroomFocus, shift: { shiftColour($0) }))
         #else
         .keyboardShortcut(.cancelAction)
         #endif
@@ -811,7 +888,14 @@ struct CarShowroomView: View {
         .accessibilityLabel(title)
         #if os(tvOS)
         .focused($showroomFocus, equals: delta > 0 ? .next : .previous)
-        .modifier(ShowroomRemote(item: delta > 0 ? .next : .previous, browses: true, focus: $showroomFocus, shift: { shiftColour($0) }))
+        .modifier(ShowroomRemote(
+            item: delta > 0 ? .next : .previous,
+            browses: true,
+            hasBuy: current.browsesCatalogue,
+            hasDetails: detailsFocusable,
+            focus: $showroomFocus,
+            shift: { shiftColour($0) }
+        ))
         #else
         .keyboardShortcut(key, modifiers: [])
         #endif
@@ -856,8 +940,10 @@ struct CarShowroomView: View {
     }
 
     private func step(_ delta: Int) {
-        guard request.browsesCatalogue, !CarShowroom.catalogueModels.isEmpty else { return }
+        guard browses else { return }
         browseIndex += delta
+        // An owned car always comes back in its own paint. Catalogue cars keep the colour being tried.
+        if !current.browsesCatalogue { colourIndex = nil }
         scene = CarShowroom.scene(for: displayed)
     }
 

@@ -301,6 +301,57 @@ has unnamed exterior surfaces. The B pillars sit on the `Interior` mesh, which i
 outer cover is on its Trim surface and the inner trim on its `Pillar` surface. The converter keeps
 the triangles of those two surfaces between the door windows, as a gloss black `Pillar` material.
 
+## Garage lineup: the account's cars, then the catalogue
+
+A garage tap (the garage door, the parked car, the charging readout, or the tvOS car button) first
+asks Fleet `GET /api/1/products` which cars are on the account, then opens one lineup:
+
+1. The car parked in the garage, when the house is showing one.
+2. The other cars on the account, in the order Fleet lists them. Each uses its own mesh (from
+   `vehicle_config.car_type` when the app already has it, otherwise the VIN), its last known paint and
+   charge lines, and the vehicle info panel. These have no buy link.
+3. Every catalogue model, each with its Buy a Tesla link and no info panel.
+
+The arrows step through the whole lineup and wrap. An account with no cars gets the catalogue alone,
+so it looks the same as before. Owned cars always come back in their own paint. A colour being tried on
+the catalogue carries from one model to the next.
+
+| Case | What opens |
+| --- | --- |
+| Products lists cars | Those cars (the parked one first), then the catalogue |
+| Products lists no cars | The catalogue |
+| Products fails, times out, 401/403, or no token | Whatever cars are already known, otherwise the catalogue |
+| Local gateway login | Cars already known (usually none), then the catalogue. No Fleet call |
+| Demo | The demo car with the sample lines, then the catalogue. No Fleet call |
+
+### The products check (`checkConnectedVehicles`, `ConnectedVehicleCheck`)
+
+- It only runs on a tap. Nothing polls. Products lists the account's cars without contacting them, so it
+  never wakes a car, and the check never calls `vehicle_data` or `wake_up`.
+- An answer is reused for 10 minutes (`ConnectedVehicleCheck.maxAge`, memory only). Taps during a request
+  share it. A failure is not cached, so the next tap tries again.
+- The request times out after 4 seconds (`ConnectedVehicleCheck.timeout`). The garage opens with what is
+  known half a second after that even if products has not answered, so a tap never hangs. While it waits,
+  the bottom Loading… line shows and other taps are ignored.
+- A failure never sets the home screen's error message. A 401 runs the existing token refresh.
+- Cars found are merged into the same `vehicles` list the rest of the app uses. The vehicle chips still
+  follow Settings → Show vehicles. Resetting settings (`clearVehicleChargeCache`) forgets the last answer.
+- Fleet's products entries for cars carry a VIN and usually no `device_type`. Energy sites carry
+  `energy_site_id`. `Product.fleetVehicle` takes an entry with `device_type` `vehicle`, or with a VIN and no
+  `energy_site_id`. Duplicate VINs are dropped.
+- Stepping to an owned car in the lineup can make that car's throttled `vehicle_data_cached` call (see
+  below). The catalogue cars never call.
+- Cost: at most one products call per 10 minutes, and only after a tap. At $0.002 per call, that is a
+  fraction of a cent a day.
+
+### OAuth scopes
+
+The app asks for `openid energy_device_data vehicle_device_data energy_cmds offline_access`. Products only
+lists cars when the account owner granted vehicle data (`vehicle_device_data`) to the app. Tesla's consent
+screen lets them untick it. With it unticked, products should list energy sites only, so the garage
+shows the catalogue. Signing in again and allowing vehicle
+information fixes that. A shared driver (not the owner) may also see fewer cars.
+
 ## Vehicle info panel and its Fleet call budget
 
 The showroom's left column puts battery and charging on one line (`80% battery · Charging`), then
@@ -367,7 +418,8 @@ The data can be hours old, so the panel's last row says how old it is.
 ### Throttling (`VehicleInfoRefreshPolicy`)
 
 - Calls only happen while the showroom is open. Its SwiftUI `.task` checks the policy once a minute and is
-  cancelled when the showroom closes. Nothing polls in the background, and the catalogue cars never call.
+  cancelled when the showroom closes or the arrows move to another car. Nothing polls in the background, and
+  the catalogue cars never call.
 - One call per car at a time. A second check while one is in flight does nothing.
 - Results are kept in memory and in `UserDefaults` (`fleetVehicleInfoCache`), together with the throttle
   state, so reopening the showroom or relaunching the app does not reset the clock. Cached info older than a

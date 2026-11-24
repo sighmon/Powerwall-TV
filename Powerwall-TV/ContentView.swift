@@ -148,6 +148,9 @@ struct ContentView: View {
     @State private var houseCallouts: HouseCalloutPoints?
     @State private var carShowroom: CarShowroomRequest?
     @State private var showroomTransition = CarShowroomTransition()
+    /// A garage tap is waiting on the products check. Further taps are ignored until it opens.
+    @State private var showroomOpenPending = false
+    @State private var showroomOpenAttempt = 0
     @State private var showroomTransitionID = 0
     @State private var showroomTransitionSettled = true
     @FocusState private var hasKeyboardFocus: Bool
@@ -259,7 +262,8 @@ struct ContentView: View {
                     .padding()
                     .opacity(showMetrics ? 1 : 0)
 
-                if showsLoadingLabel {
+                // A garage tap waiting on the products check shows the same Loading… line.
+                if showsLoadingLabel || showroomOpenPending {
                     loadingLabel(sceneSize: sceneSize)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                         .padding()
@@ -426,11 +430,15 @@ struct ContentView: View {
 #endif
         .overlay {
             if let request = carShowroom {
-                CarShowroomView(request: request, info: showroomInfo(for: request), onDismiss: closeCarShowroom)
+                CarShowroomView(
+                    request: request,
+                    info: { showroomInfo(for: $0) },
+                    whileShowing: { await refreshShowroomInfoWhileOpen($0) },
+                    onDismiss: closeCarShowroom
+                )
                     .ignoresSafeArea()
                     .transition(.identity)
                     .opacity(showroomTransition.showroomOpacity)
-                    .task(id: request.id) { await refreshShowroomInfoWhileOpen(request) }
             }
         }
         .task(id: weatherPrefetchIdentity) {
@@ -1207,16 +1215,27 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    /// True when the account already has a car. Demo cars count. An empty Fleet list does not.
-    private var userOwnsCars: Bool {
-        viewModel.isDemoMode || !viewModel.vehicles.isEmpty
+    /// Garage door, parked car, and the charging readout. Asks `/api/1/products` for the account's
+    /// cars first (reused for ten minutes, never wakes a car), then opens the lineup: those cars,
+    /// then every model with a buy link. The garage opens after `ConnectedVehicleCheck.timeout`
+    /// with what is already known if products is slow. Demo and local logins open at once.
+    private func openCarShowroom() {
+        guard showroomTransitionSettled, carShowroom == nil, !showroomOpenPending else { return }
+        showroomOpenPending = true
+        showroomOpenAttempt += 1
+        let attempt = showroomOpenAttempt
+        let open = {
+            guard showroomOpenPending, attempt == showroomOpenAttempt else { return }
+            showroomOpenPending = false
+            presentCarShowroom()
+        }
+        viewModel.checkConnectedVehicles(completion: open)
+        DispatchQueue.main.asyncAfter(deadline: .now() + ConnectedVehicleCheck.timeout + 0.5, execute: open)
     }
 
-    /// Garage door, parked car, and the charging readout. A parked car wins. With no cars on the
-    /// account, the garage opens the model catalogue instead.
-    private func openCarShowroom() {
+    private func presentCarShowroom() {
         guard showroomTransitionSettled, carShowroom == nil else { return }
-        guard let request = CarShowroom.select(
+        let request = CarShowroom.select(
             data: viewModel.data,
             fallbackVIN: viewModel.lastChargingWallConnectorVIN,
             appearances: viewModel.vehicleAppearances,
@@ -1225,7 +1244,7 @@ struct ContentView: View {
             charges: viewModel.vehicleChargeStates,
             displayBoost: viewModel.isDemoMode ? 1 : 4,
             isDemoMode: viewModel.isDemoMode
-        ) else { return }
+        )
         showroomTransitionSettled = false
         showroomTransitionID += 1
         let transitionID = showroomTransitionID
@@ -1375,7 +1394,7 @@ struct ContentView: View {
                 .accessibilityLabel("Settings")
 
                 #if os(tvOS)
-                if showsHouseScene, viewModel.garagePresentation.showVehicle || !userOwnsCars {
+                if showsHouseScene {
                     Button(action: {
                         revealAutoHiddenOverlays()
                         openCarShowroom()

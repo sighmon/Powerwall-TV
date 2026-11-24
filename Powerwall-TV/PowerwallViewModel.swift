@@ -196,6 +196,10 @@ class PowerwallViewModel: ObservableObject {
     private var lastVehicleDataFetchAt: [String: Date] = [:]
     private var lastVehicleDataAttemptAt: [String: Date] = [:]
     private var isFetchingVehicleList = false
+    /// Last garage-tap `/api/1/products` answer. Memory only, so a relaunch checks again.
+    private var connectedVehiclesCheckedAt: Date?
+    /// Garage taps waiting on the one products request in flight.
+    private var connectedVehicleWaiters: [() -> Void] = []
     private var vehicleDataFetchesInFlight = Set<String>()
     private var vehicleDataHandledForCurrentConnection = Set<String>()
     private var vehicleDataForbiddenForCurrentConnection = Set<String>()
@@ -295,7 +299,7 @@ class PowerwallViewModel: ObservableObject {
 
     // URLSession instances
     private var localURLSession: URLSession  // For local, insecure connections
-    private let fleetURLSession: URLSession = {  // For Fleet API
+    private var fleetURLSession: URLSession = {  // For Fleet API
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 9 // seconds (e.g., request-level timeout)
         config.timeoutIntervalForResource = 9 // seconds (e.g., download task timeout)
@@ -339,6 +343,12 @@ class PowerwallViewModel: ObservableObject {
         self.localURLSession = localURLSession
     }
 
+    /// Tests point Fleet calls at a stub session.
+    convenience init(fleetURLSession: URLSession) {
+        self.init()
+        self.fleetURLSession = fleetURLSession
+    }
+
     private func persistVehicleChargeCache() {
         let cache = lastVehicleDataFetchAt.reduce(into: [String: CachedVehicleChargeSnapshot]()) { result, entry in
             result[entry.key] = CachedVehicleChargeSnapshot(
@@ -363,6 +373,7 @@ class PowerwallViewModel: ObservableObject {
 
     func clearVehicleChargeCache() {
         vehicleChargeCacheGeneration &+= 1
+        connectedVehiclesCheckedAt = nil
         vehicleChargeStates.removeAll()
         lastVehicleDataFetchAt.removeAll()
         lastVehicleDataAttemptAt.removeAll()
@@ -1566,6 +1577,57 @@ class PowerwallViewModel: ObservableObject {
         }
     }
 
+    // MARK: Garage products check
+
+    /// Garage tap: asks `/api/1/products` which cars are on the account, then calls `completion` on
+    /// the main queue. Products lists cars without waking them, and nothing here calls `vehicle_data`.
+    /// An answer younger than `ConnectedVehicleCheck.maxAge` is reused, and taps during a request
+    /// share it. Demo, local logins and a missing token complete at once with no request.
+    /// A failure leaves `vehicles` as it was, so the garage falls back to what is already known.
+    func checkConnectedVehicles(now: Date = Date(), completion: @escaping () -> Void) {
+        guard ConnectedVehicleCheck.shouldFetch(
+            isDemoMode: isDemoMode,
+            isFleetLogin: loginMode == .fleetAPI,
+            hasToken: !accessToken.isEmpty,
+            checkedAt: connectedVehiclesCheckedAt,
+            now: now
+        ), let url = URL(string: "\(fleetBaseURL)/api/1/products") else {
+            completion()
+            return
+        }
+        connectedVehicleWaiters.append(completion)
+        guard connectedVehicleWaiters.count == 1 else { return }
+
+        let requestCacheGeneration = vehicleChargeCacheGeneration
+        var request = URLRequest(url: url, timeoutInterval: ConnectedVehicleCheck.timeout)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        logVehicleDebug("GET /products for garage start")
+
+        fleetURLSession.dataTask(with: request) { [weak self] data, response, error in
+            let status = (response as? HTTPURLResponse)?.statusCode
+            let found: [FleetVehicle]? = (error == nil && status == 200)
+                ? data.flatMap { try? ProductsResponse.vehicles(from: $0) }
+                : nil
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if requestCacheGeneration == self.vehicleChargeCacheGeneration {
+                    if let found {
+                        self.logVehicleDebug("GET /products for garage vehicles=\(found.count)")
+                        self.mergeVehicles(found)
+                        self.connectedVehiclesCheckedAt = now
+                    } else {
+                        self.logVehicleDebug("GET /products for garage failed status=\(status.map { String($0) } ?? "nil")")
+                        if status == 401 { self.refreshAccessToken() }
+                    }
+                }
+                let waiters = self.connectedVehicleWaiters
+                self.connectedVehicleWaiters.removeAll()
+                waiters.forEach { $0() }
+            }
+        }.resume()
+    }
+
     // MARK: Showroom vehicle info
 
     /// Memory copy first, then the disk copy loaded at launch. Nil after a day, or for an unknown VIN.
@@ -2139,7 +2201,39 @@ struct TokenResponse: Codable {
 
 struct ProductsResponse: Codable {
     let response: [Product]
-    let count: Int
+    let count: Int?
+
+    /// Cars on the account, in Fleet order, one per VIN. Energy sites are skipped.
+    var vehicles: [FleetVehicle] {
+        var seen = Set<String>()
+        return response.compactMap(\.fleetVehicle).filter { seen.insert($0.vin.uppercased()).inserted }
+    }
+
+    static func vehicles(from data: Data) throws -> [FleetVehicle] {
+        try JSONDecoder().decode(ProductsResponse.self, from: data).vehicles
+    }
+}
+
+/// When a garage tap asks `/api/1/products` which cars are on the account. Products lists the
+/// account's cars without waking any of them. Demo, local gateway logins and a missing token never ask.
+enum ConnectedVehicleCheck {
+    /// A tap inside this window reuses the last answer.
+    static let maxAge: TimeInterval = 10 * 60
+    /// The garage opens with what is known once this passes, even if products has not answered.
+    static let timeout: TimeInterval = 4
+
+    static func shouldFetch(
+        isDemoMode: Bool,
+        isFleetLogin: Bool,
+        hasToken: Bool,
+        checkedAt: Date?,
+        now: Date,
+        maxAge: TimeInterval = maxAge
+    ) -> Bool {
+        guard !isDemoMode, isFleetLogin, hasToken else { return false }
+        guard let checkedAt else { return true }
+        return now.timeIntervalSince(checkedAt) >= maxAge || now < checkedAt
+    }
 }
 
 struct FleetVehiclesResponse: Codable {
@@ -2231,8 +2325,11 @@ struct Product: Codable {
         .first
     }
 
+    /// Fleet's products list tags energy sites with `energy_site_id`. Car entries carry a VIN and
+    /// usually no `device_type`, so an untyped entry with a VIN and no site counts as a car.
     var fleetVehicle: FleetVehicle? {
-        guard deviceType == "vehicle",
+        let type = deviceType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        guard type == "vehicle" || (type.isEmpty && energySiteId == nil),
               let normalizedVIN = vin?.trimmingCharacters(in: .whitespacesAndNewlines),
               !normalizedVIN.isEmpty else {
             return nil

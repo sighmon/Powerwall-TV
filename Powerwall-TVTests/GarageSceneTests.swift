@@ -2638,7 +2638,7 @@ struct GarageSceneTests {
         #expect(returned.showroomOpacity == 0)
     }
 
-    @Test func showroomCatalogueCyclesModelsWhenTheAccountHasNoCars() {
+    @Test func showroomLineupIsTheCatalogueWhenTheAccountHasNoCars() {
         let idle = PowerwallData(
             battery: .init(instantPower: 0, count: 1),
             load: .init(instantPower: 0),
@@ -2658,9 +2658,11 @@ struct GarageSceneTests {
         )
         let models = CarShowroom.catalogueModels
         #expect(models == VehicleModel.allCases.filter { $0 != .generic })
-        #expect(shopper?.browsesCatalogue == true)
-        #expect(shopper?.model == models.first)
-        #expect(shopper?.lines == [CarShowroom.catalogueName(models[0])])
+        #expect(shopper.browsesCatalogue == true)
+        #expect(shopper.model == models.first)
+        #expect(shopper.lines == [CarShowroom.catalogueName(models[0])])
+        #expect(shopper.lineup.map(\.model) == models)
+        #expect(shopper.lineup.allSatisfy(\.browsesCatalogue))
 
         let owner = CarShowroom.select(
             data: idle,
@@ -2672,7 +2674,10 @@ struct GarageSceneTests {
             displayBoost: 4,
             isDemoMode: false
         )
-        #expect(owner == nil)
+        // An owner with nothing plugged in still opens: their car, then the catalogue.
+        #expect(owner.vin == "5YJYGDEE5LF000001")
+        #expect(owner.browsesCatalogue == false)
+        #expect(owner.lineup.count == models.count + 1)
         let demo = CarShowroom.select(
             data: idle,
             fallbackVIN: "",
@@ -2683,7 +2688,7 @@ struct GarageSceneTests {
             displayBoost: 1,
             isDemoMode: true
         )
-        #expect(demo == nil)
+        #expect(demo.lineup.map(\.model) == models)
         let parkedDemo = DemoHouseTour.parkedCar(at: 1)
         let demoCharging = PowerwallData(
             battery: .init(instantPower: 0, count: 1),
@@ -2702,8 +2707,8 @@ struct GarageSceneTests {
             displayBoost: 1,
             isDemoMode: true
         )
-        let demoLines = demoShowroom?.lines.joined(separator: "\n") ?? ""
-        #expect(demoShowroom?.lines.contains("80% battery · Charging") == true)
+        let demoLines = demoShowroom.lines.joined(separator: "\n")
+        #expect(demoShowroom.lines.contains("80% battery · Charging") == true)
         #expect(demoLines.contains("45 minutes to full charge"))
         #expect(demoLines.contains(parkedDemo.vehicle.displayName))
 
@@ -2744,8 +2749,113 @@ struct GarageSceneTests {
             displayBoost: 4,
             isDemoMode: false
         )
-        #expect(parked?.browsesCatalogue == false)
-        #expect(parked?.vin == GaragePresentation.connectedVIN(wallConnectors: charging.wallConnectors, fallbackVIN: ""))
+        #expect(parked.browsesCatalogue == false)
+        #expect(parked.vin == GaragePresentation.connectedVIN(wallConnectors: charging.wallConnectors, fallbackVIN: ""))
+    }
+
+    private static let idleGarage = PowerwallData(
+        battery: .init(instantPower: 0, count: 1),
+        load: .init(instantPower: 0),
+        solar: .init(instantPower: 0, energyExported: 0),
+        site: .init(instantPower: 0),
+        wallConnectors: []
+    )
+
+    /// Products found two cars: they come first, with no buy link, then every model with one.
+    @Test func garageLineupPutsTheAccountsCarsBeforeTheCatalogue() {
+        let models = CarShowroom.catalogueModels
+        let charging = PowerwallData(
+            battery: .init(instantPower: 0, count: 1),
+            load: .init(instantPower: 0),
+            solar: .init(instantPower: 0, energyExported: 0),
+            site: .init(instantPower: 0),
+            wallConnectors: [.init(vin: "5YJ3GDEE5RF000001", din: "1", wallConnectorState: 1, wallConnectorPower: 7000)]
+        )
+        let vehicles = [
+            FleetVehicle(vin: "5YJYGDEE5LF000001", displayName: "Test Car", state: "asleep"),
+            FleetVehicle(vin: "5YJ3GDEE5RF000001", displayName: nil, state: "online"),
+            FleetVehicle(vin: "7G2C12345RF000001", displayName: nil, state: "offline"),
+        ]
+        let appearances = ["5YJYGDEE5LF000001": VehicleAppearance(exteriorColor: "PearlWhite", paintColorOverride: nil, colorizerRemap: false, carType: "modely")]
+        let request = CarShowroom.select(
+            data: charging,
+            fallbackVIN: "",
+            appearances: appearances,
+            solar: .panels,
+            vehicles: vehicles,
+            charges: ["5YJYGDEE5LF000001": VehicleChargeSnapshot(batteryLevel: 64, chargingState: "Stopped", minutesToFullCharge: nil)],
+            displayBoost: 4,
+            isDemoMode: false
+        )
+        let lineup = request.lineup
+        // The charging car first, then the rest of the account in Fleet order, then the catalogue.
+        #expect(lineup.prefix(3).map(\.vin) == ["5YJ3GDEE5RF000001", "5YJYGDEE5LF000001", "7G2C12345RF000001"])
+        #expect(lineup.prefix(3).map(\.model) == [.model3Highland, .modelY, .cybertruck])
+        #expect(lineup.prefix(3).allSatisfy { !$0.browsesCatalogue && $0.displayBoost == 4 && $0.lineup.isEmpty })
+        #expect(lineup.dropFirst(3).map(\.model) == models)
+        #expect(lineup.dropFirst(3).allSatisfy { $0.browsesCatalogue && $0.vin == nil })
+        #expect(request.vin == "5YJ3GDEE5RF000001")
+        #expect(lineup[1].exteriorColor == "PearlWhite")
+        #expect(lineup[1].lines.first?.hasPrefix("Test Car") == true)
+        #expect(lineup[1].lines.contains("64% battery · Stopped"))
+        // No display name: the model name, never a buy link.
+        #expect(lineup[2].lines == ["Cybertruck"])
+        #expect(Set(lineup.map(\.id)).count == lineup.count)
+
+        #expect(CarShowroom.entry(in: request, at: 0).vin == "5YJ3GDEE5RF000001")
+        #expect(CarShowroom.entry(in: request, at: 3).model == models.first)
+        #expect(CarShowroom.entry(in: request, at: lineup.count) == lineup[0])
+        #expect(CarShowroom.entry(in: request, at: -1).model == models.last)
+        let single = CarShowroom.catalogueRequest(index: 0)
+        #expect(CarShowroom.entry(in: single, at: 5) == single)
+    }
+
+    /// No cars, an error, or no login all leave `vehicles` empty: the catalogue alone, each with a buy link.
+    @Test func noCarsOrAFailedCheckFallsBackToTheCatalogue() {
+        let request = CarShowroom.select(
+            data: nil,
+            fallbackVIN: "",
+            appearances: [:],
+            solar: .panels,
+            vehicles: [],
+            charges: [:],
+            displayBoost: 4,
+            isDemoMode: false
+        )
+        #expect(request == CarShowroom.lineup(owned: []))
+        #expect(request.lineup.map(\.model) == CarShowroom.catalogueModels)
+        #expect(request.lineup.allSatisfy(\.browsesCatalogue))
+        let blank = CarShowroom.select(
+            data: Self.idleGarage,
+            fallbackVIN: "",
+            appearances: [:],
+            solar: .panels,
+            vehicles: [FleetVehicle(vin: "  ", displayName: "Blank", state: nil)],
+            charges: [:],
+            displayBoost: 4,
+            isDemoMode: false
+        )
+        #expect(blank.lineup.count == CarShowroom.catalogueModels.count)
+    }
+
+    /// Demo never calls Fleet: its own car comes first with the sample lines, then the catalogue.
+    @Test func demoGarageShowsTheDemoCarThenTheCatalogue() {
+        let demoCar = DemoHouseTour.vehicle(at: 3)
+        let request = CarShowroom.select(
+            data: Self.idleGarage,
+            fallbackVIN: "",
+            appearances: [:],
+            solar: .panels,
+            vehicles: [FleetVehicle(vin: demoCar.vin, displayName: demoCar.displayName, state: "online")],
+            charges: [:],
+            displayBoost: 1,
+            isDemoMode: true
+        )
+        #expect(request.vin == demoCar.vin)
+        #expect(request.model == demoCar.model)
+        #expect(!request.browsesCatalogue)
+        #expect(request.lines.contains("80% battery · Charging"))
+        #expect(request.lineup.dropFirst().map(\.model) == CarShowroom.catalogueModels)
     }
 
     private func ribbonColor(_ material: SCNMaterial, matches color: PowerFlowColor?) -> Bool {
