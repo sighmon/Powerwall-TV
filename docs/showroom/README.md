@@ -320,17 +320,50 @@ down is dropped when the arrows move on, so it never carries to the next car.
 
 An owned car's paint comes from the first of these that knows it:
 
-1. `vehicle_config` (`exterior_color`, `paint_color_override`, `car_type`) from the live `vehicle_data`
-   charge call, or from `vehicle_data_cached` when its body includes `vehicle_config`. It is saved per VIN
-   in `UserDefaults` (`fleetVehicleAppearanceCache`), so the next open draws the right colour before any
-   call. A field missing from a newer reply keeps the saved value.
-2. Products (or `/vehicles`) `color`, which is often null, then the paint code in `option_codes`.
-3. Nothing known: the colour exported in the car's file, the same as a catalogue car. It used to be the
-   Tesla app's dark fallback grey.
+1. `vehicle_config` (`exterior_color`, `paint_color_override`, `car_type`), saved per VIN in
+   `UserDefaults` (`fleetVehicleAppearanceCache`), so the next open draws the right colour before any
+   call. A field missing from a newer reply keeps the saved value. It comes from either:
+   - the live charge call for a plugged-in car (`vehicle_data?endpoints=charge_state;vehicle_config;vehicle_state`), or
+   - the showroom paint call below, for any account car on stage whose paint is not known.
+2. Products `color`, when Tesla fills it in (usually null). It can be a name or a paint code.
+3. Nothing known: the Tesla app's neutral fallback grey with a grey glow, and no colour in the title.
 
-A reply that arrives while the showroom is open repaints the car on stage and its glow at once
-(`CarShowroom.repainted`, then one scene rebuild). The home garage uses the same per-VIN store, so a
-`vehicle_data_cached` reply also fixes the parked car's paint there.
+Fleet sources that are never used for paint:
+
+- `vehicle_data_cached`. Tesla documents that it only has `charge_state`, `climate_state`,
+  `gui_settings` and `vehicle_state`, never `vehicle_config`. The app still reads `vehicle_config` if it
+  ever appears.
+- `option_codes` on products and `/vehicles`. Tesla stopped filling it in: it is null, or the same generic
+  Model 3 list for every car. Using it would give every car the same wrong colour.
+- The car file's own colour. Highland's is blue and Model Y's is Pearl White, so an unknown car used to
+  look like a real but wrong paint. Catalogue cars, Generic and a stainless Cybertruck still use it.
+
+#### The showroom paint call (`fetchVehiclePaintIfNeeded`, `VehiclePaintFetchPolicy`)
+
+While an account car with no known paint is on stage, the showroom asks
+`GET /api/1/vehicles/{vin}/vehicle_data?endpoints=vehicle_config`. A 400 retries once without the filter.
+
+- It never calls `wake_up`. An asleep or offline car answers 408 and is asked again after 30 minutes, only
+  if it is on stage again.
+- Failures wait 15 minutes. A 403, or a reply with no paint, waits a day. A 429 waits for `Retry-After`,
+  and never less than 15 minutes.
+- Once the paint is saved it is never asked again for that VIN. In practice that is one call per car, ever,
+  at Tesla's $0.002 per call.
+- The reply repaints the car on stage and its glow at once. The home garage reads the same per-VIN store,
+  so the parked car picks up the paint too.
+- Demo, local logins and catalogue cars never call.
+
+#### Paint diagnostics: `-debugPaint YES`
+
+Add `-debugPaint YES` to the scheme's launch arguments (or set `POWERWALL_DEBUG_PAINT=1`). The console then
+prints `Paint:` lines with VINs cut to their last 4 and no car names:
+
+- for each car from products: raw `color` and `option_codes`;
+- for each paint call or plugged-in charge call: the status, whether `vehicle_config` was present, and the
+  raw `exterior_color`, `paint_color_override` and `car_type`;
+- for `vehicle_data_cached`: whether `vehicle_config` was present;
+- for each car shown: the model, products `color` and `option_codes`, the saved `vehicle_config` fields,
+  the source used, the resolved paint and display hex, and the glow hex.
 
 How a known paint is drawn:
 
@@ -338,7 +371,8 @@ How a known paint is drawn:
 | --- | --- | --- |
 | Paint name the table knows | `TeslaPaint.display`: the readable colour the demo uses, at boost 1 | The floor's table colour for that paint |
 | Override with no known name | The override at the live boost (4) | The app's formula on the override |
-| Generic, stainless Cybertruck, catalogue car, unknown paint | The file colour | The file colour's table entry |
+| Account car with no known paint | The Tesla app's fallback grey at the live boost | A soft grey |
+| Generic, stainless Cybertruck, catalogue car | The file colour | The file colour's table entry |
 
 A known name wins over `paint_color_override` in the showroom. The Tesla app's albedos are meant for its
 reflection-heavy renderer: Pearl White is `0x181818`, which reads as mid grey once lifted, so the display
@@ -347,7 +381,7 @@ fallback) and is unchanged.
 
 Names match without regard to case, spaces or punctuation, and accept marketing spellings: "Stealth
 Gray", "Pearl White Multi-Coat", "Deep Blue Metallic", "Obsidian Black" and so on. Paint codes come from
-Tesla's service manual tables:
+Tesla's service manual tables. They are only used when products `color` holds a code:
 
 | Code | Paint | Code | Paint | Code | Paint |
 | --- | --- | --- | --- | --- | --- |
@@ -360,7 +394,7 @@ Tesla's service manual tables:
 | PPSR | Signature Red | PPTI | Titanium | PMTG, PMSG, PMAB, PMMB | Older greys, green, brown, blue |
 
 Cybertruck stays stainless steel (the file finish) unless a colour step or a wrap override is set. Codes
-with no paint in the app's table, such as Cosmic Silver (PN03), fall through to the file colour.
+with no paint in the app's table, such as Cosmic Silver (PN03), count as unknown.
 
 ### Last car shown (`ShowroomLastCar`)
 

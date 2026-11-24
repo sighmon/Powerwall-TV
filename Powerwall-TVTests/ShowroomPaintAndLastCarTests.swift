@@ -8,13 +8,16 @@ import simd
 private final class CachedDataProtocol: URLProtocol, @unchecked Sendable {
     @MainActor static var body = Data()
     @MainActor static var paths: [String] = []
+    @MainActor static var queries: [String] = []
+    @MainActor static var status = 200
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         Task { @MainActor in
             Self.paths.append(request.url!.path)
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            Self.queries.append(request.url!.query ?? "")
+            let response = HTTPURLResponse(url: request.url!, statusCode: Self.status, httpVersion: nil, headerFields: nil)!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Self.body)
             client?.urlProtocolDidFinishLoading(self)
@@ -59,12 +62,12 @@ struct ShowroomPaintAndLastCarTests {
         }
         #expect(TeslaPaint(exteriorColor: "StainlessSteel") == nil)
 
-        #expect(TeslaPaint.exteriorColor(optionCodes: "AD15,MDL3,PN01,W40B") == "StealthGrey")
-        #expect(TeslaPaint.exteriorColor(optionCodes: "ppsw") == "PearlWhite")
-        #expect(TeslaPaint.exteriorColor(optionCodes: "MDL3,W40B") == nil)
-        #expect(TeslaPaint.exteriorColor(productColor: "PR01", optionCodes: nil) == "UltraRed")
-        #expect(TeslaPaint.exteriorColor(productColor: "Glacier Blue", optionCodes: "PPSW") == "GlacierBlue")
-        #expect(TeslaPaint.exteriorColor(productColor: nil, optionCodes: "PX02") == "DiamondBlack")
+        #expect(TeslaPaint.exteriorColor(productColor: "PR01") == "UltraRed")
+        #expect(TeslaPaint.exteriorColor(productColor: "ppsw") == "PearlWhite")
+        #expect(TeslaPaint.exteriorColor(productColor: "Glacier Blue") == "GlacierBlue")
+        #expect(TeslaPaint.exteriorColor(productColor: nil) == nil)
+        #expect(TeslaPaint.exteriorColor(productColor: " ") == nil)
+        #expect(TeslaPaint.exteriorColor(productColor: "MDL3") == nil)
         let codes = ["PPSW": "PearlWhite", "PMNG": "MidnightSilver", "PN01": "StealthGrey", "PPSB": "DeepBlue",
                      "PR01": "UltraRed", "PPMR": "RedMulticoat", "PBSB": "SolidBlack", "PN00": "Quicksilver",
                      "PR00": "MidnightCherryRed", "PB01": "GlacierBlue", "PB02": "MarineBlue", "PX02": "DiamondBlack"]
@@ -75,7 +78,9 @@ struct ShowroomPaintAndLastCarTests {
         #expect(TeslaPaint.table.keys.allSatisfy { TeslaPaint.demoDisplayHex[$0] != nil })
     }
 
-    @Test func productsCarriesColourAndOptionCodesIntoTheCar() throws {
+    /// Fleet's `option_codes` is null or the same generic Model 3 list for every car, so it never sets
+    /// paint. Products `color` does when Tesla fills it in.
+    @Test func productsColourSetsPaintButOptionCodesNever() throws {
         let body = Data(#"""
         {"response":[
           {"vin":"5YJYGDEE5LF000001","display_name":"A","color":null,"option_codes":"AD15,MDL3,PB01,W40B"},
@@ -84,9 +89,16 @@ struct ShowroomPaintAndLastCarTests {
         ]}
         """#.utf8)
         let vehicles = try ProductsResponse.vehicles(from: body)
-        #expect(vehicles.map(\.paintName) == ["GlacierBlue", "UltraRed", nil])
-        let merged = vehicles[0].merging(FleetVehicle(vin: carA, displayName: nil, state: "online"))
-        #expect(merged.paintName == "GlacierBlue")
+        #expect(vehicles.map(\.paintName) == [nil, "UltraRed", nil])
+        #expect(vehicles[0].optionCodes == "AD15,MDL3,PB01,W40B")
+        let merged = vehicles[1].merging(FleetVehicle(vin: carB, displayName: nil, state: "online"))
+        #expect(merged.paintName == "UltraRed")
+        // Two different cars with the same generic list get no paint, not the same wrong one.
+        let generic = "AD15,MDL3,PBSB,RENA,BT37,ID3W,RF3G,S3PB,DRLH,DV2W,W39B,PPSW,PB03"
+        let pair = [FleetVehicle(vin: carA, displayName: nil, state: nil, optionCodes: generic),
+                    FleetVehicle(vin: carB, displayName: nil, state: nil, optionCodes: generic)]
+        #expect(pair.allSatisfy { $0.paintName == nil })
+        #expect(CarShowroom.paintSource(vin: carA, appearances: [:], vehicles: pair) == nil)
     }
 
     @Test func cachedVehicleDataCarriesVehicleConfigPaint() throws {
@@ -111,10 +123,10 @@ struct ShowroomPaintAndLastCarTests {
 
     // MARK: Paint priority and stepping
 
-    @Test func paintComesFromVehicleConfigThenProductsThenTheFile() {
+    @Test func paintComesFromVehicleConfigThenProductsColourThenUnknownGrey() {
         let vehicles = [
-            FleetVehicle(vin: carA, displayName: "A", state: nil, color: nil, optionCodes: "MDL3,PN01"),
-            FleetVehicle(vin: carB, displayName: "B", state: nil, color: nil, optionCodes: "PPSW"),
+            FleetVehicle(vin: carA, displayName: "A", state: nil, color: "DeepBlue", optionCodes: "MDL3,PN01"),
+            FleetVehicle(vin: carB, displayName: "B", state: nil, color: "PearlWhite", optionCodes: "PBSB"),
             FleetVehicle(vin: carC, displayName: "C", state: nil),
         ]
         let appearances = [carA: appearance("UltraRed"), carC: appearance(nil, carType: "models")]
@@ -129,7 +141,12 @@ struct ShowroomPaintAndLastCarTests {
         ).lineup
         #expect(ShowroomPaint.resolve(for: lineup[0]) == .named(TeslaPaint.table["UltraRed"]!.display))
         #expect(ShowroomPaint.resolve(for: lineup[1]) == .named(TeslaPaint.table["PearlWhite"]!.display))
-        #expect(ShowroomPaint.resolve(for: lineup[2]) == .file)
+        // Unknown paint on an account car is the neutral grey, never the file colour (Model S's is red).
+        #expect(ShowroomPaint.resolve(for: lineup[2]) == .unknown)
+        #expect(lineup[2].lines.first == "C")
+        #expect(CarShowroom.paintSourceDetail(vin: carA, appearances: appearances, vehicles: vehicles).kind == .vehicleConfig)
+        #expect(CarShowroom.paintSourceDetail(vin: carB, appearances: appearances, vehicles: vehicles).kind == .productsColor)
+        #expect(CarShowroom.paintSourceDetail(vin: carC, appearances: appearances, vehicles: vehicles).kind == PaintSourceKind.none)
         #expect(lineup[0].lines.first == "A · Ultra Red")
         #expect(lineup[1].lines.first == "B · Pearl White")
         // Catalogue cars keep their own file colours and glows, never an owned car's paint.
@@ -173,7 +190,9 @@ struct ShowroomPaintAndLastCarTests {
             vehicles: vehicles, charges: [:], displayBoost: 4, isDemoMode: false
         )
         let before = CarShowroom.entry(in: request, at: 0)
-        #expect(ShowroomPaint.resolve(for: before) == .file)
+        #expect(ShowroomPaint.resolve(for: before) == .unknown)
+        let grey = ShowroomStage.highlight(for: before)
+        #expect(abs(grey.x - grey.y) < 0.01 && abs(grey.y - grey.z) < 0.01)
         let after = CarShowroom.repainted(before, appearances: [carA: appearance("UltraRed")], vehicles: vehicles)
         #expect(after.exteriorColor == "UltraRed")
         #expect(after.lines.first == "A · Ultra Red")
@@ -244,6 +263,127 @@ struct ShowroomPaintAndLastCarTests {
         // 0xF3F0E8, not the app's 0x181818 albedo lifted to grey.
         #expect(abs(red - 0xF3 / 255) < 0.02)
         #expect(abs(blue - 0xE8 / 255) < 0.02)
+    }
+
+    /// Unknown paint never falls through to a model's file colour, whichever model the car is.
+    @Test func unknownAccountPaintIsGreyOnEveryModel() {
+        for model in VehicleModel.allCases {
+            let car = CarShowroomRequest(
+                vin: carA, model: model, exteriorColor: nil, paintColorOverride: nil,
+                colorizerRemap: false, displayBoost: 4, lines: []
+            )
+            let expected: ShowroomPaint = (model == .generic || model == .cybertruck) ? .file : .unknown
+            #expect(ShowroomPaint.resolve(for: car) == expected, "\(model.rawValue)")
+        }
+        var catalogue = CarShowroom.catalogueRequest(index: 0)
+        #expect(ShowroomPaint.resolve(for: catalogue) == .file)
+        catalogue.vin = carA
+        #expect(ShowroomPaint.resolve(for: catalogue) == .file)
+    }
+
+    @Test func paintFetchPolicyAsksOnceUntilKnownAndBacksOff() {
+        let policy = VehiclePaintFetchPolicy()
+        let now = Date()
+        #expect(policy.shouldFetch(hasPaint: false, inFlight: false, blockedUntil: nil, now: now))
+        #expect(!policy.shouldFetch(hasPaint: true, inFlight: false, blockedUntil: nil, now: now))
+        #expect(!policy.shouldFetch(hasPaint: false, inFlight: true, blockedUntil: nil, now: now))
+        #expect(!policy.shouldFetch(hasPaint: false, inFlight: false, blockedUntil: now.addingTimeInterval(60), now: now))
+        #expect(policy.shouldFetch(hasPaint: false, inFlight: false, blockedUntil: now.addingTimeInterval(-1), now: now))
+        #expect(policy.wait(afterStatus: 408, retryAfter: nil) == 30 * 60)
+        #expect(policy.wait(afterStatus: 403, retryAfter: nil) == 24 * 60 * 60)
+        #expect(policy.wait(afterStatus: 200, retryAfter: nil) == 24 * 60 * 60)
+        #expect(policy.wait(afterStatus: 429, retryAfter: 3600) == 3600)
+        #expect(policy.wait(afterStatus: 429, retryAfter: 5) == 15 * 60)
+        #expect(policy.wait(afterStatus: 500, retryAfter: nil) == 15 * 60)
+        #expect(policy.wait(afterStatus: nil, retryAfter: nil) == 15 * 60)
+    }
+
+    @Test func showroomAsksVehicleConfigOnceForAnUnknownCarAndRepaints() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CachedDataProtocol.self]
+        CachedDataProtocol.paths = []
+        CachedDataProtocol.queries = []
+        CachedDataProtocol.body = Data(#"{"response":{"vehicle_config":{"exterior_color":"StealthGrey","car_type":"modely","paint_color_override":null}}}"#.utf8)
+        let model = PowerwallViewModel(fleetURLSession: URLSession(configuration: configuration))
+        model.ipAddress = "gateway.example"
+        model.loginMode = .fleetAPI
+        model.accessToken = "test-only"
+        model.clearVehicleChargeCache()
+        model.clearVehicleAppearanceCache()
+        defer {
+            model.clearVehicleChargeCache()
+            model.clearVehicleAppearanceCache()
+        }
+        model.vehicles = [FleetVehicle(vin: carA, displayName: "A", state: "asleep", optionCodes: "PPSW")]
+        model.fetchVehiclePaintIfNeeded(vin: carA)
+        model.fetchVehiclePaintIfNeeded(vin: carA)
+        for _ in 0..<100 where model.vehicleAppearances[carA] == nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        #expect(CachedDataProtocol.paths == ["/api/1/vehicles/\(carA)/vehicle_data"])
+        #expect(CachedDataProtocol.queries == ["endpoints=vehicle_config"])
+        #expect(model.vehicleAppearances[carA]?.exteriorColor == "StealthGrey")
+        // Known now: no more calls.
+        model.fetchVehiclePaintIfNeeded(vin: carA)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(CachedDataProtocol.paths.count == 1)
+        let car = CarShowroom.repainted(
+            CarShowroom.ownedRequest(vin: carA, appearances: [:], vehicles: model.vehicles, charges: [:], displayBoost: 4),
+            appearances: model.vehicleAppearances,
+            vehicles: model.vehicles
+        )
+        #expect(ShowroomPaint.resolve(for: car) == .named(TeslaPaint.table["StealthGrey"]!.display))
+        #expect(car.lines.first == "A · Stealth Grey")
+    }
+
+    @Test func asleepCarIsNotAskedAgainStraightAway() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CachedDataProtocol.self]
+        CachedDataProtocol.paths = []
+        CachedDataProtocol.queries = []
+        CachedDataProtocol.status = 408
+        CachedDataProtocol.body = Data(#"{"error":"vehicle unavailable: vehicle is offline or asleep"}"#.utf8)
+        defer { CachedDataProtocol.status = 200 }
+        let model = PowerwallViewModel(fleetURLSession: URLSession(configuration: configuration))
+        model.ipAddress = "gateway.example"
+        model.loginMode = .fleetAPI
+        model.accessToken = "test-only"
+        model.clearVehicleChargeCache()
+        model.clearVehicleAppearanceCache()
+        defer {
+            model.clearVehicleChargeCache()
+            model.clearVehicleAppearanceCache()
+        }
+        let now = Date()
+        model.fetchVehiclePaintIfNeeded(vin: carB, now: now)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        model.fetchVehiclePaintIfNeeded(vin: carB, now: Date())
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(CachedDataProtocol.paths.count == 1)
+        #expect(model.vehicleAppearances[carB] == nil)
+        model.fetchVehiclePaintIfNeeded(vin: carB, now: Date().addingTimeInterval(31 * 60))
+        try await Task.sleep(nanoseconds: 200_000_000)
+        #expect(CachedDataProtocol.paths.count == 2)
+        // Demo never calls.
+        model.ipAddress = "demo"
+        model.fetchVehiclePaintIfNeeded(vin: carC)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(CachedDataProtocol.paths.count == 2)
+    }
+
+    @Test func paintLogCutsTheVINAndShowsEveryRawField() {
+        let vehicles = [FleetVehicle(vin: carA, displayName: "Private name", state: nil, color: nil, optionCodes: "MDL3,PPSW")]
+        let car = CarShowroom.ownedRequest(vin: carA, appearances: [:], vehicles: vehicles, charges: [:], displayBoost: 4)
+        let report = CarShowroom.paintReport(for: car, appearances: [carA: appearance(nil, carType: "modely")], vehicles: vehicles)
+        #expect(!report.contains(carA))
+        #expect(!report.contains("Private name"))
+        #expect(report.contains("…" + carA.suffix(4)))
+        #expect(report.contains("products.color=null"))
+        #expect(report.contains("option_codes=\"MDL3,PPSW\" (ignored)"))
+        #expect(report.contains("car_type=\"modely\""))
+        #expect(report.contains("source=none"))
+        #expect(report.contains("unknown"))
+        #expect(PaintDebug.redact(nil) == "none")
     }
 
     // MARK: Last car shown

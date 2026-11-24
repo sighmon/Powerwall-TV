@@ -33,9 +33,11 @@ struct CarShowroomRequest: Equatable, Identifiable {
 
 /// How the showroom paints one car.
 enum ShowroomPaint: Equatable {
-    /// The colour exported in the file. Catalogue cars, Generic, a stainless Cybertruck, and an owned
-    /// car whose paint is not known yet.
+    /// The colour exported in the file. Catalogue cars, Generic and a stainless Cybertruck.
     case file
+    /// An account car whose paint is not known yet: the Tesla app's neutral fallback grey, never a file
+    /// colour that could pass for a real paint (Highland's file is blue, Model Y's is white).
+    case unknown
     /// A table paint, drawn with its readable display colour at boost 1 (`TeslaPaint.display`).
     case named(TeslaPaint)
     /// A `paint_color_override` with no paint name the table knows, at the request's boost.
@@ -53,8 +55,26 @@ enum ShowroomPaint: Equatable {
         if !wrap.isEmpty, let paint = TeslaPaint(paintColorOverride: wrap, colorizerRemap: request.colorizerRemap) {
             return .custom(paint)
         }
-        return .file
+        let isOwned = !request.browsesCatalogue && !(request.vin?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        return isOwned ? .unknown : .file
     }
+
+    var debugDescription: String {
+        switch self {
+        case .file: return "file colour"
+        case .unknown: return "unknown → fallback grey"
+        case .named(let paint): return "named \(paint.name) display #\(String(format: "%06X", paint.hex))"
+        case .custom(let paint): return "override #\(String(format: "%06X", paint.hex))"
+        }
+    }
+}
+
+/// Where an owned car's paint came from.
+enum PaintSourceKind: String {
+    /// `vehicle_config` from `vehicle_data`, saved per VIN.
+    case vehicleConfig = "vehicle_config (saved per VIN)"
+    case productsColor = "products.color"
+    case none = "none"
 }
 
 /// The last car shown in the showroom, saved so the next open starts there. A VIN for an owned car,
@@ -181,12 +201,40 @@ enum CarShowroom {
     /// `vehicle_data_cached`, saved per VIN), then products `color` or `option_codes`. Nil leaves the
     /// file colour. Catalogue cars are never touched.
     static func paintSource(vin: String?, appearances: [String: VehicleAppearance], vehicles: [FleetVehicle]) -> VehicleAppearance? {
-        guard let vin = vin?.trimmingCharacters(in: .whitespacesAndNewlines), !vin.isEmpty else { return nil }
+        paintSourceDetail(vin: vin, appearances: appearances, vehicles: vehicles).appearance
+    }
+
+    static func paintSourceDetail(
+        vin: String?,
+        appearances: [String: VehicleAppearance],
+        vehicles: [FleetVehicle]
+    ) -> (kind: PaintSourceKind, appearance: VehicleAppearance?) {
+        guard let vin = vin?.trimmingCharacters(in: .whitespacesAndNewlines), !vin.isEmpty else { return (.none, nil) }
         let stored = appearances[vin] ?? appearances.first { $0.key.caseInsensitiveCompare(vin) == .orderedSame }?.value
-        if let stored, stored.hasPaint { return stored }
+        if let stored, stored.hasPaint { return (.vehicleConfig, stored) }
         let vehicle = vehicles.first { $0.vin.caseInsensitiveCompare(vin) == .orderedSame }
-        guard let name = vehicle?.paintName else { return nil }
-        return VehicleAppearance(exteriorColor: name, paintColorOverride: nil, colorizerRemap: false, carType: stored?.carType)
+        guard let name = vehicle?.paintName else { return (.none, nil) }
+        return (.productsColor, VehicleAppearance(exteriorColor: name, paintColorOverride: nil, colorizerRemap: false, carType: stored?.carType))
+    }
+
+    /// One `-debugPaint` line for a car on stage: raw Fleet fields, the source used, and the result.
+    /// The VIN is cut to its last 4 and the car's own name is left out.
+    static func paintReport(for car: CarShowroomRequest, appearances: [String: VehicleAppearance], vehicles: [FleetVehicle]) -> String {
+        let vin = car.vin
+        let vehicle = vin.flatMap { vin in vehicles.first { $0.vin.caseInsensitiveCompare(vin) == .orderedSame } }
+        let stored = vin.flatMap { vin in
+            appearances[vin] ?? appearances.first { $0.key.caseInsensitiveCompare(vin) == .orderedSame }?.value
+        }
+        let source = car.browsesCatalogue ? "catalogue" : paintSourceDetail(vin: vin, appearances: appearances, vehicles: vehicles).kind.rawValue
+        let resolved = ShowroomPaint.resolve(for: car)
+        let glow = ShowroomStage.highlight(for: car)
+        let glowHex = String(format: "%02X%02X%02X", Int(glow.x * 255), Int(glow.y * 255), Int(glow.z * 255))
+        return [
+            "car \(PaintDebug.redact(vin)) model=\(car.model.rawValue)",
+            "products.color=\(PaintDebug.raw(vehicle?.color)) option_codes=\(PaintDebug.raw(vehicle?.optionCodes)) (ignored)",
+            "saved vehicle_config exterior_color=\(PaintDebug.raw(stored?.exteriorColor)) paint_color_override=\(PaintDebug.raw(stored?.paintColorOverride)) car_type=\(PaintDebug.raw(stored?.carType))",
+            "source=\(source) exterior=\(PaintDebug.raw(car.exteriorColor)) → \(resolved.debugDescription) glow #\(glowHex)",
+        ].joined(separator: " | ")
     }
 
     /// Re-reads an owned car's paint, so a `vehicle_data_cached` reply that arrives while the showroom is
@@ -388,6 +436,8 @@ enum CarShowroom {
         switch ShowroomPaint.resolve(for: request) {
         case .file:
             break
+        case .unknown:
+            applyPaint(TeslaPaint.fallback, to: vehicle, displayBoost: request.displayBoost)
         case .named(let named):
             applyPaint(named, to: vehicle, displayBoost: 1)
         case .custom(let custom):

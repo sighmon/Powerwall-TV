@@ -143,6 +143,8 @@ enum ShowroomStage {
         switch ShowroomPaint.resolve(for: request) {
         case .file:
             return rgb(highlightTable[fileHighlightName(for: request.model)] ?? 0xc1c1c1)
+        case .unknown:
+            return highlight(forPaint: rgb(TeslaPaint.fallback.hex))
         case .named(let paint):
             if let hex = highlightTable[paint.name] { return rgb(hex) }
             // Not in the floor's table: the app's formula on the app's own albedo.

@@ -1277,9 +1277,12 @@ struct ContentView: View {
     /// Runs only while the showroom is mounted: SwiftUI cancels it on close, so nothing polls in the background.
     /// Each tick only asks the refresh policy; a Fleet call happens when this car is due. Demo never calls.
     private func refreshShowroomInfoWhileOpen(_ request: CarShowroomRequest) async {
+        viewModel.logShowroomPaint(for: request)
         guard !viewModel.isDemoMode, !request.browsesCatalogue, request.vin != nil else { return }
         while !Task.isCancelled {
             viewModel.refreshVehicleInfoIfDue(vin: request.vin)
+            // Paint is asked for once per car until it is known; the policy spaces out retries.
+            viewModel.fetchVehiclePaintIfNeeded(vin: request.vin)
             try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
         }
     }

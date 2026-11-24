@@ -134,8 +134,10 @@ struct TeslaPaint: Equatable {
         TeslaPaint(name: name, hex: TeslaPaint.demoDisplayHex[name] ?? hex, metallic: metallic, roughness: roughness)
     }
 
-    /// Paint option codes (`option_codes` on products and `/vehicles`, and the B-pillar label), from
-    /// Tesla's service manual paint tables. Codes with no paint in the app's table are left out.
+    /// Paint codes (the B-pillar label and order pages), from Tesla's service manual paint tables.
+    /// Only used when products `color` holds a code. Fleet's `option_codes` field is never read for
+    /// paint: Tesla stopped filling it in, and when it is set it is the same generic Model 3 list for
+    /// every car, so it would give every car the same wrong colour.
     static let optionCodes: [String: String] = [
         "PPSW": "PearlWhite",        // Pearl White Multi-Coat
         "PM00": "PearlWhite",        // Pearl White Pro Multi-Coat
@@ -181,23 +183,11 @@ struct TeslaPaint: Equatable {
         "anzabrown": "Brown",
     ]
 
-    /// Table name for a paint option code list such as "AD15,MDL3,PPSW,W40B". Nil when no code is a paint.
-    static func exteriorColor(optionCodes: String?) -> String? {
-        guard let optionCodes else { return nil }
-        for code in optionCodes.split(whereSeparator: { $0 == "," || $0 == " " || $0 == ";" }) {
-            let key = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            if let name = Self.optionCodes[key] { return name }
-        }
-        return nil
-    }
-
-    /// Products' `color` (often null) can be a paint name or a paint code. Then `option_codes`.
-    static func exteriorColor(productColor: String?, optionCodes: String?) -> String? {
-        if let color = productColor?.trimmingCharacters(in: .whitespacesAndNewlines), !color.isEmpty {
-            if let paint = TeslaPaint(exteriorColor: color) { return paint.name }
-            if let name = exteriorColor(optionCodes: color) { return name }
-        }
-        return exteriorColor(optionCodes: optionCodes)
+    /// Products' `color` (usually null) as a table paint name. It may be a name or a paint code.
+    static func exteriorColor(productColor: String?) -> String? {
+        guard let color = productColor?.trimmingCharacters(in: .whitespacesAndNewlines), !color.isEmpty else { return nil }
+        if let paint = TeslaPaint(exteriorColor: color) { return paint.name }
+        return optionCodes[color.uppercased()]
     }
 
     /// Demo paint in display space. Apply it with `displayBoost` 1, not the live lift of 4.
@@ -297,5 +287,31 @@ struct TeslaPaint: Equatable {
             material.clearCoat.contents = clearCoat
             material.clearCoatRoughness.contents = roughness
         }
+    }
+}
+
+/// Paint diagnostics. Turn on with the launch argument `-debugPaint YES` (or POWERWALL_DEBUG_PAINT=1).
+/// Logs raw Fleet paint fields and how the showroom resolved each car. VINs are cut to the last 4.
+enum PaintDebug {
+    static var enabled: Bool {
+        let raw = UserDefaults.standard.string(forKey: "debugPaint")
+            ?? ProcessInfo.processInfo.environment["POWERWALL_DEBUG_PAINT"] ?? ""
+        return ["yes", "1", "true"].contains(raw.lowercased())
+    }
+
+    static func redact(_ vin: String?) -> String {
+        let trimmed = vin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return "none" }
+        return "…" + trimmed.suffix(4)
+    }
+
+    /// `nil` → "null", so a missing field reads differently from an empty one.
+    static func raw(_ value: String?) -> String {
+        value.map { "\"\($0)\"" } ?? "null"
+    }
+
+    static func log(_ message: @autoclosure () -> String) {
+        guard enabled else { return }
+        print("Paint: \(message())")
     }
 }

@@ -200,6 +200,10 @@ class PowerwallViewModel: ObservableObject {
     private var connectedVehiclesCheckedAt: Date?
     /// Garage taps waiting on the one products request in flight.
     private var connectedVehicleWaiters: [() -> Void] = []
+    let paintPolicy = VehiclePaintFetchPolicy()
+    private var paintFetchesInFlight = Set<String>()
+    /// Memory only: a relaunch may ask an unknown car once more.
+    private var paintFetchBlockedUntil: [String: Date] = [:]
     private var vehicleDataFetchesInFlight = Set<String>()
     private var vehicleDataHandledForCurrentConnection = Set<String>()
     private var vehicleDataForbiddenForCurrentConnection = Set<String>()
@@ -378,6 +382,7 @@ class PowerwallViewModel: ObservableObject {
     func clearVehicleChargeCache() {
         vehicleChargeCacheGeneration &+= 1
         connectedVehiclesCheckedAt = nil
+        paintFetchBlockedUntil.removeAll()
         vehicleChargeStates.removeAll()
         lastVehicleDataFetchAt.removeAll()
         lastVehicleDataAttemptAt.removeAll()
@@ -1528,6 +1533,7 @@ class PowerwallViewModel: ObservableObject {
                 colorizerRemap: vehicleData.response.vehicleState?.colorizerPaintRemapEnabled ?? false,
                 carType: vehicleData.response.vehicleConfig?.carType
             )
+            PaintDebug.log("vehicle_data (charge) \(PaintDebug.redact(vin)) vehicle_config=\(vehicleData.response.vehicleConfig == nil ? "missing" : "present") exterior_color=\(PaintDebug.raw(appearance.exteriorColor)) paint_color_override=\(PaintDebug.raw(appearance.paintColorOverride)) car_type=\(PaintDebug.raw(appearance.carType))")
             guard let chargeState = vehicleData.response.chargeState else {
                 self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data missing charge_state body=\(self.vehicleResponsePreview(from: data))")
                 DispatchQueue.main.async {
@@ -1618,6 +1624,9 @@ class PowerwallViewModel: ObservableObject {
                 if requestCacheGeneration == self.vehicleChargeCacheGeneration {
                     if let found {
                         self.logVehicleDebug("GET /products for garage vehicles=\(found.count)")
+                        for vehicle in found {
+                            PaintDebug.log("products \(PaintDebug.redact(vehicle.vin)) color=\(PaintDebug.raw(vehicle.color)) option_codes=\(PaintDebug.raw(vehicle.optionCodes))")
+                        }
                         self.mergeVehicles(found)
                         self.connectedVehiclesCheckedAt = now
                     } else {
@@ -1630,6 +1639,75 @@ class PowerwallViewModel: ObservableObject {
                 waiters.forEach { $0() }
             }
         }.resume()
+    }
+
+    // MARK: Showroom paint
+
+    /// Asks `vehicle_data?endpoints=vehicle_config` for an account car whose paint is not known, while
+    /// that car is on stage in the showroom. `vehicle_data_cached` never includes `vehicle_config`, and
+    /// products `color` and `option_codes` are null or generic, so this is the only reliable paint source
+    /// for a car that is not plugged in. It never calls `wake_up`: an asleep car answers 408 and is asked
+    /// again later (`VehiclePaintFetchPolicy`). Once the paint is saved per VIN it is never asked again.
+    func fetchVehiclePaintIfNeeded(vin: String?, now: Date = Date(), withoutFilter: Bool = false) {
+        guard !isDemoMode, loginMode == .fleetAPI, !accessToken.isEmpty,
+              let vin = vin?.trimmingCharacters(in: .whitespacesAndNewlines), !vin.isEmpty else { return }
+        let known = CarShowroom.paintSource(vin: vin, appearances: vehicleAppearances, vehicles: vehicles) != nil
+        guard withoutFilter || paintPolicy.shouldFetch(
+            hasPaint: known,
+            inFlight: paintFetchesInFlight.contains(vin),
+            blockedUntil: paintFetchBlockedUntil[vin],
+            now: now
+        ) else { return }
+        guard var components = URLComponents(string: "\(fleetBaseURL)/api/1/vehicles/\(vin)/vehicle_data") else { return }
+        if !withoutFilter {
+            components.queryItems = [URLQueryItem(name: "endpoints", value: "vehicle_config")]
+        }
+        guard let url = components.url else { return }
+        paintFetchesInFlight.insert(vin)
+        let requestCacheGeneration = vehicleChargeCacheGeneration
+        PaintDebug.log("vehicle_data paint \(PaintDebug.redact(vin)) start filter=\(withoutFilter ? "none" : "vehicle_config")")
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        fleetURLSession.dataTask(with: request) { [weak self] data, response, error in
+            let http = response as? HTTPURLResponse
+            let status = error == nil ? http?.statusCode : nil
+            let config = (status == 200 ? data : nil).flatMap { try? JSONDecoder().decode(VehicleDataResponse.self, from: $0) }?.response
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.paintFetchesInFlight.remove(vin)
+                guard requestCacheGeneration == self.vehicleChargeCacheGeneration else { return }
+                let appearance = config.map {
+                    VehicleAppearance(
+                        exteriorColor: $0.vehicleConfig?.exteriorColor,
+                        paintColorOverride: $0.vehicleConfig?.paintColorOverride,
+                        colorizerRemap: $0.vehicleState?.colorizerPaintRemapEnabled ?? false,
+                        carType: $0.vehicleConfig?.carType
+                    )
+                }
+                PaintDebug.log("vehicle_data paint \(PaintDebug.redact(vin)) status=\(status.map { String($0) } ?? "nil") vehicle_config=\(config?.vehicleConfig == nil ? "missing" : "present") exterior_color=\(PaintDebug.raw(appearance?.exteriorColor)) paint_color_override=\(PaintDebug.raw(appearance?.paintColorOverride)) car_type=\(PaintDebug.raw(appearance?.carType))")
+                if status == 400 && !withoutFilter {
+                    // Some firmware rejects the endpoints filter. One plain retry.
+                    self.fetchVehiclePaintIfNeeded(vin: vin, now: now, withoutFilter: true)
+                    return
+                }
+                if status == 401 { self.refreshAccessToken() }
+                if let appearance, appearance.hasPaint {
+                    self.rememberVehicleAppearance(appearance, for: vin)
+                    self.paintFetchBlockedUntil.removeValue(forKey: vin)
+                } else {
+                    let retryAfter = http?.value(forHTTPHeaderField: "Retry-After").flatMap { TimeInterval($0.trimmingCharacters(in: .whitespaces)) }
+                    let wait = self.paintPolicy.wait(afterStatus: status, retryAfter: retryAfter)
+                    self.paintFetchBlockedUntil[vin] = Date().addingTimeInterval(wait)
+                    PaintDebug.log("vehicle_data paint \(PaintDebug.redact(vin)) no paint, next try in \(Int(wait / 60)) min")
+                }
+            }
+        }.resume()
+    }
+
+    /// `-debugPaint YES`: one line per car shown in the showroom.
+    func logShowroomPaint(for car: CarShowroomRequest) {
+        PaintDebug.log(CarShowroom.paintReport(for: car, appearances: vehicleAppearances, vehicles: vehicles))
     }
 
     // MARK: Showroom vehicle info
@@ -1689,6 +1767,7 @@ class PowerwallViewModel: ObservableObject {
                     if let appearance = info.appearance {
                         self.rememberVehicleAppearance(appearance, for: vin)
                     }
+                    PaintDebug.log("vehicle_data_cached \(PaintDebug.redact(vin)) vehicle_config=\(info.appearance == nil ? "missing (Tesla documents it never sends it)" : "present")")
                     // Same numbers the live charge call stores, so the title lines agree with the panel.
                     if info.batteryLevel != nil || info.chargingState != nil {
                         self.vehicleChargeStates[vin] = info.chargeSnapshot
@@ -2223,6 +2302,31 @@ struct ProductsResponse: Codable {
     }
 }
 
+/// When the showroom asks `vehicle_data?endpoints=vehicle_config` for a car's paint.
+struct VehiclePaintFetchPolicy {
+    /// 408: the car is asleep or offline. `vehicle_data` never wakes it, so look again later.
+    var asleepWait: TimeInterval = 30 * 60
+    var failureWait: TimeInterval = 15 * 60
+    /// 403, or a 200 with no paint in it: nothing will change soon.
+    var refusedWait: TimeInterval = 24 * 60 * 60
+    var minimumRateLimitWait: TimeInterval = 15 * 60
+
+    func shouldFetch(hasPaint: Bool, inFlight: Bool, blockedUntil: Date?, now: Date) -> Bool {
+        guard !hasPaint, !inFlight else { return false }
+        guard let blockedUntil else { return true }
+        return now >= blockedUntil
+    }
+
+    func wait(afterStatus status: Int?, retryAfter: TimeInterval?) -> TimeInterval {
+        switch status {
+        case 408: return asleepWait
+        case 403, 200, 404, 412: return refusedWait
+        case 429: return max(retryAfter ?? 0, minimumRateLimitWait)
+        default: return failureWait
+        }
+    }
+}
+
 /// When a garage tap asks `/api/1/products` which cars are on the account. Products lists the
 /// account's cars without waking any of them. Demo, local gateway logins and a missing token never ask.
 enum ConnectedVehicleCheck {
@@ -2295,9 +2399,10 @@ struct FleetVehicle: Codable {
         case optionCodes = "option_codes"
     }
 
-    /// Table paint name from `color`, then the paint code in `option_codes`.
+    /// Table paint name from `color`. `option_codes` is decoded for the paint log only: Fleet sends
+    /// null or the same generic list for every car, so it is never trusted for paint.
     var paintName: String? {
-        TeslaPaint.exteriorColor(productColor: color, optionCodes: optionCodes)
+        TeslaPaint.exteriorColor(productColor: color)
     }
 
     func merging(_ other: FleetVehicle) -> FleetVehicle {
