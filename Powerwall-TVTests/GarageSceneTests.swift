@@ -2106,13 +2106,28 @@ struct GarageSceneTests {
         }
         #expect(vehicle != nil)
         if let vehicle, let mirror {
-            var carMaterials: [SCNMaterial] = []
-            vehicle.enumerateHierarchy { node, _ in carMaterials += node.geometry?.materials ?? [] }
-            var mirrorMaterials: [SCNMaterial] = []
-            mirror.enumerateHierarchy { node, _ in mirrorMaterials += node.geometry?.materials ?? [] }
-            // Shared, so a paint change reaches the reflection too.
+            func materials(in root: SCNNode) -> [(node: String?, material: SCNMaterial)] {
+                var found: [(String?, SCNMaterial)] = []
+                root.enumerateHierarchy { node, _ in
+                    for material in node.geometry?.materials ?? [] {
+                        found.append((node.name, material))
+                    }
+                }
+                return found
+            }
+            let carMaterials = materials(in: vehicle)
+            let mirrorMaterials = materials(in: mirror)
+            // Shared, so a paint change reaches the reflection too. The lamp lens is copied so the
+            // mirror can cull the faces the floor flip turns inside out.
             #expect(carMaterials.count == mirrorMaterials.count)
-            #expect(zip(carMaterials, mirrorMaterials).allSatisfy { $0 === $1 })
+            #expect(zip(carMaterials, mirrorMaterials).allSatisfy { car, mirror in
+                if VehicleLamps.role(material: car.material.name, node: car.node) == .lens {
+                    return car.material !== mirror.material
+                        && mirror.material.cullMode == .front
+                        && !mirror.material.isDoubleSided
+                }
+                return car.material === mirror.material
+            })
             var renderedAfterTheFloor = false
             mirror.enumerateHierarchy { node, _ in
                 if node.renderingOrder >= (floorNode?.renderingOrder ?? 0) { renderedAfterTheFloor = true }
