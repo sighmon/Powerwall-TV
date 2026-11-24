@@ -1186,6 +1186,7 @@ final class HouseLighting {
     /// Car files are in metres, nose towards −Z, origin on the ground at the car's centre, matching
     /// GenericVehicle. The local park point is (−0.7, 0.02, 0.7) at scale 0.35. The vehicle
     /// node is shifted so that point sits in the middle of the garage door.
+    /// The car arrives on its model's standard wheels; `setVehicleWheels` swaps in the car's own.
     func setVehicleModel(_ model: VehicleModel, paint: HouseColor? = nil) {
         vehicleModel = model
         guard let vehicle = root.childNode(withName: "Vehicle", recursively: true) else { return }
@@ -1211,10 +1212,21 @@ final class HouseLighting {
         vehicle.addChildNode(car)
         parkedVehicle = car
         repairVehicleShell(car, model: model)
+        VehicleWheels.mount(WheelChoice.resolve(wheelType: nil, model: model), on: car, look: .home)
         showAboveTheSkyWash(car)
         HouseGroundPlate.omitFromReflection(car)
         HouseCarLighting.mark(car)
         if let paint { setVehiclePaint(paint) }
+    }
+
+    /// Mounts the parked car's wheels (`VehicleWheels`, the no-metal home look) and puts them in the
+    /// car's light category and out of the floor reflection, like the rest of the car.
+    func setVehicleWheels(_ choice: WheelChoice?) {
+        guard let car = parkedVehicle else { return }
+        VehicleWheels.mount(choice, on: car, look: .home)
+        showAboveTheSkyWash(car)
+        HouseGroundPlate.omitFromReflection(car)
+        HouseCarLighting.mark(car)
     }
 
     /// The baked body is centred right of the opening. Slide the vehicle node so

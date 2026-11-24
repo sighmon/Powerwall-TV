@@ -241,6 +241,11 @@ class PowerwallViewModel: ObservableObject {
         }
     }
 
+    /// The saved appearance for this VIN, matched without case.
+    func storedAppearance(for vin: String) -> VehicleAppearance? {
+        vehicleAppearances[vin] ?? vehicleAppearances.first { $0.key.caseInsensitiveCompare(vin) == .orderedSame }?.value
+    }
+
     func clearVehicleAppearanceCache() {
         vehicleAppearances = [:]
         UserDefaults.standard.removeObject(forKey: Self.vehicleAppearanceCacheKey)
@@ -1528,12 +1533,10 @@ class PowerwallViewModel: ObservableObject {
             }
 
             let appearance = VehicleAppearance(
-                exteriorColor: vehicleData.response.vehicleConfig?.exteriorColor,
-                paintColorOverride: vehicleData.response.vehicleConfig?.paintColorOverride,
-                colorizerRemap: vehicleData.response.vehicleState?.colorizerPaintRemapEnabled ?? false,
-                carType: vehicleData.response.vehicleConfig?.carType
+                vehicleConfig: vehicleData.response.vehicleConfig,
+                colorizerRemap: vehicleData.response.vehicleState?.colorizerPaintRemapEnabled ?? false
             )
-            PaintDebug.log("vehicle_data (charge) \(PaintDebug.redact(vin)) vehicle_config=\(vehicleData.response.vehicleConfig == nil ? "missing" : "present") exterior_color=\(PaintDebug.raw(appearance.exteriorColor)) paint_color_override=\(PaintDebug.raw(appearance.paintColorOverride)) car_type=\(PaintDebug.raw(appearance.carType))")
+            PaintDebug.log("vehicle_data (charge) \(PaintDebug.redact(vin)) vehicle_config=\(vehicleData.response.vehicleConfig == nil ? "missing" : "present") exterior_color=\(PaintDebug.raw(appearance.exteriorColor)) paint_color_override=\(PaintDebug.raw(appearance.paintColorOverride)) car_type=\(PaintDebug.raw(appearance.carType)) wheel_type=\(PaintDebug.raw(vehicleData.response.vehicleConfig?.wheelType))")
             guard let chargeState = vehicleData.response.chargeState else {
                 self.logVehicleDebug("GET /vehicles/\(self.redactedVIN(vin))/vehicle_data missing charge_state body=\(self.vehicleResponsePreview(from: data))")
                 DispatchQueue.main.async {
@@ -1647,13 +1650,16 @@ class PowerwallViewModel: ObservableObject {
     /// that car is on stage in the showroom. `vehicle_data_cached` never includes `vehicle_config`, and
     /// products `color` and `option_codes` are null or generic, so this is the only reliable paint source
     /// for a car that is not plugged in. It never calls `wake_up`: an asleep car answers 408 and is asked
-    /// again later (`VehiclePaintFetchPolicy`). Once the paint is saved per VIN it is never asked again.
+    /// again later (`VehiclePaintFetchPolicy`). Once the paint and `wheel_type` are saved per VIN it is
+    /// never asked again. A car saved before wheels (paint, no `wheelType`) is asked once more, the same
+    /// way, and then its wheels are saved too, even when the reply names none.
     func fetchVehiclePaintIfNeeded(vin: String?, now: Date = Date(), withoutFilter: Bool = false) {
         guard !isDemoMode, loginMode == .fleetAPI, !accessToken.isEmpty,
               let vin = vin?.trimmingCharacters(in: .whitespacesAndNewlines), !vin.isEmpty else { return }
         let known = CarShowroom.paintSource(vin: vin, appearances: vehicleAppearances, vehicles: vehicles) != nil
         guard withoutFilter || paintPolicy.shouldFetch(
             hasPaint: known,
+            wheelsKnown: storedAppearance(for: vin)?.wheelsKnown ?? false,
             inFlight: paintFetchesInFlight.contains(vin),
             blockedUntil: paintFetchBlockedUntil[vin],
             now: now
@@ -1679,27 +1685,30 @@ class PowerwallViewModel: ObservableObject {
                 guard requestCacheGeneration == self.vehicleChargeCacheGeneration else { return }
                 let appearance = config.map {
                     VehicleAppearance(
-                        exteriorColor: $0.vehicleConfig?.exteriorColor,
-                        paintColorOverride: $0.vehicleConfig?.paintColorOverride,
-                        colorizerRemap: $0.vehicleState?.colorizerPaintRemapEnabled ?? false,
-                        carType: $0.vehicleConfig?.carType
+                        vehicleConfig: $0.vehicleConfig,
+                        colorizerRemap: $0.vehicleState?.colorizerPaintRemapEnabled ?? false
                     )
                 }
-                PaintDebug.log("vehicle_data paint \(PaintDebug.redact(vin)) status=\(status.map { String($0) } ?? "nil") vehicle_config=\(config?.vehicleConfig == nil ? "missing" : "present") exterior_color=\(PaintDebug.raw(appearance?.exteriorColor)) paint_color_override=\(PaintDebug.raw(appearance?.paintColorOverride)) car_type=\(PaintDebug.raw(appearance?.carType))")
+                PaintDebug.log("vehicle_data paint \(PaintDebug.redact(vin)) status=\(status.map { String($0) } ?? "nil") vehicle_config=\(config?.vehicleConfig == nil ? "missing" : "present") exterior_color=\(PaintDebug.raw(appearance?.exteriorColor)) paint_color_override=\(PaintDebug.raw(appearance?.paintColorOverride)) car_type=\(PaintDebug.raw(appearance?.carType)) wheel_type=\(PaintDebug.raw(config?.vehicleConfig?.wheelType))")
                 if status == 400 && !withoutFilter {
                     // Some firmware rejects the endpoints filter. One plain retry.
                     self.fetchVehiclePaintIfNeeded(vin: vin, now: now, withoutFilter: true)
                     return
                 }
                 if status == 401 { self.refreshAccessToken() }
-                if let appearance, appearance.hasPaint {
+                // A `vehicle_config` with no paint still settles the wheels, so it is saved.
+                if let appearance, appearance.wheelsKnown {
                     self.rememberVehicleAppearance(appearance, for: vin)
+                }
+                let settled = CarShowroom.paintSource(vin: vin, appearances: self.vehicleAppearances, vehicles: self.vehicles) != nil
+                    && self.storedAppearance(for: vin)?.wheelsKnown == true
+                if settled {
                     self.paintFetchBlockedUntil.removeValue(forKey: vin)
                 } else {
                     let retryAfter = http?.value(forHTTPHeaderField: "Retry-After").flatMap { TimeInterval($0.trimmingCharacters(in: .whitespaces)) }
                     let wait = self.paintPolicy.wait(afterStatus: status, retryAfter: retryAfter)
                     self.paintFetchBlockedUntil[vin] = Date().addingTimeInterval(wait)
-                    PaintDebug.log("vehicle_data paint \(PaintDebug.redact(vin)) no paint, next try in \(Int(wait / 60)) min")
+                    PaintDebug.log("vehicle_data paint \(PaintDebug.redact(vin)) no paint or wheels yet, next try in \(Int(wait / 60)) min")
                 }
             }
         }.resume()
@@ -2311,8 +2320,9 @@ struct VehiclePaintFetchPolicy {
     var refusedWait: TimeInterval = 24 * 60 * 60
     var minimumRateLimitWait: TimeInterval = 15 * 60
 
-    func shouldFetch(hasPaint: Bool, inFlight: Bool, blockedUntil: Date?, now: Date) -> Bool {
-        guard !hasPaint, !inFlight else { return false }
+    /// `wheelsKnown` false with paint known is a car saved before wheels: one more ask backfills them.
+    func shouldFetch(hasPaint: Bool, wheelsKnown: Bool = true, inFlight: Bool, blockedUntil: Date?, now: Date) -> Bool {
+        guard !(hasPaint && wheelsKnown), !inFlight else { return false }
         guard let blockedUntil else { return true }
         return now >= blockedUntil
     }
@@ -2787,11 +2797,29 @@ struct VehicleConfig: Codable {
     let exteriorColor: String?
     let paintColorOverride: String?
     let carType: String?
+    /// e.g. "Pinwheel18CapKit", "Gemini19". `TeslaWheel.named` maps it to a wheel usdz.
+    var wheelType: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case exteriorColor = "exterior_color"
         case paintColorOverride = "paint_color_override"
         case carType = "car_type"
+        case wheelType = "wheel_type"
+    }
+}
+
+extension VehicleAppearance {
+    /// One `vehicle_data` reply's paint, body and wheels. `wheelType` is "" when `vehicle_config` came
+    /// back with no `wheel_type`, so the car is not asked again just for wheels, and nil when the reply
+    /// had no `vehicle_config` at all.
+    init(vehicleConfig: VehicleConfig?, colorizerRemap: Bool) {
+        self.init(
+            exteriorColor: vehicleConfig?.exteriorColor,
+            paintColorOverride: vehicleConfig?.paintColorOverride,
+            colorizerRemap: colorizerRemap,
+            carType: vehicleConfig?.carType,
+            wheelType: vehicleConfig.map { $0.wheelType ?? "" }
+        )
     }
 }
 

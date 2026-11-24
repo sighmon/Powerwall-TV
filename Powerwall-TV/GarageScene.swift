@@ -10,8 +10,15 @@ enum GarageVehicleModel {
         if normalizedType.contains("cybertruck") {
             return .cybertruck
         }
-        if normalizedType.contains("highland") || normalizedType == "lychee" {
+        if normalizedType.contains("highland") {
             return .model3Highland
+        }
+        // Tesla's refresh code names: Lychee is the 2021 Model S, Tamarind the 2021 Model X.
+        if normalizedType == "lychee" {
+            return .modelS
+        }
+        if normalizedType == "tamarind" {
+            return .modelX
         }
         if normalizedType.contains("juniper") {
             return .modelYJuniper
@@ -82,10 +89,17 @@ struct VehicleAppearance: Codable, Equatable {
     var paintColorOverride: String?
     var colorizerRemap: Bool
     var carType: String?
+    /// `vehicle_config.wheel_type`, e.g. "Pinwheel18CapKit". "" when a `vehicle_config` was read and had
+    /// none; nil when no `vehicle_config` has been read for this car yet (a cache saved before wheels).
+    var wheelType: String? = nil
 
     var hasUsefulData: Bool {
         !trimmed(exteriorColor).isEmpty || !trimmed(paintColorOverride).isEmpty || !trimmed(carType).isEmpty
+            || wheelType != nil
     }
+
+    /// True once a `vehicle_config` has said which wheels the car has, or that it does not say.
+    var wheelsKnown: Bool { wheelType != nil }
 
     /// True when this copy says which paint the car has.
     var hasPaint: Bool {
@@ -107,7 +121,9 @@ struct VehicleAppearance: Codable, Equatable {
             exteriorColor: pick(newer.exteriorColor, exteriorColor),
             paintColorOverride: override,
             colorizerRemap: newer.hasPaint ? newer.colorizerRemap : colorizerRemap,
-            carType: pick(newer.carType, carType)
+            carType: pick(newer.carType, carType),
+            // A named wheel wins; a newer "" (read, none sent) only fills a nil.
+            wheelType: pick(newer.wheelType, wheelType) ?? newer.wheelType
         )
     }
 
@@ -145,6 +161,8 @@ struct GaragePresentation: Equatable {
     var paintColorOverride: String?
     var colorizerRemap: Bool
     var solar: GarageSolar
+    /// The parked car's `wheel_type`, for `WheelChoice.resolve`. Nil leaves the model's standard wheels.
+    var wheelType: String? = nil
 
     static func make(
         data: PowerwallData?,
@@ -175,7 +193,8 @@ struct GaragePresentation: Equatable {
             exteriorColor: exterior?.isEmpty == false ? exterior : nil,
             paintColorOverride: paintOverride?.isEmpty == false ? paintOverride : nil,
             colorizerRemap: appearance?.colorizerRemap ?? false,
-            solar: solar
+            solar: solar,
+            wheelType: showVehicle ? appearance?.wheelType : nil
         )
     }
 

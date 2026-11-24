@@ -25,7 +25,8 @@ struct GarageSceneTests {
         #expect(GarageVehicleModel.resolve(vin: "5YJSA1E25MF000001", carType: "cybertruck") == .cybertruck)
         #expect(GarageVehicleModel.resolve(vin: "5YJYGDEE5SF000001", carType: "model3") == .model3Highland)
         #expect(GarageVehicleModel.resolve(vin: nil, carType: "modely") == .modelY)
-        #expect(GarageVehicleModel.resolve(vin: "5YJ3GDEE5NF000001", carType: "lychee") == .model3Highland)
+        #expect(GarageVehicleModel.resolve(vin: nil, carType: "lychee") == .modelS)
+        #expect(GarageVehicleModel.resolve(vin: nil, carType: "tamarind") == .modelX)
     }
 
     @Test func garageFollowsTheWallConnectorAndCachedPaint() {

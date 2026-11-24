@@ -30,6 +30,8 @@ The before and after columns are Cycles approximations of the SceneKit scene, ma
 - `ShowroomStudio.png`: `New_Studio.png` with the sky rotation baked in, 1024 × 512.
 - `*_GroundAO.png`: each car's `Ground_AO` texture, rotated so the top is the nose (−Z) and the left is −X.
   Model Y Juniper uses Highland's, because its exported texture is empty. Generic uses Model 3's.
+- `Wheel_*.usdz`: the Tesla app's 71 wheel scenes, one usdz each (8.8 MB together). See [Wheels](#wheels).
+- The car usdz files carry no wheels, only four `WheelAnchor_*` empties.
 
 These are Tesla's copyrighted assets. Keep them in this private repository.
 
@@ -300,6 +302,119 @@ them to opaque Trim. They now map to Glass, like the windscreen and front window
 has unnamed exterior surfaces. The B pillars sit on the `Interior` mesh, which is dropped: the
 outer cover is on its Trim surface and the inner trim on its `Pillar` surface. The converter keeps
 the triangles of those two surfaces between the door windows, as a gloss black `Pillar` material.
+
+## Wheels
+
+![Caps on and off: Model 3 Pinwheel, Model Y Gemini](wheels.jpg)
+
+Each car wears its own wheels, read from `vehicle_config.wheel_type` in the `vehicle_data` calls the app
+already makes. No new Fleet call is added (see the backfill below).
+
+### Files
+
+- `tools/export_wheels.py` reads every wheel scene in the Tesla app's Godot pack: `WheelTypeToPathMap` and
+  `WheelTypeToCapsOverrideMap` in `VehicleOptions.gd`, minus Cybercab. It uses `tools/rsrc.py` and
+  `tools/godot.py` for Godot 3 binary and text resources. It writes one usdz per scene into `TeslaAssets`:
+  - 71 files, 8.8 MB together.
+  - Each is in the wheel's own frame: axle at the origin, +X forward, +Y up, +Z out of the right side.
+  - There is one mesh per material, named `WheelTire*` or `WheelRim*`.
+  - Textures are 256 px for rims and 128 px for tyres. Albedo has Tesla's baked occlusion multiplied in.
+  - Meshes over 3000 triangles are decimated.
+  - Rim colours are boosted ×3.5, like the paint display boost. Tesla's albedos are tuned for its
+    reflection-heavy renderer and read near black without it.
+- `tools/strip_wheels.py` took the baked `Wheels` mesh and the tyre triangles out of the seven car files,
+  and added `WheelAnchor_LF/RF/LR/RR` at the app's `Wheel_*_Spatial` transforms. This took the car files
+  from 20.2 MB to 17.2 MB.
+  - Stripping was chosen over hiding, so no hidden geometry is copied into the floor mirror.
+  - Left anchors are turned 180° about Y, never mirrored, so one wheel file faces out on both sides.
+  - Cybertruck keeps the body rubber that shares its `Tires` mesh.
+- `tools/wheel_table.py` prints the generated part of `TeslaWheel.swift`.
+- `tools/render_wheels.py` is the Blender check (`/workspace/showroom-shots/wheels/`).
+- `tools/inventory.py` and `tools/anchors.py` list the scenes and read the anchors.
+
+### Choosing a wheel (`TeslaWheel`, `WheelChoice.resolve`)
+
+`TeslaWheel` is the Tesla app's `WheelType` enum (53 styles). Each style has its usdz, and sometimes a
+caps swap. Fleet names come from the app's mobile and gateway tables (83 keys). They are compared as
+lowercase letters and digits, so `PINWHEEL_18`, `pinwheel18` and `Pinwheel18` match. A name is matched in
+this order:
+
+1. An exact table name. The app's own `…CapKit` names already point at the caps-off style:
+   `Pinwheel18CapKit` → `Wheel_Pinwheel_No_Cap`.
+2. A name ending in `CapKit`, `NoCaps` or `CapsOff`, with that suffix removed. Caps come off when the style
+   has a caps-off file: `Glider18CapKit` → `Wheel_Glider_No_Caps`.
+3. The shortest table name that starts with it, then the longest table name it starts with, then a
+   marketing name: `Photon` → Glider, `Nova` → Nova19Dark, `Crossflow` → Crossflow19.
+4. The model's standard wheel. This covers nil, `""`, `UNKNOWN` and any name the tables do not know.
+
+| Model | Standard wheel |
+| --- | --- |
+| Model 3 | Pinwheel (`Wheel_Pinwheel`) |
+| Model 3 Highland | Glider |
+| Model Y | Gemini |
+| Model Y Juniper | Helix 2.0 (`Wheel_Helix2`) |
+| Model S | Cardenio |
+| Model X | Cyberstream |
+| Cybertruck | Cybertruck Standard |
+| Generic | none: the baked body keeps its own wheels |
+
+A Cybertruck only takes Cybertruck wheels, and no other car takes them. Catalogue cars always wear the
+standard wheel. Caps default to on, as in the Tesla app. Fleet does not send the app's `wheel_caps_on`, so
+caps come off only when the name says so. The `capsOn:` argument is there for when it does.
+
+### Mounting (`VehicleWheels.mount`)
+
+The chosen usdz is loaded once per look and cloned onto each `WheelAnchor_*`. It is dropped so the tyre
+bottom sits 5 mm into the floor, using the radius from its bounding box and the anchor's height and
+scale. A 20" wheel on an 18" hub therefore neither floats nor sinks. Mounted nodes are named
+`VehicleWheel_<usdz>`.
+
+- **Showroom** (`CarShowroom.scene`): this uses Tesla's metal and roughness under the studio panorama.
+  Wheels are mounted before `ShowroomStage.makeMirror`, so the floor mirror clones them.
+  - `CarShowroom.repainted` re-reads the saved `wheel_type` even when the paint is not known.
+  - A reply that lands while the showroom is open changes `displayed` and rebuilds the stage with the new
+    wheels.
+- **Home garage** (`HouseLighting.setVehicleWheels`):
+  - `setVehicleModel` mounts the standard wheel first.
+  - `HouseSceneView.apply` swaps in the car's own wheel when `GaragePresentation.wheelType` resolves to a
+    different usdz.
+  - The home has no environment for metal to reflect, so its wheels use metalness 0.
+  - Wheels get `HouseCarLighting.mark`, so they are lit only by the car's lights, and they are left out of
+    the ground plate's reflection.
+- **Demo** uses a real Fleet name per model, with no Fleet call. Model 3 uses `Pinwheel18CapKit`, so demo
+  shows caps off. The others use `Nova19Dark`, `Induction20Black`, `Crossflow19`,
+  `Tempest19SonicSilver`, `Turbine22Dark` and `CTPremium20`.
+
+### Saved per VIN, and the one backfill
+
+`VehicleAppearance.wheelType` is saved with the paint in `fleetVehicleAppearanceCache`. It has three
+states:
+
+- a name, such as `"Gemini19"`;
+- `""`: a `vehicle_config` was read and had no `wheel_type`;
+- nil: no `vehicle_config` has been read since wheels were added.
+
+A merge keeps a named wheel over a later `""`.
+
+`fetchVehiclePaintIfNeeded` used to stop once the paint was known. It now stops once the paint is known
+and `wheelType` is not nil. A car saved by an earlier build is therefore asked once more, while it is on
+stage in the showroom:
+
+- It uses the same `vehicle_data?endpoints=vehicle_config` call and the same `VehiclePaintFetchPolicy`
+  backoff.
+- It never calls `wake_up`: an asleep car answers 408 and is asked again after 30 minutes.
+- The reply is saved even when it has no `wheel_type`, so the car is never asked again.
+
+A plugged-in car's charge call and `vehicle_data_cached` (when it carries `vehicle_config`) fill the field
+too. Clear All Settings clears it with the rest of the appearance cache. Demo makes no call.
+
+`-debugPaint YES` adds the following:
+
+- the raw `wheel_type` on every paint and charge call;
+- the saved `wheel_type` on each car's line;
+- a `wheels wheel_type=… → Style caps on|off Wheel_….usdz (fleet|standard)` part on each car's line.
+
+VINs are cut to their last 4.
 
 ## Garage lineup: the account's cars, then the catalogue
 

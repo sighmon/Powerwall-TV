@@ -97,11 +97,13 @@ struct VehicleInfoPayload: Decodable {
         let exteriorColor: String?
         let paintColorOverride: String?
         let carType: String?
+        let wheelType: String?
 
         enum CodingKeys: String, CodingKey {
             case exteriorColor = "exterior_color"
             case paintColorOverride = "paint_color_override"
             case carType = "car_type"
+            case wheelType = "wheel_type"
         }
     }
 
@@ -226,7 +228,8 @@ struct VehicleInfo: Codable, Equatable {
                     exteriorColor: config.exteriorColor,
                     paintColorOverride: config.paintColorOverride,
                     colorizerRemap: state?.colorizerPaintRemapEnabled ?? false,
-                    carType: config.carType
+                    carType: config.carType,
+                    wheelType: config.wheelType ?? ""
                 )
                 return appearance.hasUsefulData ? appearance : nil
             }

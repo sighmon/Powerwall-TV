@@ -28,6 +28,8 @@ struct DemoVehicle: Equatable {
     let vin: String
     let displayName: String
     let model: VehicleModel
+    /// A Fleet `wheel_type` this model ships with, so demo shows real wheel swaps with no Fleet call.
+    var wheelType: String? = nil
 }
 
 /// Demo mode walks these skies and, for each exported car, every distinct Tesla paint.
@@ -87,13 +89,13 @@ enum DemoHouseTour {
     /// VINs follow the same year and model rules as a live Fleet car.
     static let vehicles: [DemoVehicle] = [
         DemoVehicle(vin: "5YJ000000NF000001", displayName: "Generic", model: .generic),
-        DemoVehicle(vin: "5YJ3GDEE5NF000001", displayName: "Model 3", model: .model3),
-        DemoVehicle(vin: "5YJ3GDEE5RF000001", displayName: "Model 3 Highland", model: .model3Highland),
-        DemoVehicle(vin: "5YJYGDEE5LF000001", displayName: "Model Y", model: .modelY),
-        DemoVehicle(vin: "5YJYGDEE5SF000001", displayName: "Model Y Juniper", model: .modelYJuniper),
-        DemoVehicle(vin: "5YJSA1E25MF000001", displayName: "Model S", model: .modelS),
-        DemoVehicle(vin: "5YJXCAE25MF000001", displayName: "Model X", model: .modelX),
-        DemoVehicle(vin: "7G2C12345RF000001", displayName: "Cybertruck", model: .cybertruck),
+        DemoVehicle(vin: "5YJ3GDEE5NF000001", displayName: "Model 3", model: .model3, wheelType: "Pinwheel18CapKit"),
+        DemoVehicle(vin: "5YJ3GDEE5RF000001", displayName: "Model 3 Highland", model: .model3Highland, wheelType: "Nova19Dark"),
+        DemoVehicle(vin: "5YJYGDEE5LF000001", displayName: "Model Y", model: .modelY, wheelType: "Induction20Black"),
+        DemoVehicle(vin: "5YJYGDEE5SF000001", displayName: "Model Y Juniper", model: .modelYJuniper, wheelType: "Crossflow19"),
+        DemoVehicle(vin: "5YJSA1E25MF000001", displayName: "Model S", model: .modelS, wheelType: "Tempest19SonicSilver"),
+        DemoVehicle(vin: "5YJXCAE25MF000001", displayName: "Model X", model: .modelX, wheelType: "Turbine22Dark"),
+        DemoVehicle(vin: "7G2C12345RF000001", displayName: "Cybertruck", model: .cybertruck, wheelType: "CTPremium20"),
     ]
 
     static func weather(at index: Int) -> DemoWeatherScene {
@@ -116,13 +118,15 @@ enum DemoHouseTour {
         guard step > 0 else { return (generic, blank) }
         let paintStep = step - 1
         let paint = paints[paintStep % colourCount]
+        let car = painted[paintStep / colourCount]
         return (
-            painted[paintStep / colourCount],
+            car,
             VehicleAppearance(
                 exteriorColor: paint.name,
                 paintColorOverride: paint.demoOverride,
                 colorizerRemap: false,
-                carType: nil
+                carType: nil,
+                wheelType: car.wheelType
             )
         )
     }

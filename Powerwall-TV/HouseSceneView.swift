@@ -611,6 +611,8 @@ final class HouseSceneController {
     private var prepared = false
     private var appliedModel: VehicleModel?
     private var appliedPaint: String?
+    /// The wheel usdz on the parked car, so a new `wheel_type` swaps them and nothing else does.
+    private var appliedWheels: String?
     private var sample: HouseWeatherSample?
     private var demoSky: DemoWeatherScene?
     /// Set when a demo sky was stored before the house lights existed.
@@ -695,12 +697,19 @@ final class HouseSceneController {
         guard presentation.showVehicle else {
             appliedModel = nil
             appliedPaint = nil
+            appliedWheels = nil
             return
         }
         if appliedModel != presentation.model {
             lighting.setVehicleModel(presentation.model)
             appliedModel = presentation.model
             appliedPaint = nil
+            appliedWheels = nil
+        }
+        let wheels = WheelChoice.resolve(wheelType: presentation.wheelType, model: presentation.model)
+        if appliedWheels != wheels?.asset {
+            lighting.setVehicleWheels(wheels)
+            appliedWheels = wheels?.asset
         }
         // The baked generic body has no paint shell. Live cars and the demo both leave it.
         guard presentation.model != .generic else { return }

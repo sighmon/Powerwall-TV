@@ -27,6 +27,9 @@ struct CarShowroomRequest: Equatable, Identifiable {
     var lineup: [CarShowroomRequest] = []
     /// Lineup entry the showroom opens on: the last car shown, when it is still in the lineup.
     var startIndex: Int = 0
+    /// `vehicle_config.wheel_type`, saved per VIN. Nil, "" and catalogue cars get the model's standard
+    /// wheels (`WheelChoice.resolve`).
+    var wheelType: String? = nil
 
     var id: String { vin ?? model.rawValue }
 }
@@ -232,21 +235,27 @@ enum CarShowroom {
         return [
             "car \(PaintDebug.redact(vin)) model=\(car.model.rawValue)",
             "products.color=\(PaintDebug.raw(vehicle?.color)) option_codes=\(PaintDebug.raw(vehicle?.optionCodes)) (ignored)",
-            "saved vehicle_config exterior_color=\(PaintDebug.raw(stored?.exteriorColor)) paint_color_override=\(PaintDebug.raw(stored?.paintColorOverride)) car_type=\(PaintDebug.raw(stored?.carType))",
+            "saved vehicle_config exterior_color=\(PaintDebug.raw(stored?.exteriorColor)) paint_color_override=\(PaintDebug.raw(stored?.paintColorOverride)) car_type=\(PaintDebug.raw(stored?.carType)) wheel_type=\(PaintDebug.raw(stored?.wheelType))",
             "source=\(source) exterior=\(PaintDebug.raw(car.exteriorColor)) → \(resolved.debugDescription) glow #\(glowHex)",
+            "wheels " + WheelChoice.debugDescription(wheelType: car.wheelType, choice: WheelChoice.resolve(for: car)),
         ].joined(separator: " | ")
     }
 
-    /// Re-reads an owned car's paint, so a `vehicle_data_cached` reply that arrives while the showroom is
-    /// open repaints it. The title's colour suffix follows. Catalogue cars come back unchanged.
+    /// Re-reads an owned car's paint and wheels, so a `vehicle_data` reply that arrives while the showroom
+    /// is open repaints it and swaps its wheels. The title's colour suffix follows. Catalogue cars come
+    /// back unchanged.
     static func repainted(_ car: CarShowroomRequest, appearances: [String: VehicleAppearance], vehicles: [FleetVehicle]) -> CarShowroomRequest {
-        guard !car.browsesCatalogue,
-              let source = paintSource(vin: car.vin, appearances: appearances, vehicles: vehicles) else { return car }
+        guard !car.browsesCatalogue else { return car }
+        var copy = car
+        if let vin = car.vin,
+           let wheelType = (appearances[vin] ?? appearances.first { $0.key.caseInsensitiveCompare(vin) == .orderedSame }?.value)?.wheelType {
+            copy.wheelType = wheelType
+        }
+        guard let source = paintSource(vin: car.vin, appearances: appearances, vehicles: vehicles) else { return copy }
         func clean(_ value: String?) -> String? {
             let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return trimmed.isEmpty ? nil : trimmed
         }
-        var copy = car
         copy.exteriorColor = clean(source.exteriorColor)
         copy.paintColorOverride = clean(source.paintColorOverride)
         copy.colorizerRemap = source.colorizerRemap
@@ -303,7 +312,8 @@ enum CarShowroom {
             paintColorOverride: wrap?.isEmpty == false ? wrap : nil,
             colorizerRemap: appearance?.colorizerRemap ?? false,
             displayBoost: displayBoost,
-            lines: statLines(displayName: name, exteriorColor: exterior?.isEmpty == false ? exterior : nil, snapshot: charge(for: vin, in: charges))
+            lines: statLines(displayName: name, exteriorColor: exterior?.isEmpty == false ? exterior : nil, snapshot: charge(for: vin, in: charges)),
+            wheelType: appearance?.wheelType
         )
     }
 
@@ -379,7 +389,8 @@ enum CarShowroom {
             paintColorOverride: presentation.paintColorOverride,
             colorizerRemap: presentation.colorizerRemap,
             displayBoost: displayBoost,
-            lines: statLines(displayName: name, exteriorColor: presentation.exteriorColor, snapshot: charge(for: vin, in: charges))
+            lines: statLines(displayName: name, exteriorColor: presentation.exteriorColor, snapshot: charge(for: vin, in: charges)),
+            wheelType: presentation.wheelType
         )
     }
 
@@ -443,6 +454,8 @@ enum CarShowroom {
         case .custom(let custom):
             applyPaint(custom, to: vehicle, displayBoost: request.displayBoost)
         }
+        // Before the mirror, which clones the car with its wheels.
+        VehicleWheels.mount(WheelChoice.resolve(for: request), on: vehicle, look: .showroom)
         scene.rootNode.addChildNode(vehicle)
         scene.rootNode.addChildNode(ShowroomStage.makeMirror(of: vehicle))
         return scene
