@@ -569,15 +569,16 @@ struct CarShowroomOrbit: Equatable {
     var pan = SIMD3<Float>.zero
     static let panRange: ClosedRange<Float> = -3...3
 
-    /// Relative to the resting view, which already looks down about 25°.
+    /// Relative to the resting view, which already looks down about 13°.
     static let pitchRange: ClosedRange<Float> = -20...40
     /// Wide enough that a portrait window can still back up to fit a Cybertruck.
     static let distanceRange: ClosedRange<Float> = 0.2...6
     /// Eye minus the look target at the resting view. The car's nose is −Z, and this
     /// offset sits on the car's left so that nose points toward the left of the screen.
-    /// Direction of the Tesla app's PARKED camera (Snapshots.gd: rotation (−25°, −138°),
-    /// 7 m out), so the car is seen from the same front three-quarter angle and height.
-    static let restingOffset = SIMD3<Float>(-4.244, 2.958, -4.713)
+    /// The ground position is the Tesla app's PARKED camera (Snapshots.gd: yaw −138°).
+    /// The height above the look point is half of that camera's 2.958 m, so the view
+    /// sits lower on the same yaw.
+    static let restingOffset = SIMD3<Float>(-4.244, 2.958 * 0.5, -4.713)
     static let lookHeight: Float = 0.72
     /// Share of the window the fitted car may use. The rest stays clear of the edges.
     static let fitFill: Float = 0.9

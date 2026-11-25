@@ -2222,7 +2222,9 @@ struct GarageSceneTests {
         #expect(abs(CarShowroomOrbit.verticalFieldOfViewDegrees - 30) < 0.001)
         let offset = CarShowroomOrbit.restingOffset
         let elevation = asin(offset.y / simd_length(offset)) * 180 / .pi
-        #expect(abs(elevation - 25) < 0.5)
+        // Half of the Tesla camera's 2.958 m height, so the yaw stays −138° and the view is lower.
+        #expect(abs(offset.y - 1.479) < 0.001)
+        #expect(abs(elevation - 13.13) < 0.5)
         let yaw = atan2(offset.x, offset.z) * 180 / .pi
         #expect(abs(yaw - -138) < 0.5)
         #expect(abs(ShowroomStage.backgroundRGB.x - 22 / 255) < 0.001)
@@ -2281,7 +2283,8 @@ struct GarageSceneTests {
         let highEye = overhead.eye(around: centre)
         let highForward = simd_normalize(overhead.target(around: centre) - highEye)
         let high = ShowroomStage.glowPlacement(eye: highEye, forward: highForward, centre: centre)
-        #expect((high?.opacity ?? 1) < 0.01)
+        // The resting camera is lower, so the steepest pitch no longer buries the glow completely.
+        #expect((high?.opacity ?? 1) < 0.05)
     }
 
     @Test func showroomOrbitStartsOnTheRestingCameraAndStaysOnTheCar() {
