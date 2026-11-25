@@ -268,24 +268,47 @@ struct GarageSceneTests {
         #expect(first.appearance.exteriorColor == nil)
         #expect(first.appearance.paintColorOverride == nil)
 
-        let model3 = DemoHouseTour.parkedCar(at: 1)
+        func start(of model: VehicleModel) -> Int {
+            var index = 0
+            for car in DemoHouseTour.vehicles {
+                if car.model == model { return index }
+                index += DemoHouseTour.steps(for: car.model)
+            }
+            return index
+        }
+        let model3 = DemoHouseTour.parkedCar(at: start(of: .model3))
         #expect(model3.vehicle.model == .model3)
         #expect(model3.appearance.exteriorColor == paints[0].name)
+        let model3Wheels = TeslaWheel.demoNames(for: .model3)
+        #expect(model3.appearance.wheelType == model3Wheels.first)
+        #expect(model3Wheels.count > 1)
 
-        let endOfModel3 = DemoHouseTour.parkedCar(at: paints.count)
+        let endOfModel3 = DemoHouseTour.parkedCar(at: start(of: .model3Highland) - 1)
         #expect(endOfModel3.vehicle.model == .model3)
-        #expect(endOfModel3.appearance.exteriorColor == paints.last?.name)
+        let lastModel3Step = DemoHouseTour.steps(for: .model3) - 1
+        #expect(endOfModel3.appearance.exteriorColor == paints[lastModel3Step % paints.count].name)
+        #expect(endOfModel3.appearance.wheelType == model3Wheels[lastModel3Step % model3Wheels.count])
 
-        let highland = DemoHouseTour.parkedCar(at: paints.count + 1)
+        var seenWheels: [String] = []
+        for local in 0..<DemoHouseTour.steps(for: .model3) {
+            seenWheels.append(DemoHouseTour.parkedCar(at: start(of: .model3) + local).appearance.wheelType ?? "")
+        }
+        #expect(Set(seenWheels) == Set(model3Wheels))
+
+        let highland = DemoHouseTour.parkedCar(at: start(of: .model3Highland))
         #expect(highland.vehicle.model == .model3Highland)
         #expect(highland.appearance.exteriorColor == paints[0].name)
+        #expect(highland.appearance.wheelType == TeslaWheel.demoNames(for: .model3Highland).first)
 
         let previous = DemoHouseTour.parkedCar(at: -1)
         #expect(previous.vehicle.model == .cybertruck)
-        #expect(previous.appearance.exteriorColor == paints.last?.name)
+        let truckSteps = DemoHouseTour.steps(for: .cybertruck)
+        #expect(previous.appearance.exteriorColor == paints[(truckSteps - 1) % paints.count].name)
+        let truckWheels = TeslaWheel.demoNames(for: .cybertruck)
+        #expect(previous.appearance.wheelType == truckWheels[(truckSteps - 1) % truckWheels.count])
+        #expect(Set(truckWheels).isDisjoint(with: model3Wheels))
 
-        let paintedCars = DemoHouseTour.vehicles.filter { $0.model != .generic }
-        let truck = DemoHouseTour.parkedCar(at: 1 + (paintedCars.count - 1) * paints.count)
+        let truck = DemoHouseTour.parkedCar(at: start(of: .cybertruck))
         #expect(truck.vehicle.model == .cybertruck)
         let data = PowerwallData(
             battery: .init(instantPower: 0, count: 1),

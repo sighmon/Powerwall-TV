@@ -32,10 +32,10 @@ struct DemoVehicle: Equatable {
     var wheelType: String? = nil
 }
 
-/// Demo mode walks these skies and, for each exported car, every distinct Tesla paint.
-/// The baked generic body stays its file colour. Paint changes every `colourInterval`.
-/// The sky still waits for two 10-second power samples so its five-second fade can finish.
-/// A car changes only after its colours.
+/// Demo mode walks these skies and, for each exported car, every distinct Tesla paint and every
+/// wheel that fits that car. The baked generic body stays its file colour and its own wheels.
+/// Paint and wheels change together every `colourInterval`. The sky still waits for two 10-second
+/// power samples so its five-second fade can finish. A car changes only after its colours and wheels.
 enum DemoHouseTour {
     static let powerTicksPerScene = 2
     static let colourInterval: TimeInterval = 2
@@ -106,29 +106,43 @@ enum DemoHouseTour {
         vehicles[wrapped(index, count: vehicles.count)]
     }
 
-    /// The baked generic body stays its file colour for one step. Every other car
-    /// then walks `TeslaPaint.catalogue` before the next model.
+    /// How many demo steps one model stays parked. Generic is a single step. Every other car stays
+    /// long enough to show each of its colours and each of its wheels at least once.
+    static func steps(for model: VehicleModel) -> Int {
+        guard model != .generic else { return 1 }
+        return max(TeslaWheel.demoNames(for: model).count, TeslaPaint.catalogue.count, 1)
+    }
+
+    /// The baked generic body stays its file colour for one step. Every other car then walks its
+    /// paints and its own wheels before the next model. Both advance together, one step at a time.
     static func parkedCar(at index: Int) -> (vehicle: DemoVehicle, appearance: VehicleAppearance) {
-        let paints = TeslaPaint.catalogue
-        let colourCount = max(paints.count, 1)
         let generic = vehicles.first { $0.model == .generic } ?? vehicles[0]
         let painted = vehicles.filter { $0.model != .generic }
-        let step = wrapped(index, count: 1 + painted.count * colourCount)
+        let total = 1 + painted.reduce(0) { $0 + steps(for: $1.model) }
+        let step = wrapped(index, count: total)
         let blank = VehicleAppearance(exteriorColor: nil, paintColorOverride: nil, colorizerRemap: false, carType: nil)
         guard step > 0 else { return (generic, blank) }
-        let paintStep = step - 1
-        let paint = paints[paintStep % colourCount]
-        let car = painted[paintStep / colourCount]
-        return (
-            car,
-            VehicleAppearance(
-                exteriorColor: paint.name,
-                paintColorOverride: paint.demoOverride,
-                colorizerRemap: false,
-                carType: nil,
-                wheelType: car.wheelType
-            )
-        )
+        var cursor = step - 1
+        for car in painted {
+            let span = steps(for: car.model)
+            if cursor < span {
+                let paints = TeslaPaint.catalogue
+                let wheels = TeslaWheel.demoNames(for: car.model)
+                let paint = paints[cursor % max(paints.count, 1)]
+                return (
+                    car,
+                    VehicleAppearance(
+                        exteriorColor: paint.name,
+                        paintColorOverride: paint.demoOverride,
+                        colorizerRemap: false,
+                        carType: nil,
+                        wheelType: wheels.isEmpty ? car.wheelType : wheels[cursor % wheels.count]
+                    )
+                )
+            }
+            cursor -= span
+        }
+        return (generic, blank)
     }
 
     /// Keeps a title that is already on the request, and adds the sample charge lines when they are missing.

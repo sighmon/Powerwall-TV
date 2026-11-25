@@ -263,6 +263,24 @@ enum TeslaWheel: String, CaseIterable {
         }
     }
 
+    /// One Fleet name per style that fits `model`, in `allCases` order. Caps-on when that file exists.
+    /// Cybertruck wheels stay on the Cybertruck. Generic has none.
+    static func demoNames(for model: VehicleModel) -> [String] {
+        guard model != .generic else { return [] }
+        var seenAssets = Set<String>()
+        return allCases.compactMap { wheel in
+            guard wheel.isCybertruck == (model == .cybertruck) else { return nil }
+            let names = fleetNames.filter { $0.value == wheel }.map(\.key).sorted()
+            let preferred = names.first {
+                WheelChoice.resolve(wheelType: $0, model: model)?.asset == wheel.asset(capsOn: true)
+            } ?? names.first
+            guard let preferred,
+                  let asset = WheelChoice.resolve(wheelType: preferred, model: model)?.asset,
+                  seenAssets.insert(asset).inserted else { return nil }
+            return preferred
+        }
+    }
+
     /// What a model wears when Fleet has not named a wheel, and what catalogue cars always wear.
     /// Tesla's defaults (`DefaultWheelForVehicleType`) where they fit the body we draw; Highland, Juniper,
     /// Model S and Model X keep the wheels their files were exported with.

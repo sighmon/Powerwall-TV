@@ -312,9 +312,8 @@ struct VehicleWheelsTests {
             let choice = WheelChoice.resolve(wheelType: car.wheelType, model: car.model)
             #expect(choice?.source == .fleet, "\(car.model.rawValue)")
         }
-        let step = 1
-        let parked = DemoHouseTour.parkedCar(at: step)
-        #expect(parked.appearance.wheelType == parked.vehicle.wheelType)
+        let parked = DemoHouseTour.parkedCar(at: 1)
+        #expect(parked.appearance.wheelType == TeslaWheel.demoNames(for: parked.vehicle.model).first)
     }
 
     @Test func paintLogShowsTheWheelTypeAndTheFileWithTheVINCut() {
