@@ -842,8 +842,8 @@ struct CarShowroomView: View {
             }
             .overlay(alignment: .topTrailing) {
                 closeButton
-                    .padding(.top, chromeInset(proxy.safeAreaInsets.top))
-                    .padding(.trailing, chromeInset(proxy.safeAreaInsets.trailing))
+                    .padding(.top, closeInset(proxy.safeAreaInsets.top))
+                    .padding(.trailing, closeInset(proxy.safeAreaInsets.trailing, edge: .trailing))
             }
             .overlay(alignment: .bottomLeading) {
                 if browses {
@@ -1006,6 +1006,16 @@ struct CarShowroomView: View {
         #endif
     }
 
+    /// The showroom is full bleed, so the close control adds the graph's 12 pt top and 16 pt
+    /// trailing inset on top of the safe area. tvOS keeps the larger bezel inset.
+    private func closeInset(_ safe: CGFloat, edge: Edge = .top) -> CGFloat {
+        #if os(tvOS)
+        chromeInset(safe)
+        #else
+        safe + (edge == .trailing ? 16 : 12)
+        #endif
+    }
+
     /// Clears the window edge, and any safe area the full-bleed scene draws under.
     private func chromeInset(_ safe: CGFloat) -> CGFloat {
         #if os(tvOS)
@@ -1021,14 +1031,18 @@ struct CarShowroomView: View {
         return min(showroomMessageWidth, max(160, proxy.size.width - horizontal))
     }
 
-    /// The system close glyph, top right.
+    /// Same close glyph and 48-point target as the graph. tvOS keeps a larger symbol for the remote.
     private var closeButton: some View {
         Button(action: onDismiss) {
+            #if os(tvOS)
             Image(systemName: "xmark.circle.fill")
                 .symbolRenderingMode(.hierarchical)
                 .font(.system(size: 28))
                 .foregroundStyle(.secondary)
                 .padding(10)
+            #else
+            OverlayCloseButtonLabel()
+            #endif
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close")
