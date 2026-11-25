@@ -53,6 +53,7 @@ struct GarageSceneTests {
         )
         #expect(parked.showWallConnector)
         #expect(parked.showVehicle)
+        #expect(!parked.showsDressedVehicle)
         #expect(parked.model == .modelY)
         #expect(parked.exteriorColor == "PearlWhite")
 
@@ -323,18 +324,24 @@ struct GarageSceneTests {
         let controller = HouseSceneController()
         controller.prepareIfNeeded()
         let pearl = TeslaPaint.table["PearlWhite"]!
-        controller.apply(
-            GaragePresentation(
-                showWallConnector: true,
-                showVehicle: true,
-                model: .modelY,
-                exteriorColor: "PearlWhite",
-                paintColorOverride: pearl.fleetOverride,
-                colorizerRemap: false,
-                solar: .panels
-            ),
-            heading: 180
+        let waiting = GaragePresentation(
+            showWallConnector: true,
+            showVehicle: true,
+            model: .modelY,
+            exteriorColor: "PearlWhite",
+            paintColorOverride: pearl.fleetOverride,
+            colorizerRemap: false,
+            solar: .panels
         )
+        controller.apply(waiting, heading: 180)
+        let vehicle = controller.scene.rootNode.childNode(withName: "Vehicle", recursively: true)
+        let door = controller.scene.rootNode.childNode(withName: "GarageDoor", recursively: true)
+        #expect(vehicle?.isHidden == true)
+        #expect(door?.isHidden == false)
+        #expect(controller.scene.rootNode.childNode(withName: "VehicleModel_ModelY", recursively: true) == nil)
+        var dressed = waiting
+        dressed.wheelType = "Gemini19"
+        controller.apply(dressed, heading: 180)
         var paint: SCNMaterial?
         controller.scene.rootNode.enumerateHierarchy { node, stop in
             guard node.name == "VehicleModel_ModelY" else { return }
@@ -361,6 +368,8 @@ struct GarageSceneTests {
         #expect(abs(red - 0xF3 / 255) < 0.02)
         #expect(abs(green - 0xF0 / 255) < 0.02)
         #expect(abs(blue - 0xE8 / 255) < 0.02)
+        #expect(vehicle?.isHidden == false)
+        #expect(door?.isHidden == true)
     }
 
     @Test @MainActor func demoSkyStaysPutWhenTheClockAdvances() {

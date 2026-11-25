@@ -161,8 +161,15 @@ struct GaragePresentation: Equatable {
     var paintColorOverride: String?
     var colorizerRemap: Bool
     var solar: GarageSolar
-    /// The parked car's `wheel_type`, for `WheelChoice.resolve`. Nil leaves the model's standard wheels.
+    /// The parked car's `wheel_type`, for `WheelChoice.resolve`. Nil means `vehicle_config` has not
+    /// been read yet. "" means it was read and named no wheel.
     var wheelType: String? = nil
+
+    /// The 3D car stays hidden until its wheels are known and, in the same update, its colour is applied.
+    /// Generic has no paint shell and no wheel swap, so it shows as soon as a car is charging.
+    var showsDressedVehicle: Bool {
+        showVehicle && (model == .generic || wheelType != nil)
+    }
 
     static func make(
         data: PowerwallData?,

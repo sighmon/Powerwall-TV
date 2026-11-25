@@ -693,11 +693,15 @@ final class HouseSceneController {
         guard let lighting else { return }
         lighting.setSolar(presentation.solar.sceneOption)
         lighting.showWallConnector(presentation.showWallConnector)
-        lighting.showVehicle(presentation.showVehicle)
-        guard presentation.showVehicle else {
-            appliedModel = nil
-            appliedPaint = nil
-            appliedWheels = nil
+        // Keep the door closed until this update can mount the wheels and the resolved colour together.
+        // A charging car with no `wheel_type` yet would otherwise appear on its file paint and standard wheels.
+        guard presentation.showsDressedVehicle else {
+            lighting.showVehicle(false)
+            if !presentation.showVehicle {
+                appliedModel = nil
+                appliedPaint = nil
+                appliedWheels = nil
+            }
             return
         }
         if appliedModel != presentation.model {
@@ -711,26 +715,29 @@ final class HouseSceneController {
             lighting.setVehicleWheels(wheels)
             appliedWheels = wheels?.asset
         }
-        // The baked generic body has no paint shell. Live cars and the demo both leave it.
-        guard presentation.model != .generic else { return }
-        // Cybertruck stays on the file's stainless mix unless Fleet sent a wrap or a demo colour.
-        if presentation.model == .cybertruck && presentation.paintColorOverride == nil {
-            return
+        // The baked generic body has no paint shell. A stainless Cybertruck keeps the file mix
+        // until Fleet sends a wrap or a demo colour. Either one is already the colour to show.
+        let keepsFileColour = presentation.model == .generic
+            || (presentation.model == .cybertruck && presentation.paintColorOverride == nil)
+        if !keepsFileColour {
+            // Same choice as the showroom: a known paint name draws TeslaPaint.display at boost 1.
+            // Fleet's paint_color_override is a skybox albedo, so it only paints a car with no known name.
+            let boost = displayBoost ?? paintDisplayBoost
+            let paintKey = "\(presentation.exteriorColor ?? "")|\(presentation.paintColorOverride ?? "")|\(presentation.colorizerRemap)|\(boost)"
+            if appliedPaint != paintKey {
+                appliedPaint = paintKey
+                if let body = ShowroomPaint.resolve(
+                    model: presentation.model,
+                    exteriorColor: presentation.exteriorColor,
+                    paintColorOverride: presentation.paintColorOverride,
+                    colorizerRemap: presentation.colorizerRemap,
+                    owned: true
+                ).bodyPaint(displayBoost: boost) {
+                    lighting.setVehiclePaint(body.paint, displayBoost: body.boost)
+                }
+            }
         }
-        // Same choice as the showroom: a known paint name draws TeslaPaint.display at boost 1.
-        // Fleet's paint_color_override is a skybox albedo, so it only paints a car with no known name.
-        let boost = displayBoost ?? paintDisplayBoost
-        let paintKey = "\(presentation.exteriorColor ?? "")|\(presentation.paintColorOverride ?? "")|\(presentation.colorizerRemap)|\(boost)"
-        guard appliedPaint != paintKey else { return }
-        appliedPaint = paintKey
-        guard let body = ShowroomPaint.resolve(
-            model: presentation.model,
-            exteriorColor: presentation.exteriorColor,
-            paintColorOverride: presentation.paintColorOverride,
-            colorizerRemap: presentation.colorizerRemap,
-            owned: true
-        ).bodyPaint(displayBoost: boost) else { return }
-        lighting.setVehiclePaint(body.paint, displayBoost: body.boost)
+        lighting.showVehicle(true)
     }
 
     func setBatteryLevel(_ percentage: Double?) {

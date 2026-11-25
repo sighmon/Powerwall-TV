@@ -557,7 +557,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "Powerwall-TV/Powerwall-TV-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "Powerwall-TV/Powerwall-TV-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 138;
+				CURRENT_PROJECT_VERSION = 139;
 				DEVELOPMENT_ASSET_PATHS = "\"Powerwall-TV/Preview Content\"";
 				DEVELOPMENT_TEAM = 4P8S9W2NYL;
 				ENABLE_APP_SANDBOX = YES;
@@ -600,7 +600,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "Powerwall-TV/Powerwall-TV-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "Powerwall-TV/Powerwall-TV-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 138;
+				CURRENT_PROJECT_VERSION = 139;
 				DEVELOPMENT_ASSET_PATHS = "\"Powerwall-TV/Preview Content\"";
 				DEVELOPMENT_TEAM = 4P8S9W2NYL;
 				ENABLE_APP_SANDBOX = YES;
