@@ -50,19 +50,50 @@ enum ShowroomPaint: Equatable {
     case custom(TeslaPaint)
 
     /// Name first, so a known paint always reads as itself, live or demo. The override is only used
-    /// when the name is missing or unknown.
-    static func resolve(for request: CarShowroomRequest) -> ShowroomPaint {
-        let wrap = request.paintColorOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if request.model == .generic { return .file }
-        if request.model == .cybertruck && wrap.isEmpty { return .file }
-        if let name = request.exteriorColor, let paint = TeslaPaint(exteriorColor: name) {
+    /// when the name is missing or unknown. `owned` is false for a catalogue car, which keeps its file colour.
+    static func resolve(
+        model: VehicleModel,
+        exteriorColor: String?,
+        paintColorOverride: String?,
+        colorizerRemap: Bool,
+        owned: Bool
+    ) -> ShowroomPaint {
+        let wrap = paintColorOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if model == .generic { return .file }
+        if model == .cybertruck && wrap.isEmpty { return .file }
+        if let name = exteriorColor, let paint = TeslaPaint(exteriorColor: name) {
             return .named(paint.display)
         }
-        if !wrap.isEmpty, let paint = TeslaPaint(paintColorOverride: wrap, colorizerRemap: request.colorizerRemap) {
+        if !wrap.isEmpty, let paint = TeslaPaint(paintColorOverride: wrap, colorizerRemap: colorizerRemap) {
             return .custom(paint)
         }
-        let isOwned = !request.browsesCatalogue && !(request.vin?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-        return isOwned ? .unknown : .file
+        return owned ? .unknown : .file
+    }
+
+    static func resolve(for request: CarShowroomRequest) -> ShowroomPaint {
+        let vin = request.vin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return resolve(
+            model: request.model,
+            exteriorColor: request.exteriorColor,
+            paintColorOverride: request.paintColorOverride,
+            colorizerRemap: request.colorizerRemap,
+            owned: !request.browsesCatalogue && !vin.isEmpty
+        )
+    }
+
+    /// Nil keeps the colour exported in the file. A named paint is already a display colour, so its boost is 1.
+    /// An unknown owned car and a custom override still use `displayBoost` (4 for a live car, 1 in demo).
+    func bodyPaint(displayBoost: CGFloat) -> (paint: TeslaPaint, boost: CGFloat)? {
+        switch self {
+        case .file:
+            return nil
+        case .unknown:
+            return (TeslaPaint.fallback, displayBoost)
+        case .named(let paint):
+            return (paint, 1)
+        case .custom(let paint):
+            return (paint, displayBoost)
+        }
     }
 
     var debugDescription: String {
@@ -446,16 +477,8 @@ enum CarShowroom {
 
         let vehicle = loadVehicle(model: request.model)
         vehicle.simdPosition = carPosition
-        // Catalogue cars, and owned cars with no known paint, keep the colour exported in the file.
-        switch ShowroomPaint.resolve(for: request) {
-        case .file:
-            break
-        case .unknown:
-            applyPaint(TeslaPaint.fallback, to: vehicle, displayBoost: request.displayBoost)
-        case .named(let named):
-            applyPaint(named, to: vehicle, displayBoost: 1)
-        case .custom(let custom):
-            applyPaint(custom, to: vehicle, displayBoost: request.displayBoost)
+        if let body = ShowroomPaint.resolve(for: request).bodyPaint(displayBoost: request.displayBoost) {
+            applyPaint(body.paint, to: vehicle, displayBoost: body.boost)
         }
         // Before the mirror, which clones the car with its wheels.
         VehicleWheels.mount(WheelChoice.resolve(for: request), on: vehicle, look: .showroom)

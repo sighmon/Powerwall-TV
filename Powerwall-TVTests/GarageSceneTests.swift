@@ -319,6 +319,50 @@ struct GarageSceneTests {
         #expect(TeslaPaint.spacedName("MidnightCherryRed") == "Midnight Cherry Red")
     }
 
+    @Test @MainActor func chargingCarOnTheHomeUsesTheShowroomDisplayColour() {
+        let controller = HouseSceneController()
+        controller.prepareIfNeeded()
+        let pearl = TeslaPaint.table["PearlWhite"]!
+        controller.apply(
+            GaragePresentation(
+                showWallConnector: true,
+                showVehicle: true,
+                model: .modelY,
+                exteriorColor: "PearlWhite",
+                paintColorOverride: pearl.fleetOverride,
+                colorizerRemap: false,
+                solar: .panels
+            ),
+            heading: 180
+        )
+        var paint: SCNMaterial?
+        controller.scene.rootNode.enumerateHierarchy { node, stop in
+            guard node.name == "VehicleModel_ModelY" else { return }
+            node.enumerateHierarchy { child, inner in
+                if let material = child.geometry?.materials.first(where: { $0.name == "Paint" }) {
+                    paint = material
+                    inner.pointee = true
+                    stop.pointee = true
+                }
+            }
+        }
+        guard let colour = paint?.diffuse.contents as? HouseColor else {
+            Issue.record("The charging Model Y has no Paint material")
+            return
+        }
+        #if canImport(AppKit)
+        let resolved = colour.usingColorSpace(.sRGB) ?? colour
+        #else
+        let resolved = colour
+        #endif
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        // 0xF3F0E8, the showroom display colour, not the Fleet albedo 0x181818 lifted by 4.
+        #expect(abs(red - 0xF3 / 255) < 0.02)
+        #expect(abs(green - 0xF0 / 255) < 0.02)
+        #expect(abs(blue - 0xE8 / 255) < 0.02)
+    }
+
     @Test @MainActor func demoSkyStaysPutWhenTheClockAdvances() {
         let controller = HouseSceneController()
         controller.prepareIfNeeded()

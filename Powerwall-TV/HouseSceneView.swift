@@ -628,7 +628,7 @@ final class HouseSceneController {
     private var playbackPauseWhenUnfocused = false
     /// Tells the scene view to keep drawing while a forecast is blending in.
     var onRevealChange: ((Bool) -> Void)?
-    /// Tesla's paint albedos assume a skybox. This lift keeps them readable under SceneKit lights.
+    /// Lift for a custom override or an unknown paint. A known paint name uses the showroom display colour at boost 1.
     private let paintDisplayBoost: CGFloat = 4
 
     init() {
@@ -717,16 +717,20 @@ final class HouseSceneController {
         if presentation.model == .cybertruck && presentation.paintColorOverride == nil {
             return
         }
+        // Same choice as the showroom: a known paint name draws TeslaPaint.display at boost 1.
+        // Fleet's paint_color_override is a skybox albedo, so it only paints a car with no known name.
         let boost = displayBoost ?? paintDisplayBoost
         let paintKey = "\(presentation.exteriorColor ?? "")|\(presentation.paintColorOverride ?? "")|\(presentation.colorizerRemap)|\(boost)"
         guard appliedPaint != paintKey else { return }
-        lighting.setVehiclePaint(
+        appliedPaint = paintKey
+        guard let body = ShowroomPaint.resolve(
+            model: presentation.model,
             exteriorColor: presentation.exteriorColor,
             paintColorOverride: presentation.paintColorOverride,
             colorizerRemap: presentation.colorizerRemap,
-            displayBoost: boost
-        )
-        appliedPaint = paintKey
+            owned: true
+        ).bodyPaint(displayBoost: boost) else { return }
+        lighting.setVehiclePaint(body.paint, displayBoost: body.boost)
     }
 
     func setBatteryLevel(_ percentage: Double?) {

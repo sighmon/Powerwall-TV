@@ -129,7 +129,7 @@ struct TeslaPaint: Equatable {
     ]
 
     /// The paint in display space: the readable colour above with the app's metal and roughness.
-    /// Apply it with `displayBoost` 1. The showroom uses this for every named paint, live or demo.
+    /// Apply it with `displayBoost` 1. The showroom and the charging car at home use this for every named paint, live or demo.
     var display: TeslaPaint {
         TeslaPaint(name: name, hex: TeslaPaint.demoDisplayHex[name] ?? hex, metallic: metallic, roughness: roughness)
     }
