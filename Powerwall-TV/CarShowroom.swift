@@ -9,7 +9,9 @@
 
 import SceneKit
 import SwiftUI
-#if os(macOS)
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
 import AppKit
 #endif
 
@@ -183,6 +185,13 @@ struct CarShowroomTransition: Equatable {
 
 enum CarShowroom {
     static let cameraName = "ShowroomCamera"
+
+    /// Graph close padding, measured from the safe area. The showroom draws full bleed, and on iPad
+    /// the full-bleed reader can report no inset while the graph still sits below the status bar.
+    /// The larger of the two insets keeps the symbols on the same row.
+    static func closePadding(reportedSafe: CGFloat, windowSafe: CGFloat, extra: CGFloat) -> CGFloat {
+        max(reportedSafe, windowSafe) + extra
+    }
     /// Same point the ground plate is built around.
     static var stageCentre: SIMD3<Float> {
         (HouseCameraFraming.modelMin + HouseCameraFraming.modelMax) * 0.5
@@ -747,6 +756,7 @@ struct CarShowroomView: View {
     var onDismiss: () -> Void
     /// Same key as Settings → Display → Tyre pressure. The details tap only writes this; it never calls Fleet.
     @AppStorage(TyrePressureSetting.storageKey) private var tyrePressureSetting = TyrePressureSetting.automatic.rawValue
+    @Environment(\.layoutDirection) private var layoutDirection
     @State private var scene: SCNScene?
     /// The car the current scene was built for, so one change builds one scene.
     @State private var builtFor: CarShowroomRequest?
@@ -1007,12 +1017,27 @@ struct CarShowroomView: View {
     }
 
     /// The showroom is full bleed, so the close control adds the graph's 12 pt top and 16 pt
-    /// trailing inset on top of the safe area. tvOS keeps the larger bezel inset.
+    /// trailing inset on top of the safe area. On iPad that reader inset can be 0, so the window
+    /// inset is used when it is larger. tvOS keeps the larger bezel inset.
     private func closeInset(_ safe: CGFloat, edge: Edge = .top) -> CGFloat {
         #if os(tvOS)
         chromeInset(safe)
         #else
-        safe + (edge == .trailing ? 16 : 12)
+        CarShowroom.closePadding(reportedSafe: safe, windowSafe: windowSafe(edge), extra: edge == .trailing ? 16 : 12)
+        #endif
+    }
+
+    private func windowSafe(_ edge: Edge) -> CGFloat {
+        #if os(iOS)
+        let insets = ShowroomWindowSafeArea.insets
+        switch edge {
+        case .top: return insets.top
+        case .bottom: return insets.bottom
+        case .leading: return layoutDirection == .rightToLeft ? insets.right : insets.left
+        case .trailing: return layoutDirection == .rightToLeft ? insets.left : insets.right
+        }
+        #else
+        0
         #endif
     }
 
@@ -1053,6 +1078,17 @@ struct CarShowroomView: View {
         .keyboardShortcut(.cancelAction)
         #endif
     }
+
+#if os(iOS)
+    /// The key window's inset. The showroom's own reader can miss it once the view ignores the safe area.
+    private enum ShowroomWindowSafeArea {
+        static var insets: UIEdgeInsets {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            let window = scenes.flatMap(\.windows).first { $0.isKeyWindow } ?? scenes.first?.windows.first
+            return window?.safeAreaInsets ?? .zero
+        }
+    }
+#endif
 
     /// Same glass circles as the home settings buttons, along the bottom leading edge.
     private var catalogueArrows: some View {

@@ -34,8 +34,9 @@ struct DemoVehicle: Equatable {
 
 /// Demo mode walks these skies and, for each exported car, every distinct Tesla paint and every
 /// wheel that fits that car. The baked generic body stays its file colour and its own wheels.
-/// Paint and wheels change together every `colourInterval`. The sky still waits for two 10-second
-/// power samples so its five-second fade can finish. A car changes only after its colours and wheels.
+/// Paint and wheels change together every `colourInterval`. The shown sky is `sunrisePreview`,
+/// one clear sunrise step on every 10-second data update, so the wash and the sun can be compared.
+/// A car changes only after its colours and wheels.
 enum DemoHouseTour {
     static let powerTicksPerScene = 2
     static let colourInterval: TimeInterval = 2
@@ -100,6 +101,22 @@ enum DemoHouseTour {
 
     static func weather(at index: Int) -> DemoWeatherScene {
         weather[wrapped(index, count: weather.count)]
+    }
+
+    /// Clear east suns. Each data update takes the next altitude, from a low gold wash to midday blue.
+    static let sunrisePreviewAltitudes: [Double] = [2, 5, 8, 11, 15, 20, 26, 34]
+
+    static func sunrisePreview(at index: Int) -> DemoWeatherScene {
+        let altitude = sunrisePreviewAltitudes[wrapped(index, count: sunrisePreviewAltitudes.count)]
+        return DemoWeatherScene(
+            title: "Sunrise",
+            sunAltitude: altitude,
+            sunAzimuth: 90,
+            isDaylight: true,
+            cloudCover: 0.05,
+            condition: .clear,
+            precipitationMillimetresPerHour: 0
+        )
     }
 
     static func vehicle(at index: Int) -> DemoVehicle {

@@ -240,7 +240,7 @@ alpha × 2) from the usdz `0/Shadow.png`. The card uses constant lighting and al
 doesn't write depth. It sits 3 mm above the ground plate, with draw order 1. That puts it after the
 sky wash (0) and before the house (2). If the PNG is missing, the card stays hidden.
 `GarageVehicleShadow` stays hidden: its texture doesn't match Tesla's `VehicleGarage.png`.
-To make the shadow stronger or weaker, change `STRENGTH` in the bake script and rebake.
+The PNG stays at Tesla's strength. The home view multiplies it by `HouseGroundShadow.opacity`. To change the baked shape, change `STRENGTH` in the bake script and rebake.
 
 **Garage car lighting.** The house shell is unlit (`.constant` plus the Building shader port), but
 the car is PBR. Under the house's ambient and sun lights alone, it looked flat. The car now has a

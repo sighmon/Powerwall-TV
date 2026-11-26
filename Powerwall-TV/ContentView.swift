@@ -492,9 +492,8 @@ struct ContentView: View {
             }
             if viewModel.isDemoMode {
                 demoTourTick += 1
-                if demoTourTick.isMultiple(of: DemoHouseTour.powerTicksPerScene) {
-                    viewModel.demoSceneIndex += 1
-                }
+                // One sunrise colour per data update, so the wash can be compared as the numbers change.
+                viewModel.demoSceneIndex += 1
                 let homeLoad = Double(arc4random_uniform(4096)) + 256
                 queueDemoPowerwallData(
                     batteryPower: homeLoad * 0.2,

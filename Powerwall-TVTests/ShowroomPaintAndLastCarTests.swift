@@ -38,6 +38,13 @@ private func cachedBody(exterior: String?, timestamp: Int = 1_700_000_000_000) -
 @MainActor
 @Suite(.serialized)
 struct ShowroomPaintAndLastCarTests {
+    @Test func showroomCloseUsesTheWindowInsetWhenTheFullBleedReaderHasNone() {
+        #expect(CarShowroom.closePadding(reportedSafe: 0, windowSafe: 24, extra: 12) == 36)
+        #expect(CarShowroom.closePadding(reportedSafe: 59, windowSafe: 59, extra: 12) == 71)
+        #expect(CarShowroom.closePadding(reportedSafe: 59, windowSafe: 24, extra: 12) == 71)
+        #expect(CarShowroom.closePadding(reportedSafe: 0, windowSafe: 0, extra: 16) == 16)
+    }
+
     private func appearance(_ exterior: String?, override: String? = nil, carType: String? = nil) -> VehicleAppearance {
         VehicleAppearance(exteriorColor: exterior, paintColorOverride: override, colorizerRemap: false, carType: carType)
     }

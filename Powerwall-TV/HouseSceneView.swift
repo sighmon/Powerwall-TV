@@ -588,7 +588,7 @@ struct HouseSceneView: View {
 
     private func showDemoSky() {
         controller.applyDemoSky(
-            DemoHouseTour.weather(at: viewModel.demoSceneIndex),
+            DemoHouseTour.sunrisePreview(at: viewModel.demoSceneIndex),
             heading: houseHeadingDegrees,
             fadeIn: true
         )

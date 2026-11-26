@@ -249,6 +249,22 @@ struct GarageSceneTests {
         #expect(Set(signatures).count == DemoHouseTour.weather.count)
         #expect(DemoHouseTour.weather(at: DemoHouseTour.weather.count).title == "Clear")
         #expect(DemoHouseTour.weather(at: -1).title == "Rainy night")
+
+        let altitudes = DemoHouseTour.sunrisePreviewAltitudes
+        #expect(altitudes == [2, 5, 8, 11, 15, 20, 26, 34])
+        let washes = altitudes.map { HouseSky.skyWash(altitude: Float($0)) }
+        #expect(washes[0].bottom.x > washes[0].bottom.y && washes[0].bottom.y > washes[0].bottom.z)
+        #expect(abs(washes[washes.count - 1].top.z - 0.86) < 0.001)
+        for pair in zip(washes, washes.dropFirst()) {
+            #expect(pair.1.bottom.z + 0.001 >= pair.0.bottom.z)
+        }
+        let firstSun = DemoHouseTour.sunrisePreview(at: 0).parameters(heading: heading)
+        #expect(abs(firstSun.sunAltitude - 2) < 0.01)
+        #expect(abs(firstSun.sunAzimuth - 90) < 0.01)
+        #expect(firstSun.cloudCover < 0.2)
+        #expect(firstSun.rainIntensity == 0)
+        #expect(firstSun.snowIntensity == 0)
+        #expect(DemoHouseTour.sunrisePreview(at: altitudes.count).sunAltitude == altitudes[0])
     }
 
     @Test func demoTourCyclesEveryColourOnEachCar() {
@@ -482,14 +498,29 @@ struct GarageSceneTests {
         let nightWash = HouseSky.skyWash(altitude: -10)
         #expect(nightWash.amount == 0)
         #expect(noonWash.amount > 0.95)
-        #expect(dawn.top.z > dawn.top.x)
-        #expect(dawn.top.x > dawn.top.y)
-        #expect(dawn.bottom.x > dawn.bottom.z)
-        #expect(dawn.bottom.z > dawn.bottom.y)
-        #expect(noonWash.top.z > noonWash.top.x)
+        // Dawn is amber, then peach, then soft blue. Green stays above red overhead.
+        #expect(dawn.bottom.x > dawn.bottom.y && dawn.bottom.y > dawn.bottom.z)
+        #expect(dawn.mid.x > dawn.mid.y && dawn.mid.y > dawn.mid.z)
+        #expect(dawn.mid.y > dawn.bottom.y)
+        #expect(dawn.top.z > dawn.top.y && dawn.top.y > dawn.top.x)
+        #expect(dawn.top.y > 0.45)
+        // Midday is the same blue pair. The middle stop is their average.
+        #expect(abs(noonWash.top.x - 0.26) < 0.001)
+        #expect(abs(noonWash.top.y - 0.46) < 0.001)
+        #expect(abs(noonWash.top.z - 0.86) < 0.001)
+        #expect(abs(noonWash.bottom.x - 0.58) < 0.001)
+        #expect(abs(noonWash.bottom.y - 0.76) < 0.001)
+        #expect(abs(noonWash.bottom.z - 0.96) < 0.001)
+        #expect(abs(noonWash.mid.x - 0.42) < 0.001)
+        #expect(abs(noonWash.mid.y - 0.61) < 0.001)
+        #expect(abs(noonWash.mid.z - 0.91) < 0.001)
         let lowSun = place(altitude: 4, azimuth: 90, cloud: 0)
-        #expect(lowSun.sunColor.x > lowSun.sunColor.z)
-        #expect(lowSun.sunColor.z > lowSun.sunColor.y)
+        #expect(lowSun.sunColor.x > lowSun.sunColor.y)
+        #expect(lowSun.sunColor.y > lowSun.sunColor.z)
+        let highSun = place(altitude: 58, azimuth: 180, cloud: 0)
+        #expect(highSun.sunColor.x > 0.98)
+        #expect(highSun.sunColor.y > 0.95)
+        #expect(highSun.sunColor.z > 0.88)
         let thin = HouseSky.wisps.filter { $0.cirrus && HouseSky.wispOpacity(threshold: $0.threshold, cloudCover: 0.5, cirrus: true) > 0 }
         let thick = HouseSky.wisps.filter { !$0.cirrus && HouseSky.wispOpacity(threshold: $0.threshold, cloudCover: 0.5, cirrus: false) > 0.2 }
         #expect(!thin.isEmpty)
@@ -691,6 +722,7 @@ struct GarageSceneTests {
             #expect(material.name == "HouseGroundShadow")
             #expect(material.lightingModel == .constant)
             #expect(material.blendMode == .alpha)
+            #expect(abs(material.transparency - HouseGroundShadow.opacity) < 0.001)
             #expect(material.writesToDepthBuffer == false)
         }
         #expect(meshes > 0)

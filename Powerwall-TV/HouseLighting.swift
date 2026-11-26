@@ -44,6 +44,8 @@ enum HouseGroundShadow {
     static let renderingOrder = 1
     /// Lifts the card off the plate so it does not z-fight. Metres.
     static let lift: Float = 0.003
+    /// The bake is Tesla's full strength. The home view draws that card lighter.
+    static let opacity: CGFloat = 0.55
 
     /// Shows the card with the baked texture. Leaves it hidden if the texture is missing,
     /// which is how it drew before (solid black wedges otherwise).
@@ -70,6 +72,7 @@ enum HouseGroundShadow {
         material.diffuse.contents = contents
         material.blendMode = .alpha
         material.transparencyMode = .aOne
+        material.transparency = opacity
         material.writesToDepthBuffer = false
         material.readsFromDepthBuffer = true
         material.isDoubleSided = true
@@ -325,26 +328,43 @@ enum HouseSky {
 
     struct SkyWash: Equatable {
         var top: SIMD3<Float>
+        var mid: SIMD3<Float>
         var bottom: SIMD3<Float>
         /// 0 at night, 1 once the sun is up. The plane peaks at `washPeak` opacity.
         var amount: Float
     }
 
-    /// Deep purple higher in the wash and deep pink toward the horizon, blue
-    /// once the sun is high. Colour fades across `washScreenFraction` of the
-    /// screen and is clear before the plane ends.
+    /// Low sun: amber at the horizon, a pale peach band, then soft blue.
+    /// That peach is the rose a real sunrise keeps, without a deep pink or purple.
+    /// Once the sun is high the three stops are the midday blue pair, and the
+    /// middle stop is their average so the band stays a straight blend.
+    /// Colour fades across `washScreenFraction` of the screen and is clear
+    /// before the plane ends.
     static func skyWash(altitude: Float) -> SkyWash {
         let amount = smoothstep(-4, 10, altitude)
-        let day = smoothstep(16, 40, altitude)
-        let sunsetTop = SIMD3<Float>(0.46, 0.14, 0.70)
-        let sunsetBottom = SIMD3<Float>(0.88, 0.26, 0.58)
+        let day = smoothstep(12, 34, altitude)
+        let sunsetTop = SIMD3<Float>(0.40, 0.55, 0.78)
+        let sunsetMid = SIMD3<Float>(0.93, 0.70, 0.58)
+        let sunsetBottom = SIMD3<Float>(0.96, 0.64, 0.32)
         let blueTop = SIMD3<Float>(0.26, 0.46, 0.86)
         let blueBottom = SIMD3<Float>(0.58, 0.76, 0.96)
+        let blueMid = (blueTop + blueBottom) * 0.5
         return SkyWash(
             top: sunsetTop + (blueTop - sunsetTop) * day,
+            mid: sunsetMid + (blueMid - sunsetMid) * day,
             bottom: sunsetBottom + (blueBottom - sunsetBottom) * day,
             amount: amount
         )
+    }
+
+    /// `easedFade` is 1 at the top of the frame and 0 toward the horizon.
+    /// The lower half runs horizon to peach, the upper half peach to sky.
+    static func washBandColor(bottom: SIMD3<Float>, mid: SIMD3<Float>, top: SIMD3<Float>, easedFade: Float) -> SIMD3<Float> {
+        let fade = min(max(easedFade, 0), 1)
+        if fade < 0.5 {
+            return bottom + (mid - bottom) * (fade * 2)
+        }
+        return mid + (top - mid) * ((fade - 0.5) * 2)
     }
 
     static func placement(altitude: Float, azimuth: Float, heading: Float, cloudCover: Float,
@@ -370,7 +390,8 @@ enum HouseSky {
         let day = smoothstep(-5, 6, altitude)
         let veil = pow(1 - cover, 1.45)
         let warm = smoothstep(0, 26, altitude)
-        let low = SIMD3<Float>(0.98, 0.34, 0.68)
+        // Warm gold on the horizon. The high sun stays the same near-white.
+        let low = SIMD3<Float>(1.00, 0.66, 0.38)
         let high = SIMD3<Float>(1, 0.97, 0.90)
         let tint = low + (high - low) * warm
         let grey = SIMD3<Float>(0.86, 0.89, 0.93)
@@ -430,6 +451,7 @@ enum HouseSky {
         """
         let uniforms = openGL ? """
         uniform \(vec3) washTop;
+        uniform \(vec3) washMid;
         uniform \(vec3) washBottom;
         uniform float washAmount;
         uniform float washPeak;
@@ -438,6 +460,7 @@ enum HouseSky {
         """ : """
         #pragma arguments
         \(vec3) washTop;
+        \(vec3) washMid;
         \(vec3) washBottom;
         float washAmount;
         float washPeak;
@@ -457,7 +480,10 @@ enum HouseSky {
         if (alpha <= 0.0) {
             _output.color = \(vec4)(0.0);
         } else {
-            \(vec3) color = mix(washBottom, washTop, fade);
+            float band = step(0.5, fade);
+            float lower = clamp(fade * 2.0, 0.0, 1.0);
+            float upper = clamp((fade - 0.5) * 2.0, 0.0, 1.0);
+            \(vec3) color = mix(mix(washBottom, washMid, lower), mix(washMid, washTop, upper), band);
             \(vec2) pixel = floor(_surface.diffuseTexcoord * washPixels);
             alpha = clamp(alpha + (washNoise(pixel) - 0.5) / 255.0, 0.0, 1.0);
             _output.color = \(vec4)(color * alpha, alpha);
@@ -1346,7 +1372,9 @@ final class HouseLighting {
         washMaterial.lightingModel = .constant
         washMaterial.isDoubleSided = true
         washMaterial.diffuse.contents = HouseSkyArt.washContents(
-            top: SIMD3(0.26, 0.46, 0.86), bottom: SIMD3(0.58, 0.76, 0.96))
+            top: SIMD3(0.26, 0.46, 0.86),
+            mid: SIMD3(0.42, 0.61, 0.91),
+            bottom: SIMD3(0.58, 0.76, 0.96))
         smoothWash(washMaterial)
         washMaterial.transparencyMode = .aOne
         washMaterial.blendMode = .alpha
@@ -1495,12 +1523,13 @@ final class HouseLighting {
             // The bitmap is the expensive part. A forecast blend steps every frame
             // while the sun colour stays put, so keep the image already on the material.
             if bakedWashTop != wash.top || bakedWashBottom != wash.bottom {
-                material.diffuse.contents = HouseSkyArt.washContents(top: wash.top, bottom: wash.bottom)
+                material.diffuse.contents = HouseSkyArt.washContents(top: wash.top, mid: wash.mid, bottom: wash.bottom)
                 smoothWash(material)
                 bakedWashTop = wash.top
                 bakedWashBottom = wash.bottom
             }
             material.setValue(NSValue(scnVector3: SCNVector3(wash.top.x, wash.top.y, wash.top.z)), forKey: "washTop")
+            material.setValue(NSValue(scnVector3: SCNVector3(wash.mid.x, wash.mid.y, wash.mid.z)), forKey: "washMid")
             material.setValue(NSValue(scnVector3: SCNVector3(wash.bottom.x, wash.bottom.y, wash.bottom.z)), forKey: "washBottom")
             material.setValue(NSNumber(value: wash.amount), forKey: "washAmount")
             material.setValue(NSNumber(value: HouseSky.washPeak), forKey: "washPeak")
@@ -1934,7 +1963,7 @@ enum HouseSkyArt {
     /// Row 0 is the top. The peak is only a quarter opaque, so an 8-bit ramp has a few
     /// dozen steps and they read as stripes. Bayer dither breaks those steps up, and
     /// the lower feather is already clear so the quad edge is not a line.
-    static func washContents(top: SIMD3<Float>, bottom: SIMD3<Float>) -> Any {
+    static func washContents(top: SIMD3<Float>, mid: SIMD3<Float>, bottom: SIMD3<Float>) -> Any {
         let width = 1024
         let height = 512
         let span = HouseSky.washScreenFraction / (HouseSky.washScreenFraction + HouseSky.washFeatherFraction)
@@ -1945,7 +1974,7 @@ enum HouseSkyArt {
             let t = min(max(down / span, 0), 1)
             let fade = 1 - t
             let eased = fade * fade * (3 - 2 * fade)
-            let color = bottom + (top - bottom) * eased
+            let color = HouseSky.washBandColor(bottom: bottom, mid: mid, top: top, easedFade: eased)
             for x in 0..<width {
                 let index = (y * width + x) * 4
                 pixels[index] = ditheredByte(color.x, x: x, y: y)
