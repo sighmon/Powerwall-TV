@@ -33,8 +33,10 @@ struct CarShowroomRequest: Equatable, Identifiable {
     /// Lineup entry the showroom opens on: the last car shown, when it is still in the lineup.
     var startIndex: Int = 0
     /// `vehicle_config.wheel_type`, saved per VIN. Nil, "" and catalogue cars get the model's standard
-    /// wheels (`WheelChoice.resolve`).
+    /// wheels (`WheelChoice.resolve`). Edit mode sets `wearsChosenWheel` so a catalogue car can try one.
     var wheelType: String? = nil
+    /// The showroom edit arrows picked this `wheelType`. Catalogue cars otherwise ignore it.
+    var wearsChosenWheel: Bool = false
 
     var id: String { vin ?? model.rawValue }
 }
@@ -551,6 +553,17 @@ enum CarShowroom {
         return wrapped(base + delta, count: count)
     }
 
+    /// Next wheel in `names`. With no index yet, a positive step moves on from `currentName`
+    /// when that name is in the list, otherwise it starts at the first wheel.
+    static func wheelIndex(after index: Int?, names: [String], currentName: String?, delta: Int) -> Int? {
+        guard !names.isEmpty else { return nil }
+        if let index { return wrapped(index + delta, count: names.count) }
+        let start = currentName.flatMap { name in
+            names.firstIndex { $0.caseInsensitiveCompare(name) == .orderedSame }
+        } ?? (delta >= 0 ? -1 : 0)
+        return wrapped(start + delta, count: names.count)
+    }
+
     private static func applyPaint(_ paint: TeslaPaint, to vehicle: SCNNode, displayBoost: CGFloat) {
         vehicle.enumerateHierarchy { node, _ in
             node.geometry?.materials.filter { $0.name == "Paint" }.forEach {
@@ -761,8 +774,16 @@ struct CarShowroomView: View {
     /// The car the current scene was built for, so one change builds one scene.
     @State private var builtFor: CarShowroomRequest?
     @State private var browseIndex = 0
-    /// Nil keeps the file or Fleet colour. Up and down walk `TeslaPaint.catalogue`.
+    /// Nil keeps the file or Fleet colour. Edit-mode arrows walk `TeslaPaint.catalogue`.
     @State private var colourIndex: Int?
+    /// Nil keeps the car's own wheels. Edit-mode arrows walk `TeslaWheel.demoNames`.
+    @State private var wheelIndex: Int?
+    /// Double tap (double click on Mac) freezes orbit and pan and shows the colour and wheel arrows.
+    @State private var editing = false
+    /// Hides the stage while the next model is fitted, so it does not pop on at the unfitted size.
+    @State private var modelOpacity: Double = 1
+    @State private var modelFadingOut = false
+    @State private var pendingModelStep = 0
     #if os(tvOS)
     private enum ShowroomFocus: Hashable {
         case previous
@@ -818,18 +839,30 @@ struct CarShowroomView: View {
 
     private var displayed: CarShowroomRequest {
         var shown = current
-        guard let colourIndex, shown.model != .generic else { return shown }
-        let paint = TeslaPaint.catalogue[colourIndex % TeslaPaint.catalogue.count]
-        shown.exteriorColor = paint.name
-        shown.paintColorOverride = paint.demoOverride
-        shown.colorizerRemap = false
-        shown.displayBoost = 1
-        let bareName = shown.lines.first.map(CarShowroom.bareTitle) ?? CarShowroom.catalogueName(shown.model)
-        if shown.lines.isEmpty {
-            shown.lines = [DemoHouseTour.vehicleLabel(displayName: bareName, exteriorColor: paint.name)]
-        } else {
-            shown.lines[0] = DemoHouseTour.vehicleLabel(displayName: bareName, exteriorColor: paint.name)
+        if let colourIndex, shown.model != .generic {
+            let paint = TeslaPaint.catalogue[colourIndex % TeslaPaint.catalogue.count]
+            shown.exteriorColor = paint.name
+            shown.paintColorOverride = paint.demoOverride
+            shown.colorizerRemap = false
+            shown.displayBoost = 1
+            let bareName = shown.lines.first.map(CarShowroom.bareTitle) ?? CarShowroom.catalogueName(shown.model)
+            if shown.lines.isEmpty {
+                shown.lines = [DemoHouseTour.vehicleLabel(displayName: bareName, exteriorColor: paint.name)]
+            } else {
+                shown.lines[0] = DemoHouseTour.vehicleLabel(displayName: bareName, exteriorColor: paint.name)
+            }
         }
+        return withChosenWheel(shown)
+    }
+
+    /// The edit arrows' wheel, including on a catalogue car that would otherwise keep the standard set.
+    private func withChosenWheel(_ car: CarShowroomRequest) -> CarShowroomRequest {
+        guard let wheelIndex else { return car }
+        let names = TeslaWheel.demoNames(for: car.model)
+        guard !names.isEmpty else { return car }
+        var shown = car
+        shown.wheelType = names[wheelIndex % names.count]
+        shown.wearsChosenWheel = true
         return shown
     }
 
@@ -841,8 +874,14 @@ struct CarShowroomView: View {
                 Color(red: 22 / 255, green: 23 / 255, blue: 24 / 255)
                     .ignoresSafeArea()
                 if let scene {
-                    CarShowroomMetalView(scene: scene) { shiftColour($0) }
+                    CarShowroomMetalView(
+                        scene: scene,
+                        editing: editing,
+                        onToggleEdit: { editing.toggle() },
+                        onColour: { shiftColour($0) }
+                    )
                         .ignoresSafeArea()
+                        .opacity(modelOpacity)
                 }
             }
             .overlay(alignment: .topLeading) {
@@ -862,12 +901,14 @@ struct CarShowroomView: View {
                         .padding(.bottom, chromeInset(proxy.safeAreaInsets.bottom))
                 }
             }
-        }
-        .background {
-            #if !os(tvOS)
-            colourKey(delta: 1, key: .upArrow, label: "Next colour")
-            colourKey(delta: -1, key: .downArrow, label: "Previous colour")
-            #endif
+            .overlay(alignment: .bottom) {
+                #if !os(tvOS)
+                if editing {
+                    editControls
+                        .padding(.bottom, editBottomInset(proxy))
+                }
+                #endif
+            }
         }
         .onAppear {
             if scene == nil {
@@ -887,14 +928,98 @@ struct CarShowroomView: View {
         #endif
     }
 
+    /// Lifts the edit arrows above the catalogue pair on a narrow phone.
+    private func editBottomInset(_ proxy: GeometryProxy) -> CGFloat {
+        let base = chromeInset(proxy.safeAreaInsets.bottom)
+        let narrow = proxy.size.width < 700
+        return base + (browses && narrow ? 72 : 0)
+    }
+
     #if !os(tvOS)
-    private func colourKey(delta: Int, key: KeyEquivalent, label: String) -> some View {
-        Button(action: { shiftColour(delta) }) { Color.clear.frame(width: 1, height: 1) }
-            .buttonStyle(.plain)
-            .keyboardShortcut(key, modifiers: [])
-            .accessibilityLabel(label)
-            .opacity(0)
-            .allowsHitTesting(false)
+    private var editControls: some View {
+        VStack(spacing: 12) {
+            if cyclesColour {
+                editRow(
+                    caption: colourCaption,
+                    previous: "Previous colour",
+                    next: "Next colour",
+                    previousKey: .downArrow,
+                    nextKey: .upArrow,
+                    step: shiftColour
+                )
+            }
+            if cyclesWheels {
+                editRow(
+                    caption: wheelCaption,
+                    previous: "Previous wheels",
+                    next: "Next wheels",
+                    previousKey: nil,
+                    nextKey: nil,
+                    step: shiftWheel
+                )
+            }
+        }
+    }
+
+    private var cyclesColour: Bool { displayed.model != .generic && !TeslaPaint.catalogue.isEmpty }
+
+    private var cyclesWheels: Bool { !TeslaWheel.demoNames(for: displayed.model).isEmpty }
+
+    private var colourCaption: String {
+        guard let name = displayed.exteriorColor, !name.isEmpty else { return "Colour" }
+        return TeslaPaint.spacedName(name)
+    }
+
+    private var wheelCaption: String {
+        let model = displayed.model
+        let names = TeslaWheel.demoNames(for: model)
+        let chosen = wheelIndex.flatMap { names.isEmpty ? nil : names[$0 % names.count] } ?? displayed.wheelType
+        if let wheel = WheelChoice.resolve(wheelType: chosen, model: model)?.wheel {
+            return wheel.rawValue.replacingOccurrences(of: "_", with: " ")
+        }
+        return "Wheels"
+    }
+
+    private func editRow(
+        caption: String,
+        previous: String,
+        next: String,
+        previousKey: KeyEquivalent?,
+        nextKey: KeyEquivalent?,
+        step: @escaping (Int) -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            editArrow(title: previous, systemImage: "chevron.left", key: previousKey) { step(-1) }
+            Text(caption)
+                .fontWeight(.bold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(minWidth: 96, maxWidth: 220)
+            editArrow(title: next, systemImage: "chevron.right", key: nextKey) { step(1) }
+        }
+        .foregroundColor(.white)
+        .homeSettingsButtonCluster()
+        .homeSettingsDarkChrome()
+    }
+
+    private func editArrow(title: String, systemImage: String, key: KeyEquivalent?, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                #if os(macOS)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.primary)
+                .font(.system(size: 20, weight: .semibold))
+                .frame(width: 40, height: 40)
+                #else
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.gray)
+                .font(.system(size: 30, weight: .semibold))
+                .frame(width: 40, height: 40)
+                #endif
+        }
+        .homeSettingsButtonChrome()
+        .accessibilityLabel(title)
+        .modifier(ShowroomEditKey(key: key))
     }
     #endif
 
@@ -1181,15 +1306,38 @@ struct CarShowroomView: View {
     }
 
     /// Every car arrives in its own paint: a colour tried on one car never carries to the next.
+    /// The stage fades out first. The next model is fitted while it is invisible, then fades in,
+    /// so the unfitted mesh never flashes larger than the window.
     private func step(_ delta: Int) {
         guard browses else { return }
-        browseIndex += delta
-        colourIndex = nil
+        pendingModelStep += delta
+        guard !modelFadingOut else { return }
+        modelFadingOut = true
+        withAnimation(.easeInOut(duration: Self.modelFadeOut)) { modelOpacity = 0 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.modelFadeOut) {
+            let jump = pendingModelStep
+            pendingModelStep = 0
+            modelFadingOut = false
+            if jump != 0 {
+                browseIndex += jump
+                colourIndex = nil
+                wheelIndex = nil
+            }
+            withAnimation(.easeInOut(duration: Self.modelFadeIn)) { modelOpacity = 1 }
+        }
     }
+
+    private static let modelFadeOut: TimeInterval = 0.2
+    private static let modelFadeIn: TimeInterval = 0.25
 
     private func shiftColour(_ delta: Int) {
         guard displayed.model != .generic, !TeslaPaint.catalogue.isEmpty else { return }
         colourIndex = CarShowroom.colourIndex(after: colourIndex, delta: delta)
+    }
+
+    private func shiftWheel(_ delta: Int) {
+        let names = TeslaWheel.demoNames(for: displayed.model)
+        wheelIndex = CarShowroom.wheelIndex(after: wheelIndex, names: names, currentName: current.wheelType, delta: delta)
     }
 
     private func rebuildScene() {
@@ -1202,26 +1350,28 @@ struct CarShowroomView: View {
 
 private struct CarShowroomMetalView: View {
     let scene: SCNScene
+    var editing: Bool
+    var onToggleEdit: () -> Void
     var onColour: (Int) -> Void
 
     var body: some View {
         #if os(macOS)
-        CarShowroomMac(scene: scene, onColour: onColour)
+        CarShowroomMac(scene: scene, editing: editing, onToggleEdit: onToggleEdit, onColour: onColour)
         #else
-        CarShowroomIOS(scene: scene, onColour: onColour)
+        CarShowroomIOS(scene: scene, editing: editing, onToggleEdit: onToggleEdit, onColour: onColour)
         #endif
     }
 }
 
 /// Drag orbits the car. Option-drag, right-drag, and a two-finger drag pan.
-/// Scroll, pinch, and magnify zoom. A vertical swipe steps the colour.
-/// The orbit survives a model change.
+/// Scroll, pinch, and magnify zoom. A double tap or double click toggles edit mode,
+/// which stops orbit and pan. The orbit survives a model change.
 final class CarShowroomControlView: SCNView {
     var orbit = CarShowroomOrbit()
+    var editing = false
+    var onToggleEdit: (() -> Void)?
+    /// tvOS remote up and down still step the colour. Touch and Mac use the edit arrows.
     var onColour: ((Int) -> Void)?
-    private var swipeTranslation = CGPoint.zero
-    private var swipeBegan = Date.distantPast
-    private var swipeActive = false
     private var lastColourStep = Date.distantPast
     /// Set once the viewer pinches or scrolls. Until then the car is fitted to the window.
     private var userZoomed = false
@@ -1320,6 +1470,7 @@ final class CarShowroomControlView: SCNView {
     }
 
     private func orbit(by deltaX: CGFloat, deltaY: CGFloat) {
+        guard !editing else { return }
         let degreesPerPoint = CarShowroomOrbit.verticalFieldOfViewDegrees / Float(max(bounds.height, 1))
         orbit.yawDegrees -= Float(deltaX) * degreesPerPoint
         orbit.pitchDegrees += Float(deltaY) * degreesPerPoint
@@ -1328,6 +1479,7 @@ final class CarShowroomControlView: SCNView {
     }
 
     private func pan(screenX: Float, screenY: Float) {
+        guard !editing else { return }
         orbit.pan(
             screenX: screenX,
             screenY: screenY,
@@ -1354,36 +1506,19 @@ final class CarShowroomControlView: SCNView {
         pan.minimumNumberOfTouches = 2
         addGestureRecognizer(pan)
         addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinchZoom(_:))))
+        let edit = UITapGestureRecognizer(target: self, action: #selector(toggleEdit))
+        edit.numberOfTapsRequired = 2
+        addGestureRecognizer(edit)
         #elseif os(tvOS)
         addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(orbitPan(_:))))
         #endif
     }
 
-    private func beginSwipe() {
-        swipeTranslation = .zero
-        swipeBegan = Date()
-        swipeActive = true
+    #if os(iOS)
+    @objc private func toggleEdit() {
+        onToggleEdit?()
     }
-
-    private func trackSwipe(deltaX: CGFloat, deltaY: CGFloat) {
-        if !swipeActive { beginSwipe() }
-        swipeTranslation.x += deltaX
-        swipeTranslation.y += deltaY
-    }
-
-    /// A short vertical flick changes colour and puts the orbit back. A slow drag still orbits.
-    private func finishSwipe() {
-        defer {
-            swipeActive = false
-            swipeTranslation = .zero
-        }
-        guard swipeActive else { return }
-        let elapsed = Date().timeIntervalSince(swipeBegan)
-        let translation = swipeTranslation
-        guard elapsed < 0.45, abs(translation.y) > 80, abs(translation.y) > abs(translation.x) * 2.2 else { return }
-        orbit(by: -translation.x, deltaY: -translation.y)
-        emitColour(translation.y < 0 ? 1 : -1)
-    }
+    #endif
 
     private func emitColour(_ delta: Int) {
         let now = Date()
@@ -1394,17 +1529,10 @@ final class CarShowroomControlView: SCNView {
 
     #if os(iOS) || os(tvOS)
     @objc private func orbitPan(_ gesture: UIPanGestureRecognizer) {
-        if gesture.state == .cancelled || gesture.state == .failed {
-            swipeActive = false
-            swipeTranslation = .zero
-            return
-        }
-        if gesture.state == .began { beginSwipe() }
+        guard gesture.state != .cancelled, gesture.state != .failed else { return }
         let delta = gesture.translation(in: self)
         gesture.setTranslation(.zero, in: self)
-        trackSwipe(deltaX: delta.x, deltaY: delta.y)
         orbit(by: delta.x, deltaY: delta.y)
-        if gesture.state == .ended { finishSwipe() }
     }
 
     #if os(iOS)
@@ -1446,7 +1574,8 @@ final class CarShowroomControlView: SCNView {
     override var acceptsFirstResponder: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
-        beginSwipe()
+        guard event.clickCount == 2 else { return }
+        onToggleEdit?()
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -1454,7 +1583,6 @@ final class CarShowroomControlView: SCNView {
             pan(with: event)
             return
         }
-        trackSwipe(deltaX: event.deltaX, deltaY: event.deltaY)
         orbit(by: event.deltaX, deltaY: event.deltaY)
     }
 
@@ -1467,16 +1595,6 @@ final class CarShowroomControlView: SCNView {
     /// `pan` treats a positive screen Y as pointer-up. AppKit's drag deltaY grows downward.
     private func pan(with event: NSEvent) {
         pan(screenX: Float(event.deltaX), screenY: Float(-event.deltaY))
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        finishSwipe()
-    }
-
-    override func swipe(with event: NSEvent) {
-        let vertical = event.deltaY
-        guard abs(vertical) > abs(event.deltaX), vertical != 0 else { return }
-        emitColour(vertical > 0 ? 1 : -1)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -1497,10 +1615,14 @@ final class CarShowroomControlView: SCNView {
 #if os(macOS)
 private struct CarShowroomMac: NSViewRepresentable {
     let scene: SCNScene
+    var editing: Bool
+    var onToggleEdit: () -> Void
     var onColour: (Int) -> Void
 
     func makeNSView(context: Context) -> CarShowroomControlView { CarShowroomControlView(frame: .zero) }
     func updateNSView(_ view: CarShowroomControlView, context: Context) {
+        view.editing = editing
+        view.onToggleEdit = onToggleEdit
         view.onColour = onColour
         view.present(scene)
     }
@@ -1508,12 +1630,31 @@ private struct CarShowroomMac: NSViewRepresentable {
 #else
 private struct CarShowroomIOS: UIViewRepresentable {
     let scene: SCNScene
+    var editing: Bool
+    var onToggleEdit: () -> Void
     var onColour: (Int) -> Void
 
     func makeUIView(context: Context) -> CarShowroomControlView { CarShowroomControlView(frame: .zero) }
     func updateUIView(_ view: CarShowroomControlView, context: Context) {
+        view.editing = editing
+        view.onToggleEdit = onToggleEdit
         view.onColour = onColour
         view.present(scene)
+    }
+}
+#endif
+
+#if !os(tvOS)
+/// Up and down step colour while the edit arrows are on screen. Wheels have no key.
+private struct ShowroomEditKey: ViewModifier {
+    let key: KeyEquivalent?
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let key {
+            content.keyboardShortcut(key, modifiers: [])
+        } else {
+            content
+        }
     }
 }
 #endif

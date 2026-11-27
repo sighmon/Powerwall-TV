@@ -13,9 +13,11 @@ import SceneKit
 import simd
 
 extension WheelChoice {
-    /// Owned cars wear their `wheel_type`; catalogue cars wear the model's standard wheels.
+    /// Owned cars wear their `wheel_type`. Catalogue cars wear the model's standard wheels until
+    /// edit mode sets `wearsChosenWheel`.
     static func resolve(for request: CarShowroomRequest) -> WheelChoice? {
-        resolve(wheelType: request.browsesCatalogue ? nil : request.wheelType, model: request.model)
+        let type = request.browsesCatalogue && !request.wearsChosenWheel ? nil : request.wheelType
+        return resolve(wheelType: type, model: request.model)
     }
 }
 

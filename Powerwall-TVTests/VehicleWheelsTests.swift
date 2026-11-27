@@ -240,6 +240,24 @@ struct VehicleWheelsTests {
         #expect(VehicleWheels.mountedAssets(on: try vehicle(in: capsOff)).first == "Wheel_Pinwheel_No_Cap")
     }
 
+    @Test func chosenWheelOverridesTheCatalogueStandard() throws {
+        let index = try #require(CarShowroom.catalogueModels.firstIndex(of: .modelY))
+        var request = CarShowroom.catalogueRequest(index: index)
+        request.wheelType = "Induction20Black"
+        request.wearsChosenWheel = true
+        let scene = CarShowroom.scene(for: request)
+        #expect(VehicleWheels.mountedAssets(on: try vehicle(in: scene)).first == "Wheel_Induction")
+    }
+
+    @Test func wheelArrowsStepFromTheCarsOwnWheel() {
+        let names = TeslaWheel.demoNames(for: .model3)
+        #expect(names.count > 2)
+        #expect(CarShowroom.wheelIndex(after: nil, names: names, currentName: nil, delta: 1) == 0)
+        #expect(CarShowroom.wheelIndex(after: 0, names: names, currentName: nil, delta: -1) == names.count - 1)
+        #expect(CarShowroom.wheelIndex(after: nil, names: names, currentName: names[2], delta: 1) == 3)
+        #expect(CarShowroom.wheelIndex(after: nil, names: [], currentName: nil, delta: 1) == nil)
+    }
+
     @Test func catalogueCarsKeepTheStandardWheels() throws {
         for index in CarShowroom.catalogueModels.indices {
             var request = CarShowroom.catalogueRequest(index: index)
