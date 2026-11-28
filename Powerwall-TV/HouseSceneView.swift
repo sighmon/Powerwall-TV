@@ -474,6 +474,9 @@ struct HouseSceneView: View {
             )
             controller.applyPowerFlow(powerFlowSnapshot, solar: viewModel.garagePresentation.solar)
             controller.setBatteryLevel(viewModel.batteryPercentage?.percentage)
+            if viewModel.isDemoMode {
+                showDemoSky()
+            }
             noteSky()
         }
         .onChange(of: viewModel.batteryPercentage?.percentage) { percentage in
@@ -485,6 +488,9 @@ struct HouseSceneView: View {
         }
         .onChange(of: powerFlowSnapshot) { snapshot in
             controller.applyPowerFlow(snapshot, solar: viewModel.garagePresentation.solar)
+            if viewModel.isDemoMode {
+                showDemoSky()
+            }
         }
         .onChange(of: houseHeadingDegrees) { heading in
             controller.applyHeading(heading)
@@ -588,9 +594,9 @@ struct HouseSceneView: View {
 
     private func showDemoSky() {
         controller.applyDemoSky(
-            DemoHouseTour.sunrisePreview(at: viewModel.demoSceneIndex),
+            DemoHouseTour.skyPreview(at: viewModel.demoSceneIndex),
             heading: houseHeadingDegrees,
-            fadeIn: true
+            fadeIn: false
         )
         noteSky()
     }
@@ -761,7 +767,8 @@ final class HouseSceneController {
     }
 
     /// Shows a scripted demo sky. Repeating the scene that is already up does
-    /// not restart the fade. The clock does not move this sun.
+    /// not restart the fade. The clock does not move this sun. Preview steps
+    /// snap so a stalled weather fade cannot hide them.
     func applyDemoSky(_ scene: DemoWeatherScene, heading: Double, fadeIn: Bool) {
         let changed = demoSky != scene || sample != nil || demoSkyNeedsApply
         demoSky = scene
@@ -773,7 +780,11 @@ final class HouseSceneController {
         }
         demoSkyNeedsApply = false
         guard changed || !fadeIn else { return }
-        present(scene.parameters(heading: heading), animated: false, fadeIn: fadeIn && changed)
+        cancelWeatherFade()
+        lighting?.apply(scene.parameters(heading: heading), animated: false)
+        if viewport.width > 1 {
+            lighting?.updateWeatherCoverage(camera: camera, viewport: viewport)
+        }
     }
 
     private func present(_ parameters: HouseLightingParameters, animated: Bool, fadeIn: Bool) {

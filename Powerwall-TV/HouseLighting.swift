@@ -330,35 +330,71 @@ enum HouseSky {
         var top: SIMD3<Float>
         var mid: SIMD3<Float>
         var bottom: SIMD3<Float>
-        /// 0 at night, 1 once the sun is up. The plane peaks at `washPeak` opacity.
+        /// 0 at night, 1 once the sun is up. The plane peaks at `peak` opacity.
         var amount: Float
+        /// Low sun lifts the band so gold over the dark plate does not read brown.
+        var peak: Float
     }
 
-    /// Low sun: amber at the horizon, a pale peach band, then soft blue.
-    /// That peach is the rose a real sunrise keeps, without a deep pink or purple.
-    /// Once the sun is high the three stops are the midday blue pair, and the
-    /// middle stop is their average so the band stays a straight blend.
+    /// First light is red, pink, and purple. That becomes orange and peach, then
+    /// morning gold, then the midday blue pair. Blue in the warm stops stays
+    /// close to green so a translucent wash over the dark plate is not brown.
     /// Colour fades across `washScreenFraction` of the screen and is clear
     /// before the plane ends.
     static func skyWash(altitude: Float) -> SkyWash {
         let amount = smoothstep(-4, 10, altitude)
-        let day = smoothstep(12, 34, altitude)
-        let sunsetTop = SIMD3<Float>(0.40, 0.55, 0.78)
-        let sunsetMid = SIMD3<Float>(0.93, 0.70, 0.58)
-        let sunsetBottom = SIMD3<Float>(0.96, 0.64, 0.32)
+        let first = WashStops(
+            bottom: SIMD3(1.00, 0.40, 0.48),
+            mid: SIMD3(0.96, 0.50, 0.74),
+            top: SIMD3(0.52, 0.38, 0.72)
+        )
+        let blaze = WashStops(
+            bottom: SIMD3(1.00, 0.55, 0.44),
+            mid: SIMD3(0.98, 0.62, 0.70),
+            top: SIMD3(0.50, 0.46, 0.78)
+        )
+        let gold = WashStops(
+            bottom: SIMD3(0.99, 0.72, 0.58),
+            mid: SIMD3(0.96, 0.80, 0.72),
+            top: SIMD3(0.42, 0.56, 0.80)
+        )
         let blueTop = SIMD3<Float>(0.26, 0.46, 0.86)
         let blueBottom = SIMD3<Float>(0.58, 0.76, 0.96)
-        let blueMid = (blueTop + blueBottom) * 0.5
+        let noon = WashStops(bottom: blueBottom, mid: (blueTop + blueBottom) * 0.5, top: blueTop)
+        let palette: WashStops
+        if altitude >= 20 {
+            palette = mix(gold, noon, smoothstep(20, 34, altitude))
+        } else if altitude >= 10 {
+            palette = mix(blaze, gold, smoothstep(10, 20, altitude))
+        } else {
+            palette = mix(first, blaze, smoothstep(0, 10, altitude))
+        }
+        let day = smoothstep(12, 34, altitude)
         return SkyWash(
-            top: sunsetTop + (blueTop - sunsetTop) * day,
-            mid: sunsetMid + (blueMid - sunsetMid) * day,
-            bottom: sunsetBottom + (blueBottom - sunsetBottom) * day,
-            amount: amount
+            top: palette.top,
+            mid: palette.mid,
+            bottom: palette.bottom,
+            amount: amount,
+            peak: washPeak + (1 - day) * sunsetWashLift
         )
     }
 
+    private struct WashStops {
+        var bottom: SIMD3<Float>
+        var mid: SIMD3<Float>
+        var top: SIMD3<Float>
+    }
+
+    private static func mix(_ a: WashStops, _ b: WashStops, _ t: Float) -> WashStops {
+        WashStops(bottom: mix(a.bottom, b.bottom, t), mid: mix(a.mid, b.mid, t), top: mix(a.top, b.top, t))
+    }
+
+    private static func mix(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ t: Float) -> SIMD3<Float> {
+        a + (b - a) * min(max(t, 0), 1)
+    }
+
     /// `easedFade` is 1 at the top of the frame and 0 toward the horizon.
-    /// The lower half runs horizon to peach, the upper half peach to sky.
+    /// The lower half runs horizon to the middle stop, the upper half to sky.
     static func washBandColor(bottom: SIMD3<Float>, mid: SIMD3<Float>, top: SIMD3<Float>, easedFade: Float) -> SIMD3<Float> {
         let fade = min(max(easedFade, 0), 1)
         if fade < 0.5 {
@@ -389,11 +425,10 @@ enum HouseSky {
 
         let day = smoothstep(-5, 6, altitude)
         let veil = pow(1 - cover, 1.45)
-        let warm = smoothstep(0, 26, altitude)
-        // Warm gold on the horizon. The high sun stays the same near-white.
-        let low = SIMD3<Float>(1.00, 0.66, 0.38)
+        let blush = SIMD3<Float>(1.00, 0.46, 0.48)
+        let orange = SIMD3<Float>(1.00, 0.62, 0.44)
         let high = SIMD3<Float>(1, 0.97, 0.90)
-        let tint = low + (high - low) * warm
+        let tint = mix(mix(blush, orange, smoothstep(0, 10, altitude)), high, smoothstep(10, 26, altitude))
         let grey = SIMD3<Float>(0.86, 0.89, 0.93)
         return Placement(
             sunPosition: position,
@@ -433,8 +468,10 @@ enum HouseSky {
     static let washScreenFraction: Float = 0.48
     /// Extra plane below that band. It stays clear so the fade ends before the quad edge.
     static let washFeatherFraction: Float = 0.2
-    /// Peak opacity at the top edge.
+    /// Peak opacity at the top edge once the sun is high.
     static let washPeak: Float = 0.25
+    /// Extra opacity while the sun is low, so the salmon wash stays a colour.
+    static let sunsetWashLift: Float = 0.16
 
     /// Full-precision blend. The window is 8-bit, so a peak of 0.25 only has a few dozen
     /// steps and they draw as lines toward the clear end. The colour is computed here,
@@ -955,6 +992,7 @@ final class HouseLighting {
     /// Last baked wash colours. A blend that does not change the sun reuses the image.
     private var bakedWashTop: SIMD3<Float>?
     private var bakedWashBottom: SIMD3<Float>?
+    private var bakedWashPeak: Float?
     /// Emitter volume relative to a 4,000 m³ reference, so a larger view stays the same density.
     private var coverageScale: CGFloat = 1
     private var coverageCenter = SIMD3<Float>.zero
@@ -1374,7 +1412,8 @@ final class HouseLighting {
         washMaterial.diffuse.contents = HouseSkyArt.washContents(
             top: SIMD3(0.26, 0.46, 0.86),
             mid: SIMD3(0.42, 0.61, 0.91),
-            bottom: SIMD3(0.58, 0.76, 0.96))
+            bottom: SIMD3(0.58, 0.76, 0.96),
+            peak: HouseSky.washPeak)
         smoothWash(washMaterial)
         washMaterial.transparencyMode = .aOne
         washMaterial.blendMode = .alpha
@@ -1522,17 +1561,19 @@ final class HouseLighting {
         if let material = skyWash.geometry?.firstMaterial {
             // The bitmap is the expensive part. A forecast blend steps every frame
             // while the sun colour stays put, so keep the image already on the material.
-            if bakedWashTop != wash.top || bakedWashBottom != wash.bottom {
-                material.diffuse.contents = HouseSkyArt.washContents(top: wash.top, mid: wash.mid, bottom: wash.bottom)
+            if bakedWashTop != wash.top || bakedWashBottom != wash.bottom || bakedWashPeak != wash.peak {
+                material.diffuse.contents = HouseSkyArt.washContents(
+                    top: wash.top, mid: wash.mid, bottom: wash.bottom, peak: wash.peak)
                 smoothWash(material)
                 bakedWashTop = wash.top
                 bakedWashBottom = wash.bottom
+                bakedWashPeak = wash.peak
             }
             material.setValue(NSValue(scnVector3: SCNVector3(wash.top.x, wash.top.y, wash.top.z)), forKey: "washTop")
             material.setValue(NSValue(scnVector3: SCNVector3(wash.mid.x, wash.mid.y, wash.mid.z)), forKey: "washMid")
             material.setValue(NSValue(scnVector3: SCNVector3(wash.bottom.x, wash.bottom.y, wash.bottom.z)), forKey: "washBottom")
             material.setValue(NSNumber(value: wash.amount), forKey: "washAmount")
-            material.setValue(NSNumber(value: HouseSky.washPeak), forKey: "washPeak")
+            material.setValue(NSNumber(value: wash.peak), forKey: "washPeak")
         }
         // The shader multiplies by washAmount. Leave the node opaque so it is not applied twice.
         skyWash.opacity = 1
@@ -1891,24 +1932,27 @@ enum HouseSkyArt {
     static let cirrus = cloudImage(
         width: 512, height: 256,
         blobs: [
-            Blob(x: -0.55, y: 0.18, rx: 0.34, ry: 0.30, amp: 0.55),
-            Blob(x: -0.22, y: -0.10, rx: 0.30, ry: 0.26, amp: 0.48),
-            Blob(x: 0.12, y: 0.22, rx: 0.32, ry: 0.28, amp: 0.52),
-            Blob(x: 0.48, y: -0.16, rx: 0.30, ry: 0.24, amp: 0.42),
-            Blob(x: 0.02, y: 0.00, rx: 0.46, ry: 0.20, amp: 0.28),
+            Blob(x: -0.62, y: 0.10, rx: 0.42, ry: 0.16, amp: 0.52),
+            Blob(x: -0.28, y: -0.04, rx: 0.38, ry: 0.14, amp: 0.46),
+            Blob(x: 0.08, y: 0.12, rx: 0.40, ry: 0.15, amp: 0.50),
+            Blob(x: 0.42, y: -0.08, rx: 0.36, ry: 0.13, amp: 0.42),
+            Blob(x: 0.70, y: 0.06, rx: 0.28, ry: 0.12, amp: 0.34),
+            Blob(x: -0.08, y: 0.00, rx: 0.58, ry: 0.18, amp: 0.24),
         ],
-        shred: 9
+        fibreX: 3.4, fibreY: 14, fibreAmp: 0.28
     )
     static let puff = cloudImage(
         width: 384, height: 256,
         blobs: [
-            Blob(x: -0.28, y: 0.12, rx: 0.38, ry: 0.32, amp: 0.55),
-            Blob(x: 0.08, y: 0.20, rx: 0.32, ry: 0.28, amp: 0.48),
-            Blob(x: 0.34, y: -0.06, rx: 0.34, ry: 0.30, amp: 0.42),
-            Blob(x: -0.04, y: -0.18, rx: 0.28, ry: 0.24, amp: 0.36),
-            Blob(x: 0.16, y: 0.02, rx: 0.22, ry: 0.18, amp: 0.28),
+            Blob(x: -0.30, y: 0.10, rx: 0.40, ry: 0.34, amp: 0.58),
+            Blob(x: 0.04, y: 0.22, rx: 0.30, ry: 0.28, amp: 0.50),
+            Blob(x: 0.32, y: -0.04, rx: 0.34, ry: 0.30, amp: 0.46),
+            Blob(x: -0.08, y: -0.20, rx: 0.28, ry: 0.24, amp: 0.38),
+            Blob(x: 0.18, y: 0.02, rx: 0.22, ry: 0.20, amp: 0.32),
+            Blob(x: -0.42, y: -0.06, rx: 0.20, ry: 0.18, amp: 0.30),
+            Blob(x: 0.48, y: 0.16, rx: 0.18, ry: 0.16, amp: 0.26),
         ],
-        shred: 5
+        fibreX: 5.2, fibreY: 4.6, fibreAmp: 0.16
     )
 
     static func material(_ image: CGImage, additive: Bool, readsDepth: Bool = true) -> SCNMaterial {
@@ -1932,6 +1976,11 @@ enum HouseSkyArt {
         let excess = clamped - shoulder
         let core = shoulder + excess / (1 + excess * 5)
         return min(core, 0.62)
+    }
+
+    /// Optical depth. Thin vapour covers the wash instead of picking up its colour.
+    static func cloudCoverage(_ density: Float) -> Float {
+        1 - exp(-max(density, 0) * 2.8)
     }
 
     private struct Blob {
@@ -1963,7 +2012,8 @@ enum HouseSkyArt {
     /// Row 0 is the top. The peak is only a quarter opaque, so an 8-bit ramp has a few
     /// dozen steps and they read as stripes. Bayer dither breaks those steps up, and
     /// the lower feather is already clear so the quad edge is not a line.
-    static func washContents(top: SIMD3<Float>, mid: SIMD3<Float>, bottom: SIMD3<Float>) -> Any {
+    static func washContents(top: SIMD3<Float>, mid: SIMD3<Float>, bottom: SIMD3<Float>,
+                             peak: Float = HouseSky.washPeak) -> Any {
         let width = 1024
         let height = 512
         let span = HouseSky.washScreenFraction / (HouseSky.washScreenFraction + HouseSky.washFeatherFraction)
@@ -1980,7 +2030,7 @@ enum HouseSkyArt {
                 pixels[index] = ditheredByte(color.x, x: x, y: y)
                 pixels[index + 1] = ditheredByte(color.y, x: x, y: y &+ 3)
                 pixels[index + 2] = ditheredByte(color.z, x: x, y: y &+ 5)
-                pixels[index + 3] = ditheredByte(HouseSky.washPeak * eased, x: x &+ 2, y: y &+ 1)
+                pixels[index + 3] = ditheredByte(peak * eased, x: x &+ 2, y: y &+ 1)
             }
         }
         return platformImage(image(pixels, width: width, height: height))
@@ -2023,7 +2073,8 @@ enum HouseSkyArt {
         return image(pixels, width: size, height: size)
     }
 
-    private static func cloudImage(width: Int, height: Int, blobs: [Blob], shred: Float) -> CGImage {
+    private static func cloudImage(width: Int, height: Int, blobs: [Blob],
+                                   fibreX: Float, fibreY: Float, fibreAmp: Float) -> CGImage {
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         for y in 0..<height {
             for x in 0..<width {
@@ -2035,19 +2086,46 @@ enum HouseSkyArt {
                     let dy = (v - blob.y) / blob.ry
                     amount += blob.amp * exp(-(dx * dx + dy * dy))
                 }
-                let strands = 0.55 + 0.45 * sin(u * shred + v * 2.5) * sin(u * shred * 0.37 - 1.3)
+                let n1 = valueNoise(u * fibreX, v * fibreY)
+                let n2 = valueNoise(u * fibreX * 2.15 + 8, v * fibreY * 2.15 + 3.4)
+                let grain = 1 - fibreAmp + fibreAmp * (n1 * 0.65 + n2 * 0.35)
                 let edge = max(abs(u) / 0.98, abs(v) / 0.9)
                 let window = 1 - HouseSky.smoothstep(0.45, 1, edge)
-                let alpha = cloudThickness(amount * strands * window)
+                let density = cloudThickness(amount * grain * window)
+                let alpha = cloudCoverage(density)
                 let index = (y * width + x) * 4
-                // Cool white. Alpha carries the wisp so stacked clouds stay soft.
-                pixels[index] = 226
-                pixels[index + 1] = 234
-                pixels[index + 2] = 242
+                // Neutral white so a thin fringe does not pick up the wash hue.
+                pixels[index] = 248
+                pixels[index + 1] = 250
+                pixels[index + 2] = 252
                 pixels[index + 3] = UInt8(alpha * 255)
             }
         }
         return image(pixels, width: width, height: height)
+    }
+
+    private static func hash2(_ x: Int, _ y: Int) -> Float {
+        var n = UInt32(bitPattern: Int32(truncatingIfNeeded: x &* 1597334677 &+ y &* 3812015801))
+        n ^= n >> 16
+        n &*= 0x7feb352d
+        n ^= n >> 15
+        n &*= 0x846ca68b
+        n ^= n >> 16
+        return Float(n) / Float(UInt32.max)
+    }
+
+    private static func valueNoise(_ x: Float, _ y: Float) -> Float {
+        let ix = Int(floor(x))
+        let iy = Int(floor(y))
+        let fx = x - floor(x)
+        let fy = y - floor(y)
+        let ux = fx * fx * (3 - 2 * fx)
+        let uy = fy * fy * (3 - 2 * fy)
+        let a = hash2(ix, iy)
+        let b = hash2(ix &+ 1, iy)
+        let c = hash2(ix, iy &+ 1)
+        let d = hash2(ix &+ 1, iy &+ 1)
+        return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy
     }
 
     private static func image(_ pixels: [UInt8], width: Int, height: Int) -> CGImage {

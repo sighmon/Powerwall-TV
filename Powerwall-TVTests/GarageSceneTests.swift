@@ -253,10 +253,12 @@ struct GarageSceneTests {
         let altitudes = DemoHouseTour.sunrisePreviewAltitudes
         #expect(altitudes == [2, 5, 8, 11, 15, 20, 26, 34])
         let washes = altitudes.map { HouseSky.skyWash(altitude: Float($0)) }
-        #expect(washes[0].bottom.x > washes[0].bottom.y && washes[0].bottom.y > washes[0].bottom.z)
+        #expect(washes[0].bottom.x > washes[0].bottom.y)
+        #expect(washes[0].mid.z > washes[0].mid.y)
+        #expect(washes[0].top.z > washes[0].top.x)
         #expect(abs(washes[washes.count - 1].top.z - 0.86) < 0.001)
         for pair in zip(washes, washes.dropFirst()) {
-            #expect(pair.1.bottom.z + 0.001 >= pair.0.bottom.z)
+            #expect(pair.0 != pair.1)
         }
         let firstSun = DemoHouseTour.sunrisePreview(at: 0).parameters(heading: heading)
         #expect(abs(firstSun.sunAltitude - 2) < 0.01)
@@ -265,6 +267,43 @@ struct GarageSceneTests {
         #expect(firstSun.rainIntensity == 0)
         #expect(firstSun.snowIntensity == 0)
         #expect(DemoHouseTour.sunrisePreview(at: altitudes.count).sunAltitude == altitudes[0])
+
+        let covers = DemoHouseTour.skyPreviewCovers
+        let previewAlts = DemoHouseTour.skyPreviewAltitudes
+        let azimuths = DemoHouseTour.skyPreviewAzimuths
+        #expect(covers == [0.68, 0.92, 0.42, 0.05])
+        #expect(previewAlts == [0, 4, 8, 12, 16, 20, 24, 28, 32, 34])
+        #expect(azimuths == [90, 270])
+        let previewWashes = previewAlts.map { HouseSky.skyWash(altitude: Float($0)) }
+        for pair in zip(previewWashes, previewWashes.dropFirst()) {
+            #expect(pair.0 != pair.1)
+        }
+        #expect(abs(previewWashes[previewWashes.count - 1].top.z - 0.86) < 0.001)
+        let firstSky = DemoHouseTour.skyPreview(at: 0)
+        #expect(abs(firstSky.sunAltitude - previewAlts[0]) < 0.01)
+        #expect(abs(firstSky.sunAzimuth - 90) < 0.01)
+        #expect(abs(firstSky.cloudCover - covers[0]) < 0.001)
+        let nextColour = DemoHouseTour.skyPreview(at: 1)
+        #expect(abs(nextColour.sunAltitude - previewAlts[1]) < 0.01)
+        #expect(abs(nextColour.sunAzimuth - 90) < 0.01)
+        #expect(abs(nextColour.cloudCover - covers[0]) < 0.001)
+        let westSunrise = DemoHouseTour.skyPreview(at: previewAlts.count)
+        #expect(abs(westSunrise.sunAltitude - previewAlts[0]) < 0.01)
+        #expect(abs(westSunrise.sunAzimuth - 270) < 0.01)
+        #expect(abs(westSunrise.cloudCover - covers[0]) < 0.001)
+        let afterSuns = DemoHouseTour.skyPreview(at: previewAlts.count * azimuths.count)
+        #expect(abs(afterSuns.sunAltitude - previewAlts[0]) < 0.01)
+        #expect(abs(afterSuns.sunAzimuth - 90) < 0.01)
+        #expect(abs(afterSuns.cloudCover - covers[1]) < 0.001)
+        let lastSky = DemoHouseTour.skyPreview(at: previewAlts.count * azimuths.count * covers.count - 1)
+        #expect(abs(lastSky.sunAltitude - previewAlts[previewAlts.count - 1]) < 0.01)
+        #expect(abs(lastSky.sunAzimuth - 270) < 0.01)
+        #expect(abs(lastSky.cloudCover - covers[covers.count - 1]) < 0.001)
+        let pairs = (0..<(previewAlts.count * azimuths.count * covers.count)).map {
+            let scene = DemoHouseTour.skyPreview(at: $0)
+            return "\(scene.sunAltitude)-\(scene.sunAzimuth)-\(scene.cloudCover)"
+        }
+        #expect(Set(pairs).count == pairs.count)
     }
 
     @Test func demoTourCyclesEveryColourOnEachCar() {
@@ -498,12 +537,21 @@ struct GarageSceneTests {
         let nightWash = HouseSky.skyWash(altitude: -10)
         #expect(nightWash.amount == 0)
         #expect(noonWash.amount > 0.95)
-        // Dawn is amber, then peach, then soft blue. Green stays above red overhead.
-        #expect(dawn.bottom.x > dawn.bottom.y && dawn.bottom.y > dawn.bottom.z)
-        #expect(dawn.mid.x > dawn.mid.y && dawn.mid.y > dawn.mid.z)
-        #expect(dawn.mid.y > dawn.bottom.y)
-        #expect(dawn.top.z > dawn.top.y && dawn.top.y > dawn.top.x)
-        #expect(dawn.top.y > 0.45)
+        // First light: red-rose horizon, pink band, purple sky. Enough blue in
+        // the warm stops so the wash does not read brown over the dark plate.
+        #expect(dawn.bottom.x > 0.95 && dawn.bottom.x > dawn.bottom.y)
+        #expect(dawn.mid.x > dawn.mid.z && dawn.mid.z > dawn.mid.y)
+        #expect(dawn.top.z > dawn.top.x && dawn.top.z > dawn.top.y)
+        #expect(dawn.bottom.z > 0.42)
+        #expect(abs(dawn.bottom.y - dawn.bottom.z) < 0.22)
+        let blaze = HouseSky.skyWash(altitude: 12)
+        #expect(blaze.bottom.y > dawn.bottom.y)
+        #expect(blaze.bottom.x > 0.95)
+        let gold = HouseSky.skyWash(altitude: 20)
+        #expect(gold.bottom.y > blaze.bottom.y)
+        #expect(gold.top.y > gold.top.x)
+        #expect(dawn.peak > HouseSky.washPeak + 0.10)
+        #expect(abs(noonWash.peak - HouseSky.washPeak) < 0.001)
         // Midday is the same blue pair. The middle stop is their average.
         #expect(abs(noonWash.top.x - 0.26) < 0.001)
         #expect(abs(noonWash.top.y - 0.46) < 0.001)
@@ -515,8 +563,9 @@ struct GarageSceneTests {
         #expect(abs(noonWash.mid.y - 0.61) < 0.001)
         #expect(abs(noonWash.mid.z - 0.91) < 0.001)
         let lowSun = place(altitude: 4, azimuth: 90, cloud: 0)
+        #expect(lowSun.sunColor.x > 0.95)
         #expect(lowSun.sunColor.x > lowSun.sunColor.y)
-        #expect(lowSun.sunColor.y > lowSun.sunColor.z)
+        #expect(lowSun.sunColor.x > lowSun.sunColor.z)
         let highSun = place(altitude: 58, azimuth: 180, cloud: 0)
         #expect(highSun.sunColor.x > 0.98)
         #expect(highSun.sunColor.y > 0.95)
@@ -534,6 +583,22 @@ struct GarageSceneTests {
         #expect(core > mid)
         #expect(core < 0.5)
         #expect((core - mid) < (mid - edge))
+        let fringe = HouseSkyArt.cloudCoverage(0.16)
+        #expect(fringe > 0.30 && fringe < 0.55)
+        #expect(fringe > edge)
+        let sprite = HouseSkyArt.cirrus
+        var sampled = 0
+        var white = 0
+        for y in stride(from: 0, to: sprite.height, by: 16) {
+            for x in stride(from: 0, to: sprite.width, by: 16) {
+                let pixel = spritePixel(sprite, x: x, y: y)
+                guard pixel.a > 8 && pixel.a < 180 else { continue }
+                sampled += 1
+                if pixel.r > 240 && pixel.g > 240 && pixel.b > 240 { white += 1 }
+            }
+        }
+        #expect(sampled > 8)
+        #expect(white == sampled)
     }
 
     @Test func precipitationIsSoftAndRound() {
@@ -579,10 +644,14 @@ struct GarageSceneTests {
     }
 
     private func spriteAlpha(_ image: CGImage, x: Int, y: Int) -> Int {
-        guard let data = image.dataProvider?.data as Data? else { return -1 }
-        let index = (y * image.bytesPerRow) + x * 4 + 3
-        guard data.indices.contains(index) else { return -1 }
-        return Int(data[index])
+        spritePixel(image, x: x, y: y).a
+    }
+
+    private func spritePixel(_ image: CGImage, x: Int, y: Int) -> (r: Int, g: Int, b: Int, a: Int) {
+        guard let data = image.dataProvider?.data as Data? else { return (-1, -1, -1, -1) }
+        let index = (y * image.bytesPerRow) + x * 4
+        guard data.indices.contains(index + 3) else { return (-1, -1, -1, -1) }
+        return (Int(data[index]), Int(data[index + 1]), Int(data[index + 2]), Int(data[index + 3]))
     }
 
     @Test func loadedWeatherFadesInFromTheClockSky() {

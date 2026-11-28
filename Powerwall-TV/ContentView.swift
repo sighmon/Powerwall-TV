@@ -164,10 +164,11 @@ struct ContentView: View {
     private let powerwallPercentageWidth: Double = 5
 #endif
     private static let timerUpdateInterval: TimeInterval = 10
-    private let timer = Timer.publish(every: Self.timerUpdateInterval, on: .main, in: .common).autoconnect()
-    private let demoColourTimer = Timer.publish(every: DemoHouseTour.colourInterval, on: .main, in: .common).autoconnect()
-    private let timerTodaysTotal = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
-    private let timerElectricityMaps = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
+    /// Static so a ContentView rebuild (each `@Published` car step) does not reset the 10 s clock.
+    private static let timer = Timer.publish(every: timerUpdateInterval, on: .main, in: .common).autoconnect()
+    private static let demoColourTimer = Timer.publish(every: DemoHouseTour.colourInterval, on: .main, in: .common).autoconnect()
+    private static let timerTodaysTotal = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    private static let timerElectricityMaps = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
     var body: some View {
         GeometryReader { geometry in
@@ -481,7 +482,7 @@ struct ContentView: View {
         .onChange(of: viewModel.energySiteId) { _ in
             exportAdvisor.invalidate()
         }
-        .onReceive(timer) { _ in
+        .onReceive(Self.timer) { _ in
             powerwallRuntimeEstimateTimerCycle += 1
             precision = viewModel.showLessPrecision ? "%.1f" : "%.3f"
             if showingSettings {
@@ -492,8 +493,6 @@ struct ContentView: View {
             }
             if viewModel.isDemoMode {
                 demoTourTick += 1
-                // One sunrise colour per data update, so the wash can be compared as the numbers change.
-                viewModel.demoSceneIndex += 1
                 let homeLoad = Double(arc4random_uniform(4096)) + 256
                 queueDemoPowerwallData(
                     batteryPower: homeLoad * 0.2,
@@ -516,17 +515,18 @@ struct ContentView: View {
                 }
             }
         }
-        .onReceive(demoColourTimer) { _ in
+        .onReceive(Self.demoColourTimer) { _ in
             guard viewModel.isDemoMode, !showingSettings else { return }
             viewModel.demoColourIndex += 1
+            viewModel.demoSceneIndex += 1
             showDemoParkedCar()
         }
-        .onReceive(timerTodaysTotal) { _ in
+        .onReceive(Self.timerTodaysTotal) { _ in
             if !viewModel.accessToken.isEmpty {
                 viewModel.fetchSolarEnergyToday()
             }
         }
-        .onReceive(timerElectricityMaps) { _ in
+        .onReceive(Self.timerElectricityMaps) { _ in
             if viewModel.isDemoMode {
                 queueDemoElectricityGridData()
             } else {

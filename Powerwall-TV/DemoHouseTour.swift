@@ -34,9 +34,9 @@ struct DemoVehicle: Equatable {
 
 /// Demo mode walks these skies and, for each exported car, every distinct Tesla paint and every
 /// wheel that fits that car. The baked generic body stays its file colour and its own wheels.
-/// Paint and wheels change together every `colourInterval`. The shown sky is `sunrisePreview`,
-/// one clear sunrise step on every 10-second data update, so the wash and the sun can be compared.
-/// A car changes only after its colours and wheels.
+/// Paint and wheels change together every `colourInterval`. The shown sky is `skyPreview`
+/// on that same 2-second tick: the full sunrise wash, then the same wash as a west sunset,
+/// then the next cloud deck.
 enum DemoHouseTour {
     static let powerTicksPerScene = 2
     static let colourInterval: TimeInterval = 2
@@ -105,6 +105,14 @@ enum DemoHouseTour {
 
     /// Clear east suns. Each data update takes the next altitude, from a low gold wash to midday blue.
     static let sunrisePreviewAltitudes: [Double] = [2, 5, 8, 11, 15, 20, 26, 34]
+    /// Every distinct wash mix: red/pink/purple, orange, gold, then midday blue.
+    static let skyPreviewAltitudes: [Double] = [0, 4, 8, 12, 16, 20, 24, 28, 32, 34]
+    /// East sunrise, then west sunset. The wash is the same; the disc moves.
+    static let skyPreviewAzimuths: [Double] = [90, 270]
+    /// Puffs first so the opening frame has visible clouds, then a full deck,
+    /// cirrus, and a clear sky. Condition stays `.clear` so WeatherLighting
+    /// does not raise the cover.
+    static let skyPreviewCovers: [Double] = [0.68, 0.92, 0.42, 0.05]
 
     static func sunrisePreview(at index: Int) -> DemoWeatherScene {
         let altitude = sunrisePreviewAltitudes[wrapped(index, count: sunrisePreviewAltitudes.count)]
@@ -114,6 +122,27 @@ enum DemoHouseTour {
             sunAzimuth: 90,
             isDaylight: true,
             cloudCover: 0.05,
+            condition: .clear,
+            precipitationMillimetresPerHour: 0
+        )
+    }
+
+    /// Colour every tick, then the west disc, then the next cloud deck.
+    static func skyPreview(at index: Int) -> DemoWeatherScene {
+        let altitudes = skyPreviewAltitudes.count
+        let azimuths = skyPreviewAzimuths.count
+        let covers = skyPreviewCovers.count
+        let sunPass = altitudes * azimuths
+        let step = wrapped(index, count: sunPass * covers)
+        let altitude = skyPreviewAltitudes[step % altitudes]
+        let azimuth = skyPreviewAzimuths[(step / altitudes) % azimuths]
+        let cover = skyPreviewCovers[step / sunPass]
+        return DemoWeatherScene(
+            title: "Sky preview",
+            sunAltitude: altitude,
+            sunAzimuth: azimuth,
+            isDaylight: altitude >= 0,
+            cloudCover: cover,
             condition: .clear,
             precipitationMillimetresPerHour: 0
         )
